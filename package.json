@@ -9,7 +9,10 @@
   },
   "scripts": {
     "dev": "tsx ./bin/omni.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix .",
     "lint:ts": "tsc --noEmit",
+    "format": "biome format --write .",
     "test": "npx vitest run",
     "test:watch": "npx vitest watch"
   },
@@ -26,6 +29,7 @@
     "zod": "4.3.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
     "@types/node": "^25.3.5",
     "@types/react": "18.2.61",
     "ink-testing-library": "4.0.0",
