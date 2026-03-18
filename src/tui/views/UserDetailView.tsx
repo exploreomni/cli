@@ -1,13 +1,12 @@
-import React from 'react'
 import { Text, useApp, useInput } from 'ink'
-import { RetroFrame, ActionBar, KeyValueFields } from '../components/index.js'
 import type { UserListItem } from '../../api/index.js'
-import { useRouter } from '../router.js'
+import { ActionBar, KeyValueFields, RetroFrame } from '../components/index.js'
 import { usePaneFocus } from '../focus.js'
+import { useRouter } from '../router.js'
 import { RETRO } from '../theme.js'
 
 export const UserDetailView = ({
-  userId,
+  userId: _userId,
   user,
 }: {
   userId: string
