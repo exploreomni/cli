@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import type React from 'react'
+import { createContext, useCallback, useContext, useState } from 'react'
 import type { ScheduleListItem, UserListItem } from '../api/index.js'
 
 export type Section = 'schedules' | 'models' | 'users' | 'config'
@@ -53,11 +54,7 @@ export const useRouter = (): RouterState => {
   return ctx
 }
 
-export const RouterProvider = ({
-  children,
-}: {
-  children: React.ReactNode
-}) => {
+export const RouterProvider = ({ children }: { children: React.ReactNode }) => {
   const [stack, setStack] = useState<Route[]>([{ view: 'schedule-list' }])
 
   const push = useCallback((route: Route) => {
@@ -77,7 +74,9 @@ export const RouterProvider = ({
   const isAtSectionRoot = stack.length === 1
 
   return (
-    <RouterContext.Provider value={{ stack, push, pop, navigate, current, section, isAtSectionRoot }}>
+    <RouterContext.Provider
+      value={{ stack, push, pop, navigate, current, section, isAtSectionRoot }}
+    >
       {children}
     </RouterContext.Provider>
   )

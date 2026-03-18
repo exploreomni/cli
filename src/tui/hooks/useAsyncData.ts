@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 interface AsyncDataState<T> {
   data: T | null
@@ -13,7 +13,7 @@ export const useAsyncData = <T>(
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [reloadKey, setReloadKey] = useState(0)
+  const [_reloadKey, setReloadKey] = useState(0)
 
   const reload = useCallback(() => {
     setReloadKey((k) => k + 1)
@@ -41,7 +41,7 @@ export const useAsyncData = <T>(
     return () => {
       cancelled = true
     }
-  }, [reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetcher]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return { data, loading, error, reload }
 }

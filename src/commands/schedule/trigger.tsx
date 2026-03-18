@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react'
 import { render } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage } from '../../components/index.js'
+import type { OutputMode } from '../../output/index.js'
 import {
-  resolveOutputMode,
   renderJson,
   renderPosixError,
   renderPosixSuccess,
+  resolveOutputMode,
 } from '../../output/index.js'
-import type { OutputMode } from '../../output/index.js'
 import { executeScheduleTrigger } from './trigger.execute.js'
 
 interface ScheduleTriggerProps {
@@ -21,7 +22,7 @@ const ScheduleTrigger: React.FC<ScheduleTriggerProps> = ({
 }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [_success, setSuccess] = useState(false)
 
   useEffect(() => {
     executeScheduleTrigger({ scheduleId, profile })

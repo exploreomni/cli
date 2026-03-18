@@ -1,10 +1,10 @@
+import type { ScheduleListItem } from '../../api/index.js'
+import { createAPIClient, getSchedule } from '../../api/index.js'
 import {
-  getConfigManager,
   getAuthContext,
+  getConfigManager,
   validateAuth,
 } from '../../config/index.js'
-import { createAPIClient, getSchedule } from '../../api/index.js'
-import type { ScheduleListItem } from '../../api/index.js'
 import type { CommandResult } from '../../output/index.js'
 
 export interface ScheduleGetResult {

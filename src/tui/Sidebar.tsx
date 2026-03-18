@@ -1,9 +1,9 @@
-import React, { useState } from 'react'
 import { Box, Text, useInput } from 'ink'
-import { RETRO } from './theme.js'
-import { useRouter } from './router.js'
+import { useState } from 'react'
 import { usePaneFocus } from './focus.js'
 import type { Section } from './router.js'
+import { useRouter } from './router.js'
+import { RETRO } from './theme.js'
 
 interface SidebarSection {
   id: Section
@@ -27,7 +27,7 @@ export const Sidebar = () => {
   const [cursor, setCursor] = useState(currentIndex >= 0 ? currentIndex : 0)
 
   useInput(
-    (input, key) => {
+    (_input, key) => {
       if (key.upArrow) {
         setCursor((c) => (c > 0 ? c - 1 : sections.length - 1))
         return
@@ -63,11 +63,19 @@ export const Sidebar = () => {
         const isActive = s.id === section
         return (
           <Box key={s.id} gap={1}>
-            <Text color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}>
+            <Text
+              color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}
+            >
               {isCursor ? RETRO.symbols.cursor : ' '}
             </Text>
             <Text
-              color={isCursor ? RETRO.colors.highlight : isActive ? RETRO.colors.primary : RETRO.colors.dim}
+              color={
+                isCursor
+                  ? RETRO.colors.highlight
+                  : isActive
+                    ? RETRO.colors.primary
+                    : RETRO.colors.dim
+              }
               bold={isCursor}
             >
               {s.label}

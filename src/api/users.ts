@@ -36,7 +36,8 @@ export const listUsers = async (
 ): Promise<APIResponse<UserListResponse>> => {
   const searchParams = new URLSearchParams()
 
-  if (params.startIndex) searchParams.set('startIndex', params.startIndex.toString())
+  if (params.startIndex)
+    searchParams.set('startIndex', params.startIndex.toString())
   if (params.count) searchParams.set('count', params.count.toString())
   if (params.filter) searchParams.set('filter', params.filter)
 

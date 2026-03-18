@@ -1,9 +1,9 @@
+import { createAPIClient, pauseSchedule } from '../../api/index.js'
 import {
-  getConfigManager,
   getAuthContext,
+  getConfigManager,
   validateAuth,
 } from '../../config/index.js'
-import { createAPIClient, pauseSchedule } from '../../api/index.js'
 import type { CommandResult } from '../../output/index.js'
 
 export interface SchedulePauseResult {
