@@ -1,17 +1,15 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, render } from 'ink'
+import { Box, render, Text } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage, Table } from '../../components/index.js'
-import {
-  resolveOutputMode,
-  renderPosix,
-  renderPosixError,
-} from '../../output/index.js'
 import type { OutputMode, TabularData } from '../../output/index.js'
 import {
-  executeUserList,
-  formatUserRow,
-} from './list.execute.js'
+  renderPosix,
+  renderPosixError,
+  resolveOutputMode,
+} from '../../output/index.js'
 import type { UserListResult } from './list.execute.js'
+import { executeUserList, formatUserRow } from './list.execute.js'
 
 interface UserListProps {
   search?: string
@@ -38,7 +36,7 @@ const UserList: React.FC<UserListProps> = (props) => {
       .then((r) => setResult(r.data))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [props])
 
   if (loading) {
     return <Spinner label="Fetching users..." />

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
 import { Text } from 'ink'
+import { useEffect, useState } from 'react'
 import { RETRO } from '../theme.js'
 
 interface ToastMessageProps {

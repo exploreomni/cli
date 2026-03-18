@@ -1,5 +1,5 @@
-import React from 'react'
 import { Box, Text } from 'ink'
+import type React from 'react'
 
 type Status = 'success' | 'error' | 'warning' | 'info'
 

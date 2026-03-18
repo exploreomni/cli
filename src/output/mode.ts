@@ -8,8 +8,7 @@ export const resolveOutputMode = (flags: {
   const hasFormatFlag = flags.format === 'json' || flags.format === 'csv'
   const noTui = flags.noTui === true
   const isTTY = process.stdout.isTTY === true
-  const noColor =
-    flags.noColor === true || process.env.NO_COLOR !== undefined
+  const noColor = flags.noColor === true || process.env.NO_COLOR !== undefined
 
   const isTUI = !hasFormatFlag && !noTui && isTTY
 

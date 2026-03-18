@@ -1,19 +1,19 @@
-import React, { useState, useCallback, useMemo } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
-import {
-  SelectableList,
-  ActionBar,
-  ResourceFrame,
-} from '../components/index.js'
-import type { ListItem } from '../components/index.js'
-import { useRouter } from '../router.js'
-import { usePaneFocus } from '../focus.js'
-import { useAsyncData } from '../hooks/useAsyncData.js'
-import { RETRO } from '../theme.js'
+import { useCallback, useMemo, useState } from 'react'
 import {
   executeUserList,
   formatUserRow,
 } from '../../commands/user/list.execute.js'
+import type { ListItem } from '../components/index.js'
+import {
+  ActionBar,
+  ResourceFrame,
+  SelectableList,
+} from '../components/index.js'
+import { usePaneFocus } from '../focus.js'
+import { useAsyncData } from '../hooks/useAsyncData.js'
+import { useRouter } from '../router.js'
+import { RETRO } from '../theme.js'
 
 export const UserListView = () => {
   const { push } = useRouter()
@@ -83,9 +83,7 @@ export const UserListView = () => {
   const footer = (
     <Box flexDirection="column" gap={0}>
       {searchQuery && (
-        <Text color={RETRO.colors.highlight}>
-          Search: {searchQuery}
-        </Text>
+        <Text color={RETRO.colors.highlight}>Search: {searchQuery}</Text>
       )}
       <ActionBar
         actions={[
