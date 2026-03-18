@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "tsx ./bin/omni.ts",
-    "lint": "biome check .",
+    "lint": "npm run lint:biome && npm run lint:ts",
+    "lint:biome": "biome check .",
     "lint:fix": "biome check --fix .",
     "lint:ts": "tsc --noEmit",
     "format": "biome format --write .",

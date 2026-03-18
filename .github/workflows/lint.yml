@@ -17,8 +17,5 @@ jobs:
 
       - run: npm ci
 
-      - name: Biome check
+      - name: Lint
         run: npm run lint
-
-      - name: Type check
-        run: npm run lint:ts
