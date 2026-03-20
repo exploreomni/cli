@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react'
 import { Box, Text, useInput } from 'ink'
+import { useState } from 'react'
 import { RETRO } from '../theme.js'
 
 export interface ListItem {
@@ -84,11 +84,15 @@ export const SelectableList = ({
         return (
           <Box key={item.id} gap={1}>
             {multiSelect && (
-              <Text color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}>
+              <Text
+                color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}
+              >
                 {isSelected ? RETRO.symbols.checked : RETRO.symbols.unchecked}
               </Text>
             )}
-            <Text color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}>
+            <Text
+              color={isCursor ? RETRO.colors.highlight : RETRO.colors.primary}
+            >
               {isCursor ? RETRO.symbols.cursor : ' '}
             </Text>
             <Text

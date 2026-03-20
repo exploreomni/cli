@@ -1,26 +1,26 @@
-import React, { useState, useCallback, useMemo } from 'react'
-import { Box, Text, useApp, useInput } from 'ink'
-import {
-  SelectableList,
-  ActionBar,
-  ConfirmDialog,
-  ToastMessage,
-  ResourceFrame,
-} from '../components/index.js'
-import type { ListItem } from '../components/index.js'
-import { useRouter } from '../router.js'
-import { usePaneFocus } from '../focus.js'
-import { useAsyncData } from '../hooks/useAsyncData.js'
-import { useBulkAction } from '../hooks/useBulkAction.js'
-import { RETRO } from '../theme.js'
+import { Box, Text, useApp } from 'ink'
+import { useCallback, useMemo, useState } from 'react'
+import { executeScheduleDelete } from '../../commands/schedule/delete.execute.js'
 import {
   executeScheduleList,
   formatScheduleRow,
 } from '../../commands/schedule/list.execute.js'
-import { executeScheduleDelete } from '../../commands/schedule/delete.execute.js'
 import { executeSchedulePause } from '../../commands/schedule/pause.execute.js'
 import { executeScheduleResume } from '../../commands/schedule/resume.execute.js'
 import { executeScheduleTrigger } from '../../commands/schedule/trigger.execute.js'
+import type { ListItem } from '../components/index.js'
+import {
+  ActionBar,
+  ConfirmDialog,
+  ResourceFrame,
+  SelectableList,
+  ToastMessage,
+} from '../components/index.js'
+import { usePaneFocus } from '../focus.js'
+import { useAsyncData } from '../hooks/useAsyncData.js'
+import { useBulkAction } from '../hooks/useBulkAction.js'
+import { useRouter } from '../router.js'
+import { RETRO } from '../theme.js'
 
 type PendingAction = 'delete' | 'pause' | 'resume' | 'trigger'
 
@@ -46,7 +46,10 @@ export const ScheduleListView = () => {
     executeScheduleList({}).then((r) => r.data)
   )
 
-  const actionExecutors: Record<PendingAction, (id: string) => Promise<unknown>> = useMemo(
+  const actionExecutors: Record<
+    PendingAction,
+    (id: string) => Promise<unknown>
+  > = useMemo(
     () => ({
       delete: (id) => executeScheduleDelete({ scheduleId: id }),
       pause: (id) => executeSchedulePause({ scheduleId: id }),
@@ -66,12 +69,18 @@ export const ScheduleListView = () => {
   const bulkResume = useBulkAction(actionExecutors.resume, onBulkComplete)
   const bulkTrigger = useBulkAction(actionExecutors.trigger, onBulkComplete)
 
-  const bulkActions: Record<PendingAction, ReturnType<typeof useBulkAction>> = {
-    delete: bulkDelete,
-    pause: bulkPause,
-    resume: bulkResume,
-    trigger: bulkTrigger,
-  }
+  const bulkActions: Record<
+    PendingAction,
+    ReturnType<typeof useBulkAction>
+  > = useMemo(
+    () => ({
+      delete: bulkDelete,
+      pause: bulkPause,
+      resume: bulkResume,
+      trigger: bulkTrigger,
+    }),
+    [bulkDelete, bulkPause, bulkResume, bulkTrigger]
+  )
 
   const isRunning = Object.values(bulkActions).some((a) => a.running)
 
@@ -144,9 +153,7 @@ export const ScheduleListView = () => {
   const footer = (
     <Box flexDirection="column" gap={0}>
       {selectedIds.size > 0 && (
-        <Text color={RETRO.colors.highlight}>
-          {selectedIds.size} selected
-        </Text>
+        <Text color={RETRO.colors.highlight}>{selectedIds.size} selected</Text>
       )}
       <ActionBar
         actions={[

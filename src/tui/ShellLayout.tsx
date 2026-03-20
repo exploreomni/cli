@@ -1,8 +1,8 @@
-import React from 'react'
 import { Box, useApp, useInput } from 'ink'
-import { Sidebar, SIDEBAR_WIDTH } from './Sidebar.js'
+import type React from 'react'
 import { usePaneFocus } from './focus.js'
 import { useTerminalSize } from './hooks/useTerminalSize.js'
+import { Sidebar } from './Sidebar.js'
 import { RETRO } from './theme.js'
 
 export const ShellLayout = ({ children }: { children: React.ReactNode }) => {

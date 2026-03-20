@@ -8,16 +8,16 @@ import {
   runModelList,
   runModelValidate,
   runQueryRun,
-  runScheduleList,
-  runScheduleGet,
-  runScheduleTrigger,
-  runSchedulePause,
-  runScheduleResume,
   runScheduleDelete,
+  runScheduleGet,
+  runScheduleList,
+  runSchedulePause,
   runScheduleRecipients,
+  runScheduleResume,
+  runScheduleTrigger,
   runUserList,
 } from '../src/commands/index.js'
-import { resolveOutputMode, outputFlags } from '../src/output/index.js'
+import { outputFlags, resolveOutputMode } from '../src/output/index.js'
 import { runTui } from '../src/tui/index.js'
 
 cli(
@@ -239,13 +239,11 @@ cli(
           flags: {
             status: {
               type: String,
-              description:
-                'Filter by status: success, error, canceled, none',
+              description: 'Filter by status: success, error, canceled, none',
             },
             destination: {
               type: String,
-              description:
-                'Filter by destination: email, slack, webhook, sftp',
+              description: 'Filter by destination: email, slack, webhook, sftp',
             },
             search: {
               type: String,

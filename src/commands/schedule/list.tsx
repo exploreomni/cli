@@ -1,17 +1,15 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, render } from 'ink'
+import { Box, render, Text } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage, Table } from '../../components/index.js'
-import {
-  resolveOutputMode,
-  renderPosix,
-  renderPosixError,
-} from '../../output/index.js'
 import type { OutputMode, TabularData } from '../../output/index.js'
 import {
-  executeScheduleList,
-  formatScheduleRow,
-} from './list.execute.js'
+  renderPosix,
+  renderPosixError,
+  resolveOutputMode,
+} from '../../output/index.js'
 import type { ScheduleListResult } from './list.execute.js'
+import { executeScheduleList, formatScheduleRow } from './list.execute.js'
 
 interface ScheduleListProps {
   status?: string
@@ -35,13 +33,13 @@ const SCHEDULE_COLUMNS = [
   { key: 'id', header: 'ID' },
 ]
 
-const statusColors: Record<string, string> = {
+const _statusColors: Record<string, string> = {
   active: 'green',
   paused: 'yellow',
   'system-disabled': 'red',
 }
 
-const lastStatusColors: Record<string, string> = {
+const _lastStatusColors: Record<string, string> = {
   COMPLETE: 'green',
   ERROR: 'red',
   ERROR_DELIVERED: 'red',
@@ -59,7 +57,7 @@ const ScheduleList: React.FC<ScheduleListProps> = (props) => {
       .then((r) => setResult(r.data))
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [props])
 
   if (loading) {
     return <Spinner label="Fetching schedules..." />

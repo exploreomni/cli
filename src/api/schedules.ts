@@ -1,9 +1,9 @@
 import type { APIClient, APIResponse } from './client.js'
 import type {
-  ScheduleListResponse,
-  ScheduleListItem,
-  SuccessResponse,
   RecipientsResponse,
+  ScheduleListItem,
+  ScheduleListResponse,
+  SuccessResponse,
 } from './schedule-types.js'
 
 export interface ListSchedulesParams {
@@ -56,27 +56,21 @@ export const triggerSchedule = async (
   client: APIClient,
   scheduleId: string
 ): Promise<APIResponse<SuccessResponse>> => {
-  return client.post<SuccessResponse>(
-    `/api/v1/schedules/${scheduleId}/trigger`
-  )
+  return client.post<SuccessResponse>(`/api/v1/schedules/${scheduleId}/trigger`)
 }
 
 export const pauseSchedule = async (
   client: APIClient,
   scheduleId: string
 ): Promise<APIResponse<SuccessResponse>> => {
-  return client.put<SuccessResponse>(
-    `/api/v1/schedules/${scheduleId}/pause`
-  )
+  return client.put<SuccessResponse>(`/api/v1/schedules/${scheduleId}/pause`)
 }
 
 export const resumeSchedule = async (
   client: APIClient,
   scheduleId: string
 ): Promise<APIResponse<SuccessResponse>> => {
-  return client.put<SuccessResponse>(
-    `/api/v1/schedules/${scheduleId}/resume`
-  )
+  return client.put<SuccessResponse>(`/api/v1/schedules/${scheduleId}/resume`)
 }
 
 export const deleteSchedule = async (

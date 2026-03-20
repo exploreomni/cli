@@ -1,9 +1,8 @@
-import React from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
-import { RetroFrame, ActionBar } from '../components/index.js'
+import { executeConfigShow } from '../../commands/config/show.execute.js'
+import { ActionBar, RetroFrame } from '../components/index.js'
 import { usePaneFocus } from '../focus.js'
 import { RETRO } from '../theme.js'
-import { executeConfigShow } from '../../commands/config/show.execute.js'
 
 export const ConfigView = () => {
   const { exit } = useApp()

@@ -1,21 +1,21 @@
-import React, { useState, useCallback } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
-import {
-  RetroFrame,
-  ActionBar,
-  ConfirmDialog,
-  ToastMessage,
-  KeyValueFields,
-} from '../components/index.js'
+import { useCallback, useState } from 'react'
 import type { ScheduleListItem } from '../../api/index.js'
-import { useRouter } from '../router.js'
-import { usePaneFocus } from '../focus.js'
-import { RETRO } from '../theme.js'
-import { formatScheduleRow } from '../../commands/schedule/list.execute.js'
 import { executeScheduleDelete } from '../../commands/schedule/delete.execute.js'
+import { formatScheduleRow } from '../../commands/schedule/list.execute.js'
 import { executeSchedulePause } from '../../commands/schedule/pause.execute.js'
 import { executeScheduleResume } from '../../commands/schedule/resume.execute.js'
 import { executeScheduleTrigger } from '../../commands/schedule/trigger.execute.js'
+import {
+  ActionBar,
+  ConfirmDialog,
+  KeyValueFields,
+  RetroFrame,
+  ToastMessage,
+} from '../components/index.js'
+import { usePaneFocus } from '../focus.js'
+import { useRouter } from '../router.js'
+import { RETRO } from '../theme.js'
 
 type ActionType = 'delete' | 'pause' | 'resume' | 'trigger'
 
@@ -45,10 +45,8 @@ export const ScheduleDetailView = ({
   const runAction = useCallback(
     async (action: ActionType) => {
       try {
-        if (action === 'delete')
-          await executeScheduleDelete({ scheduleId })
-        else if (action === 'pause')
-          await executeSchedulePause({ scheduleId })
+        if (action === 'delete') await executeScheduleDelete({ scheduleId })
+        else if (action === 'pause') await executeSchedulePause({ scheduleId })
         else if (action === 'resume')
           await executeScheduleResume({ scheduleId })
         else if (action === 'trigger')
