@@ -1,5 +1,5 @@
-import React from 'react'
 import { Box, Text } from 'ink'
+import type React from 'react'
 
 interface Column {
   key: string
@@ -48,7 +48,9 @@ export const Table: React.FC<TableProps> = ({ columns, data }) => {
       {data.map((row, rowIndex) => (
         <Box key={rowIndex}>
           {columns.map((col, i) => (
-            <Text key={col.key}>{padRight(String(row[col.key] ?? ''), widths[i])}</Text>
+            <Text key={col.key}>
+              {padRight(String(row[col.key] ?? ''), widths[i])}
+            </Text>
           ))}
         </Box>
       ))}

@@ -1,5 +1,5 @@
-import React from 'react'
 import { Box, Text } from 'ink'
+import type React from 'react'
 import { RETRO } from '../theme.js'
 
 interface RetroFrameProps {
@@ -9,7 +9,12 @@ interface RetroFrameProps {
   children: React.ReactNode
 }
 
-export const RetroFrame = ({ title, footer, borderless, children }: RetroFrameProps) => (
+export const RetroFrame = ({
+  title,
+  footer,
+  borderless,
+  children,
+}: RetroFrameProps) => (
   <Box flexDirection="column">
     <Box
       borderStyle={borderless ? undefined : RETRO.border}

@@ -1,4 +1,3 @@
-import React from 'react'
 import { Box, Text, useInput } from 'ink'
 import { RETRO } from '../theme.js'
 

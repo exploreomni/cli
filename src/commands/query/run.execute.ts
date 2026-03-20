@@ -1,9 +1,9 @@
+import { createAPIClient, generateQuery } from '../../api/index.js'
 import {
-  getConfigManager,
   getAuthContext,
+  getConfigManager,
   validateAuth,
 } from '../../config/index.js'
-import { createAPIClient, generateQuery } from '../../api/index.js'
 import type { CommandResult } from '../../output/index.js'
 
 export interface QueryRunResult {
@@ -47,9 +47,7 @@ export const executeQueryRun = async (options: {
   }
 
   if (response.data?.error) {
-    throw new Error(
-      response.data.error.detail ?? response.data.error.message
-    )
+    throw new Error(response.data.error.detail ?? response.data.error.message)
   }
 
   if (!response.data?.query) {

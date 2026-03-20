@@ -13,9 +13,10 @@ export const executeConfigUse = (
 
   if (!profile) {
     const available = Object.keys(configManager.getProfiles())
-    const msg = available.length > 0
-      ? `Profile '${profileName}' not found. Available: ${available.join(', ')}`
-      : `Profile '${profileName}' not found. No profiles configured.`
+    const msg =
+      available.length > 0
+        ? `Profile '${profileName}' not found. Available: ${available.join(', ')}`
+        : `Profile '${profileName}' not found. No profiles configured.`
     throw new Error(msg)
   }
 

@@ -1,17 +1,17 @@
-export { resolveOutputMode } from './mode.js'
 export { outputFlags } from './flags.js'
+export { resolveOutputMode } from './mode.js'
 export {
-  renderPosix,
-  renderJson,
   renderCsv,
+  renderJson,
   renderPlainTable,
+  renderPosix,
   renderPosixError,
   renderPosixSuccess,
 } from './posix.js'
 export type {
-  OutputMode,
-  OutputFormat,
   ColumnDef,
-  TabularData,
   CommandResult,
+  OutputFormat,
+  OutputMode,
+  TabularData,
 } from './types.js'
