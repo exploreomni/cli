@@ -1,8 +1,14 @@
 vi.mock('../../config/index.js', () => ({
   getConfigManager: vi.fn(() => ({
-    getProfile: vi.fn(() => ({ apiEndpoint: 'https://test.omni.co', organizationId: 'org-1' })),
+    getProfile: vi.fn(() => ({
+      apiEndpoint: 'https://test.omni.co',
+      organizationId: 'org-1',
+    })),
   })),
-  getAuthContext: vi.fn(() => ({ token: 'test-token', organizationId: 'org-1' })),
+  getAuthContext: vi.fn(() => ({
+    token: 'test-token',
+    organizationId: 'org-1',
+  })),
   validateAuth: vi.fn(() => null),
 }))
 
@@ -11,9 +17,9 @@ vi.mock('../../api/index.js', () => ({
   validateModel: vi.fn(),
 }))
 
-import { executeModelValidate } from './validate.execute.js'
-import { getConfigManager } from '../../config/index.js'
 import { validateModel } from '../../api/index.js'
+import { getConfigManager } from '../../config/index.js'
+import { executeModelValidate } from './validate.execute.js'
 
 describe('executeModelValidate', () => {
   it('returns valid result with no issues', async () => {

@@ -17,13 +17,16 @@ const mockResponse = (status: number, body: unknown, ok?: boolean) =>
     ok: ok ?? (status >= 200 && status < 300),
     status,
     json: () => Promise.resolve(body),
-    text: () => Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
+    text: () =>
+      Promise.resolve(typeof body === 'string' ? body : JSON.stringify(body)),
   } as Response)
 
 let fetchSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
-  fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(undefined as unknown as Response)
+  fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(undefined as unknown as Response)
 })
 
 afterEach(() => {
@@ -41,14 +44,17 @@ describe('APIClient', () => {
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     await client.get('/api/v1/test')
 
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/api/v1/test', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer test-token',
-      },
-      body: undefined,
-    })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/api/v1/test',
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-token',
+        },
+        body: undefined,
+      }
+    )
   })
 
   it('POST sends body as JSON', async () => {
@@ -56,11 +62,14 @@ describe('APIClient', () => {
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     await client.post('/api/v1/items', { name: 'test' })
 
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/api/v1/items', {
-      method: 'POST',
-      headers: expect.any(Object),
-      body: JSON.stringify({ name: 'test' }),
-    })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/api/v1/items',
+      {
+        method: 'POST',
+        headers: expect.any(Object),
+        body: JSON.stringify({ name: 'test' }),
+      }
+    )
   })
 
   it('PUT sends body', async () => {
@@ -68,11 +77,14 @@ describe('APIClient', () => {
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     await client.put('/api/v1/items/1', { name: 'updated' })
 
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/api/v1/items/1', {
-      method: 'PUT',
-      headers: expect.any(Object),
-      body: JSON.stringify({ name: 'updated' }),
-    })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/api/v1/items/1',
+      {
+        method: 'PUT',
+        headers: expect.any(Object),
+        body: JSON.stringify({ name: 'updated' }),
+      }
+    )
   })
 
   it('DELETE sends correct method', async () => {
@@ -80,17 +92,22 @@ describe('APIClient', () => {
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     await client.delete('/api/v1/items/1')
 
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/api/v1/items/1', {
-      method: 'DELETE',
-      headers: expect.any(Object),
-      body: undefined,
-    })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/api/v1/items/1',
+      {
+        method: 'DELETE',
+        headers: expect.any(Object),
+        body: undefined,
+      }
+    )
   })
 
   it('successful response returns data and status', async () => {
     fetchSpy.mockReturnValueOnce(mockResponse(200, { id: '1', name: 'test' }))
     const client = createAPIClient('https://api.example.com', mockAuthContext)
-    const result = await client.get<{ id: string; name: string }>('/api/v1/items/1')
+    const result = await client.get<{ id: string; name: string }>(
+      '/api/v1/items/1'
+    )
 
     expect(result).toEqual({
       data: { id: '1', name: 'test' },
@@ -99,7 +116,9 @@ describe('APIClient', () => {
   })
 
   it('error response with JSON { message } extracts message', async () => {
-    fetchSpy.mockReturnValueOnce(mockResponse(400, { message: 'Bad request' }, false))
+    fetchSpy.mockReturnValueOnce(
+      mockResponse(400, { message: 'Bad request' }, false)
+    )
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     const result = await client.get('/api/v1/fail')
 
@@ -109,7 +128,9 @@ describe('APIClient', () => {
   })
 
   it('error response with JSON { error } extracts error', async () => {
-    fetchSpy.mockReturnValueOnce(mockResponse(403, { error: 'Forbidden' }, false))
+    fetchSpy.mockReturnValueOnce(
+      mockResponse(403, { error: 'Forbidden' }, false)
+    )
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     const result = await client.get('/api/v1/fail')
 
@@ -117,7 +138,9 @@ describe('APIClient', () => {
   })
 
   it('error response with JSON { error: { message } } extracts nested message', async () => {
-    fetchSpy.mockReturnValueOnce(mockResponse(500, { error: { message: 'nested' } }, false))
+    fetchSpy.mockReturnValueOnce(
+      mockResponse(500, { error: { message: 'nested' } }, false)
+    )
     const client = createAPIClient('https://api.example.com', mockAuthContext)
     const result = await client.get('/api/v1/fail')
 

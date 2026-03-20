@@ -1,8 +1,14 @@
 vi.mock('../../config/index.js', () => ({
   getConfigManager: vi.fn(() => ({
-    getProfile: vi.fn(() => ({ apiEndpoint: 'https://test.omni.co', organizationId: 'org-1' })),
+    getProfile: vi.fn(() => ({
+      apiEndpoint: 'https://test.omni.co',
+      organizationId: 'org-1',
+    })),
   })),
-  getAuthContext: vi.fn(() => ({ token: 'test-token', organizationId: 'org-1' })),
+  getAuthContext: vi.fn(() => ({
+    token: 'test-token',
+    organizationId: 'org-1',
+  })),
   validateAuth: vi.fn(() => null),
 }))
 
@@ -11,9 +17,9 @@ vi.mock('../../api/index.js', () => ({
   generateQuery: vi.fn(),
 }))
 
-import { executeQueryRun } from './run.execute.js'
-import { getConfigManager, validateAuth } from '../../config/index.js'
 import { generateQuery } from '../../api/index.js'
+import { getConfigManager, validateAuth } from '../../config/index.js'
+import { executeQueryRun } from './run.execute.js'
 
 const defaultOpts = { prompt: 'show me revenue', modelId: 'model-1' }
 
@@ -21,7 +27,10 @@ describe('executeQueryRun', () => {
   it('returns columns, rows, topic, and rowCount on success', async () => {
     vi.mocked(generateQuery).mockResolvedValue({
       data: {
-        query: { modelId: 'model-1', fields: [{ name: 'revenue', kind: 'metric' }] },
+        query: {
+          modelId: 'model-1',
+          fields: [{ name: 'revenue', kind: 'metric' }],
+        },
         topic: 'Sales',
         result: {
           columns: ['revenue'],
@@ -47,7 +56,9 @@ describe('executeQueryRun', () => {
       status: 503,
     })
 
-    await expect(executeQueryRun(defaultOpts)).rejects.toThrow('Service unavailable')
+    await expect(executeQueryRun(defaultOpts)).rejects.toThrow(
+      'Service unavailable'
+    )
   })
 
   it('throws detail on data-level error with detail', async () => {
@@ -60,7 +71,9 @@ describe('executeQueryRun', () => {
       status: 200,
     })
 
-    await expect(executeQueryRun(defaultOpts)).rejects.toThrow('Column not found: foo')
+    await expect(executeQueryRun(defaultOpts)).rejects.toThrow(
+      'Column not found: foo'
+    )
   })
 
   it('throws message on data-level error without detail', async () => {
@@ -113,7 +126,9 @@ describe('executeQueryRun', () => {
       getProfile: vi.fn(() => null),
     } as any)
 
-    await expect(executeQueryRun(defaultOpts)).rejects.toThrow('No profile configured')
+    await expect(executeQueryRun(defaultOpts)).rejects.toThrow(
+      'No profile configured'
+    )
   })
 
   it('throws on auth error', async () => {

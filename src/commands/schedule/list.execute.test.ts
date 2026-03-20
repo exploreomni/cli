@@ -1,8 +1,14 @@
 vi.mock('../../config/index.js', () => ({
   getConfigManager: vi.fn(() => ({
-    getProfile: vi.fn(() => ({ apiEndpoint: 'https://test.omni.co', organizationId: 'org-1' })),
+    getProfile: vi.fn(() => ({
+      apiEndpoint: 'https://test.omni.co',
+      organizationId: 'org-1',
+    })),
   })),
-  getAuthContext: vi.fn(() => ({ token: 'test-token', organizationId: 'org-1' })),
+  getAuthContext: vi.fn(() => ({
+    token: 'test-token',
+    organizationId: 'org-1',
+  })),
   validateAuth: vi.fn(() => null),
 }))
 
@@ -11,12 +17,14 @@ vi.mock('../../api/index.js', () => ({
   listSchedules: vi.fn(),
 }))
 
-import { formatScheduleRow, executeScheduleList } from './list.execute.js'
-import { getConfigManager } from '../../config/index.js'
-import { listSchedules } from '../../api/index.js'
 import type { ScheduleListItem } from '../../api/index.js'
+import { listSchedules } from '../../api/index.js'
+import { getConfigManager } from '../../config/index.js'
+import { executeScheduleList, formatScheduleRow } from './list.execute.js'
 
-const makeScheduleItem = (overrides: Partial<ScheduleListItem> = {}): ScheduleListItem => ({
+const makeScheduleItem = (
+  overrides: Partial<ScheduleListItem> = {}
+): ScheduleListItem => ({
   id: 'sched-123-full-uuid',
   name: 'Test Schedule',
   dashboardName: 'Dashboard',
@@ -45,7 +53,9 @@ describe('formatScheduleRow', () => {
   })
 
   it('returns paused status when disabledAt is set', () => {
-    const row = formatScheduleRow(makeScheduleItem({ disabledAt: '2025-01-01T00:00:00Z' }))
+    const row = formatScheduleRow(
+      makeScheduleItem({ disabledAt: '2025-01-01T00:00:00Z' })
+    )
     expect(row.status).toBe('paused')
   })
 
@@ -96,7 +106,9 @@ describe('executeScheduleList', () => {
       getProfile: vi.fn(() => null),
     } as any)
 
-    await expect(executeScheduleList({})).rejects.toThrow('No profile configured')
+    await expect(executeScheduleList({})).rejects.toThrow(
+      'No profile configured'
+    )
   })
 
   it('throws on API error', async () => {

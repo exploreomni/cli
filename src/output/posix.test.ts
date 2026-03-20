@@ -1,4 +1,11 @@
-import { renderJson, renderCsv, renderPlainTable, renderPosix, renderPosixError, renderPosixSuccess } from './posix.js'
+import {
+  renderCsv,
+  renderJson,
+  renderPlainTable,
+  renderPosix,
+  renderPosixError,
+  renderPosixSuccess,
+} from './posix.js'
 
 describe('posix output', () => {
   let stdoutSpy: ReturnType<typeof vi.spyOn>

@@ -1,13 +1,13 @@
+import type { APIClient } from './client.js'
 import {
-  listSchedules,
+  deleteSchedule,
   getSchedule,
-  triggerSchedule,
+  getScheduleRecipients,
+  listSchedules,
   pauseSchedule,
   resumeSchedule,
-  deleteSchedule,
-  getScheduleRecipients,
+  triggerSchedule,
 } from './schedules.js'
-import type { APIClient } from './client.js'
 
 const createMockClient = () =>
   ({
@@ -46,7 +46,9 @@ describe('schedules API', () => {
   it('triggerSchedule calls POST /api/v1/schedules/{id}/trigger', async () => {
     const client = createMockClient()
     await triggerSchedule(client, 'sched-1')
-    expect(client.post).toHaveBeenCalledWith('/api/v1/schedules/sched-1/trigger')
+    expect(client.post).toHaveBeenCalledWith(
+      '/api/v1/schedules/sched-1/trigger'
+    )
   })
 
   it('pauseSchedule calls PUT /api/v1/schedules/{id}/pause', async () => {
@@ -70,6 +72,8 @@ describe('schedules API', () => {
   it('getScheduleRecipients calls GET /api/v1/schedules/{id}/recipients', async () => {
     const client = createMockClient()
     await getScheduleRecipients(client, 'sched-1')
-    expect(client.get).toHaveBeenCalledWith('/api/v1/schedules/sched-1/recipients')
+    expect(client.get).toHaveBeenCalledWith(
+      '/api/v1/schedules/sched-1/recipients'
+    )
   })
 })

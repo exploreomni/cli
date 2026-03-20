@@ -1,8 +1,14 @@
 vi.mock('../../config/index.js', () => ({
   getConfigManager: vi.fn(() => ({
-    getProfile: vi.fn(() => ({ apiEndpoint: 'https://test.omni.co', organizationId: 'org-1' })),
+    getProfile: vi.fn(() => ({
+      apiEndpoint: 'https://test.omni.co',
+      organizationId: 'org-1',
+    })),
   })),
-  getAuthContext: vi.fn(() => ({ token: 'test-token', organizationId: 'org-1' })),
+  getAuthContext: vi.fn(() => ({
+    token: 'test-token',
+    organizationId: 'org-1',
+  })),
   validateAuth: vi.fn(() => null),
 }))
 
@@ -11,9 +17,9 @@ vi.mock('../../api/index.js', () => ({
   listModels: vi.fn(),
 }))
 
-import { formatDate, executeModelList } from './list.execute.js'
-import { getConfigManager, validateAuth } from '../../config/index.js'
 import { listModels } from '../../api/index.js'
+import { getConfigManager, validateAuth } from '../../config/index.js'
+import { executeModelList, formatDate } from './list.execute.js'
 
 describe('formatDate', () => {
   it('returns "just now" for less than 1 hour ago', () => {
@@ -63,7 +69,12 @@ describe('executeModelList', () => {
             deletedAt: null,
           },
         ],
-        pageInfo: { hasNextPage: false, nextCursor: null, pageSize: 20, totalRecords: 2 },
+        pageInfo: {
+          hasNextPage: false,
+          nextCursor: null,
+          pageSize: 20,
+          totalRecords: 2,
+        },
       },
       error: undefined,
       status: 200,

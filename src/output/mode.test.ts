@@ -21,7 +21,11 @@ describe('resolveOutputMode', () => {
   it('TUI mode when isTTY=true, no format flags', () => {
     process.stdout.isTTY = true
     delete process.env.NO_COLOR
-    expect(resolveOutputMode({})).toEqual({ isTUI: true, format: 'table', color: true })
+    expect(resolveOutputMode({})).toEqual({
+      isTUI: true,
+      format: 'table',
+      color: true,
+    })
   })
 
   it('JSON when format=json', () => {

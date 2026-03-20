@@ -1,5 +1,5 @@
-import { getAuthHeaders, validateAuth } from './auth.js'
 import type { AuthContext } from './auth.js'
+import { getAuthHeaders, validateAuth } from './auth.js'
 
 describe('validateAuth', () => {
   it('returns null when apiKey + organizationId present', () => {

@@ -1,8 +1,14 @@
 vi.mock('../../config/index.js', () => ({
   getConfigManager: vi.fn(() => ({
-    getProfile: vi.fn(() => ({ apiEndpoint: 'https://test.omni.co', organizationId: 'org-1' })),
+    getProfile: vi.fn(() => ({
+      apiEndpoint: 'https://test.omni.co',
+      organizationId: 'org-1',
+    })),
   })),
-  getAuthContext: vi.fn(() => ({ token: 'test-token', organizationId: 'org-1' })),
+  getAuthContext: vi.fn(() => ({
+    token: 'test-token',
+    organizationId: 'org-1',
+  })),
   validateAuth: vi.fn(() => null),
 }))
 
@@ -11,9 +17,9 @@ vi.mock('../../api/index.js', () => ({
   getScheduleRecipients: vi.fn(),
 }))
 
-import { executeScheduleRecipients } from './recipients.execute.js'
-import { getConfigManager } from '../../config/index.js'
 import { getScheduleRecipients } from '../../api/index.js'
+import { getConfigManager } from '../../config/index.js'
+import { executeScheduleRecipients } from './recipients.execute.js'
 
 const defaultOpts = { scheduleId: 'sched-1' }
 
@@ -35,8 +41,16 @@ describe('executeScheduleRecipients', () => {
     const result = await executeScheduleRecipients(defaultOpts)
 
     expect(result.data.recipients).toHaveLength(2)
-    expect(result.data.recipients[0]).toEqual({ id: 'r1', name: 'Alice', email: 'alice@test.com' })
-    expect(result.data.recipients[1]).toEqual({ id: 'r2', name: 'Bob', email: 'bob@test.com' })
+    expect(result.data.recipients[0]).toEqual({
+      id: 'r1',
+      name: 'Alice',
+      email: 'alice@test.com',
+    })
+    expect(result.data.recipients[1]).toEqual({
+      id: 'r2',
+      name: 'Bob',
+      email: 'bob@test.com',
+    })
   })
 
   it('flattens group recipients with group field', async () => {
@@ -130,7 +144,9 @@ describe('executeScheduleRecipients', () => {
       getProfile: vi.fn(() => null),
     } as any)
 
-    await expect(executeScheduleRecipients(defaultOpts)).rejects.toThrow('No profile configured')
+    await expect(executeScheduleRecipients(defaultOpts)).rejects.toThrow(
+      'No profile configured'
+    )
   })
 
   it('throws on API error', async () => {
@@ -140,6 +156,8 @@ describe('executeScheduleRecipients', () => {
       status: 404,
     })
 
-    await expect(executeScheduleRecipients(defaultOpts)).rejects.toThrow('Not found')
+    await expect(executeScheduleRecipients(defaultOpts)).rejects.toThrow(
+      'Not found'
+    )
   })
 })

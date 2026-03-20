@@ -1,5 +1,5 @@
-import { listModels, validateModel, getModelYaml } from './models.js'
 import type { APIClient } from './client.js'
+import { getModelYaml, listModels, validateModel } from './models.js'
 
 const createMockClient = () =>
   ({
