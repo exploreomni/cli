@@ -1,8 +1,8 @@
-import React from 'react'
 import { Text } from 'ink'
-import { RetroFrame } from './RetroFrame.js'
-import { RETRO } from '../theme.js'
+import type React from 'react'
 import { Spinner } from '../../components/index.js'
+import { RETRO } from '../theme.js'
+import { RetroFrame } from './RetroFrame.js'
 
 interface ResourceFrameProps {
   title: string

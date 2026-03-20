@@ -1,7 +1,7 @@
-import type { ColumnDef, OutputFormat, TabularData } from './types.js'
+import type { OutputFormat, TabularData } from './types.js'
 
 export const renderJson = (data: unknown): void => {
-  process.stdout.write(JSON.stringify(data, null, 2) + '\n')
+  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`)
 }
 
 export const renderCsv = (tabular: TabularData): void => {
@@ -14,13 +14,11 @@ export const renderCsv = (tabular: TabularData): void => {
   }
 
   const header = tabular.columns.map((col) => escapeCsv(col.header)).join(',')
-  process.stdout.write(header + '\n')
+  process.stdout.write(`${header}\n`)
 
   for (const row of tabular.rows) {
-    const line = tabular.columns
-      .map((col) => escapeCsv(row[col.key]))
-      .join(',')
-    process.stdout.write(line + '\n')
+    const line = tabular.columns.map((col) => escapeCsv(row[col.key])).join(',')
+    process.stdout.write(`${line}\n`)
   }
 }
 
@@ -28,9 +26,7 @@ export const renderPlainTable = (tabular: TabularData): void => {
   const widths = tabular.columns.map((col) => {
     const headerLen = col.header.length
     const maxDataLen = Math.max(
-      ...tabular.rows.map(
-        (row) => String(row[col.key] ?? '').length
-      ),
+      ...tabular.rows.map((row) => String(row[col.key] ?? '').length),
       0
     )
     return col.width ?? Math.max(headerLen, maxDataLen) + 2
@@ -42,16 +38,16 @@ export const renderPlainTable = (tabular: TabularData): void => {
   const headerLine = tabular.columns
     .map((col, i) => padRight(col.header, widths[i]))
     .join('')
-  process.stdout.write(headerLine + '\n')
+  process.stdout.write(`${headerLine}\n`)
 
   const separator = widths.map((w) => '-'.repeat(w)).join('')
-  process.stdout.write(separator + '\n')
+  process.stdout.write(`${separator}\n`)
 
   for (const row of tabular.rows) {
     const line = tabular.columns
       .map((col, i) => padRight(String(row[col.key] ?? ''), widths[i]))
       .join('')
-    process.stdout.write(line + '\n')
+    process.stdout.write(`${line}\n`)
   }
 }
 

@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react'
 import { render } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage } from '../../components/index.js'
+import type { OutputMode } from '../../output/index.js'
 import {
-  resolveOutputMode,
   renderJson,
   renderPosixError,
   renderPosixSuccess,
+  resolveOutputMode,
 } from '../../output/index.js'
-import type { OutputMode } from '../../output/index.js'
 import { executeSchedulePause } from './pause.execute.js'
 
 interface SchedulePauseProps {
@@ -21,7 +22,7 @@ const SchedulePause: React.FC<SchedulePauseProps> = ({
 }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [_success, setSuccess] = useState(false)
 
   useEffect(() => {
     executeSchedulePause({ scheduleId, profile })
@@ -70,9 +71,7 @@ export const runSchedulePause = (options: {
       if (mode.format === 'json') {
         renderJson(result.data)
       } else {
-        renderPosixSuccess(
-          `Schedule ${options.scheduleId.slice(0, 8)} paused`
-        )
+        renderPosixSuccess(`Schedule ${options.scheduleId.slice(0, 8)} paused`)
       }
     })
     .catch((e: Error) => {

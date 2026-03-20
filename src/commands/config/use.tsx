@@ -1,14 +1,14 @@
-import React from 'react'
 import { Box, render } from 'ink'
-import { getConfigManager } from '../../config/index.js'
+import type React from 'react'
 import { StatusMessage } from '../../components/index.js'
+import { getConfigManager } from '../../config/index.js'
+import type { OutputMode } from '../../output/index.js'
 import {
-  resolveOutputMode,
+  renderJson,
   renderPosixError,
   renderPosixSuccess,
-  renderJson,
+  resolveOutputMode,
 } from '../../output/index.js'
-import type { OutputMode } from '../../output/index.js'
 import { executeConfigUse } from './use.execute.js'
 
 interface ConfigUseProps {

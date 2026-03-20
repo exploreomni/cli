@@ -1,10 +1,10 @@
+import type { UserListItem } from '../../api/index.js'
+import { createAPIClient, listUsers } from '../../api/index.js'
 import {
-  getConfigManager,
   getAuthContext,
+  getConfigManager,
   validateAuth,
 } from '../../config/index.js'
-import { createAPIClient, listUsers } from '../../api/index.js'
-import type { UserListItem } from '../../api/index.js'
 import type { CommandResult } from '../../output/index.js'
 
 export interface UserListResult {
@@ -28,9 +28,7 @@ const formatLastLogin = (lastLogin: string | null): string => {
   return date.toLocaleDateString()
 }
 
-export const formatUserRow = (
-  item: UserListItem
-): Record<string, string> => ({
+export const formatUserRow = (item: UserListItem): Record<string, string> => ({
   name: item.displayName,
   email: item.email,
   groups: item.groups.map((g) => g.display).join(', ') || '-',

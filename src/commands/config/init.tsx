@@ -1,8 +1,9 @@
-import React, { useState } from 'react'
-import { Box, Text, render, useApp, useInput } from 'ink'
+import { Box, render, Text, useApp, useInput } from 'ink'
 import TextInput from 'ink-text-input'
-import { getConfigManager, Profile } from '../../config/index.js'
+import type React from 'react'
+import { useState } from 'react'
 import { StatusMessage } from '../../components/index.js'
+import { getConfigManager, type Profile } from '../../config/index.js'
 
 type Step = 'name' | 'org' | 'endpoint' | 'auth' | 'apiKey' | 'done'
 
@@ -113,7 +114,9 @@ const ConfigInit: React.FC = () => {
       {step === 'org' && (
         <Box flexDirection="column">
           <StatusMessage status="success">Profile: {profileName}</StatusMessage>
-          <Text>Organization ID or short ID (e.g., myorg or myorg/org_abc123):</Text>
+          <Text>
+            Organization ID or short ID (e.g., myorg or myorg/org_abc123):
+          </Text>
           <Box>
             <Text color="cyan">&gt; </Text>
             <TextInput
@@ -129,7 +132,9 @@ const ConfigInit: React.FC = () => {
       {step === 'endpoint' && (
         <Box flexDirection="column">
           <StatusMessage status="success">Profile: {profileName}</StatusMessage>
-          <StatusMessage status="success">Organization: {orgShortId}</StatusMessage>
+          <StatusMessage status="success">
+            Organization: {orgShortId}
+          </StatusMessage>
           <Text>API endpoint (press Enter for default):</Text>
           <Box>
             <Text color="cyan">&gt; </Text>
@@ -146,11 +151,13 @@ const ConfigInit: React.FC = () => {
       {step === 'auth' && (
         <Box flexDirection="column">
           <StatusMessage status="success">Profile: {profileName}</StatusMessage>
-          <StatusMessage status="success">Organization: {orgShortId}</StatusMessage>
+          <StatusMessage status="success">
+            Organization: {orgShortId}
+          </StatusMessage>
           <StatusMessage status="success">Endpoint: {endpoint}</StatusMessage>
           <Text>Authentication method:</Text>
-          <Text>  [1] API Key</Text>
-          <Text>  [2] OAuth (browser login)</Text>
+          <Text> [1] API Key</Text>
+          <Text> [2] OAuth (browser login)</Text>
           <Text dimColor>Press 1 or 2 to select</Text>
         </Box>
       )}
@@ -158,7 +165,9 @@ const ConfigInit: React.FC = () => {
       {step === 'apiKey' && (
         <Box flexDirection="column">
           <StatusMessage status="success">Profile: {profileName}</StatusMessage>
-          <StatusMessage status="success">Organization: {orgShortId}</StatusMessage>
+          <StatusMessage status="success">
+            Organization: {orgShortId}
+          </StatusMessage>
           <StatusMessage status="success">Endpoint: {endpoint}</StatusMessage>
           <StatusMessage status="success">Auth: API Key</StatusMessage>
           <Text>API Key (or press Enter to skip, set OMNI_API_KEY later):</Text>

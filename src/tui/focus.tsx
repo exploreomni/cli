@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import type React from 'react'
+import { createContext, useCallback, useContext, useState } from 'react'
 
 type Pane = 'sidebar' | 'detail'
 
@@ -14,11 +15,16 @@ const FocusPaneContext = createContext<PaneFocusState | null>(null)
 
 export const usePaneFocus = (): PaneFocusState => {
   const ctx = useContext(FocusPaneContext)
-  if (!ctx) throw new Error('usePaneFocus must be used within FocusPaneProvider')
+  if (!ctx)
+    throw new Error('usePaneFocus must be used within FocusPaneProvider')
   return ctx
 }
 
-export const FocusPaneProvider = ({ children }: { children: React.ReactNode }) => {
+export const FocusPaneProvider = ({
+  children,
+}: {
+  children: React.ReactNode
+}) => {
   const [activePane, setActivePane] = useState<Pane>('sidebar')
 
   const focusSidebar = useCallback(() => setActivePane('sidebar'), [])

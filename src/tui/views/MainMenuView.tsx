@@ -1,10 +1,9 @@
-import React from 'react'
 import { useApp, useInput } from 'ink'
-import { RetroFrame, SelectableList, ActionBar } from '../components/index.js'
 import type { ListItem } from '../components/index.js'
+import { ActionBar, RetroFrame, SelectableList } from '../components/index.js'
+import type { Route } from '../router.js'
 import { useRouter } from '../router.js'
 import { RETRO } from '../theme.js'
-import type { Route } from '../router.js'
 
 const menuItems: (ListItem & { route: Route })[] = [
   { id: 'schedules', label: 'Schedules', route: { view: 'schedule-list' } },

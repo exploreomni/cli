@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, render } from 'ink'
+import { Box, render, Text } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage } from '../../components/index.js'
-import {
-  resolveOutputMode,
-  renderJson,
-  renderPosixError,
-  renderPlainTable,
-} from '../../output/index.js'
 import type { OutputMode } from '../../output/index.js'
-import { executeScheduleGet } from './get.execute.js'
+import {
+  renderJson,
+  renderPlainTable,
+  renderPosixError,
+  resolveOutputMode,
+} from '../../output/index.js'
 import type { ScheduleGetResult } from './get.execute.js'
+import { executeScheduleGet } from './get.execute.js'
 
 interface ScheduleGetProps {
   scheduleId: string
@@ -54,15 +55,15 @@ const ScheduleGet: React.FC<ScheduleGetProps> = ({ scheduleId, profile }) => {
       <Text bold>{s.name}</Text>
       <Box flexDirection="column">
         <Text>
-          <Text dimColor>ID:          </Text>
+          <Text dimColor>ID: </Text>
           {s.id}
         </Text>
         <Text>
-          <Text dimColor>Dashboard:   </Text>
+          <Text dimColor>Dashboard: </Text>
           {s.dashboardName}
         </Text>
         <Text>
-          <Text dimColor>Owner:       </Text>
+          <Text dimColor>Owner: </Text>
           {s.ownerName}
         </Text>
         <Text>
@@ -70,20 +71,28 @@ const ScheduleGet: React.FC<ScheduleGetProps> = ({ scheduleId, profile }) => {
           {s.destinationType}
         </Text>
         <Text>
-          <Text dimColor>Format:      </Text>
+          <Text dimColor>Format: </Text>
           {s.format}
         </Text>
         <Text>
-          <Text dimColor>Schedule:    </Text>
+          <Text dimColor>Schedule: </Text>
           {s.schedule}
         </Text>
         <Text>
-          <Text dimColor>Timezone:    </Text>
+          <Text dimColor>Timezone: </Text>
           {s.timezone}
         </Text>
         <Text>
-          <Text dimColor>Status:      </Text>
-          <Text color={status === 'active' ? 'green' : status === 'paused' ? 'yellow' : 'red'}>
+          <Text dimColor>Status: </Text>
+          <Text
+            color={
+              status === 'active'
+                ? 'green'
+                : status === 'paused'
+                  ? 'yellow'
+                  : 'red'
+            }
+          >
             {status}
           </Text>
         </Text>
@@ -92,11 +101,11 @@ const ScheduleGet: React.FC<ScheduleGetProps> = ({ scheduleId, profile }) => {
           {s.lastStatus ?? '-'}
         </Text>
         <Text>
-          <Text dimColor>Last run:    </Text>
+          <Text dimColor>Last run: </Text>
           {s.lastCompletedAt ?? '-'}
         </Text>
         <Text>
-          <Text dimColor>Recipients:  </Text>
+          <Text dimColor>Recipients: </Text>
           {s.recipientCount}
         </Text>
         {s.systemDisabledReason && (
@@ -108,7 +117,7 @@ const ScheduleGet: React.FC<ScheduleGetProps> = ({ scheduleId, profile }) => {
         {s.alert && (
           <Box flexDirection="column">
             <Text>
-              <Text dimColor>Alert type:  </Text>
+              <Text dimColor>Alert type: </Text>
               {s.alert.conditionType}
             </Text>
             <Text>
@@ -131,10 +140,7 @@ export const runScheduleGet = (options: {
 
   if (mode.isTUI) {
     render(
-      <ScheduleGet
-        scheduleId={options.scheduleId}
-        profile={options.profile}
-      />
+      <ScheduleGet scheduleId={options.scheduleId} profile={options.profile} />
     )
     return
   }

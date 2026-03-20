@@ -1,11 +1,15 @@
-import React, { useCallback, useMemo } from 'react'
 import { useApp, useInput } from 'ink'
-import { SelectableList, ActionBar, ResourceFrame } from '../components/index.js'
+import { useCallback, useMemo } from 'react'
+import { executeModelList } from '../../commands/model/list.execute.js'
 import type { ListItem } from '../components/index.js'
-import { useRouter } from '../router.js'
+import {
+  ActionBar,
+  ResourceFrame,
+  SelectableList,
+} from '../components/index.js'
 import { usePaneFocus } from '../focus.js'
 import { useAsyncData } from '../hooks/useAsyncData.js'
-import { executeModelList } from '../../commands/model/list.execute.js'
+import { useRouter } from '../router.js'
 
 export const ModelListView = () => {
   const { push } = useRouter()

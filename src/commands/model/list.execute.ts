@@ -1,10 +1,10 @@
+import type { ModelMetadata } from '../../api/index.js'
+import { createAPIClient, listModels } from '../../api/index.js'
 import {
-  getConfigManager,
   getAuthContext,
+  getConfigManager,
   validateAuth,
 } from '../../config/index.js'
-import { createAPIClient, listModels } from '../../api/index.js'
-import type { ModelMetadata } from '../../api/index.js'
 import type { CommandResult } from '../../output/index.js'
 
 export interface ModelListResult {

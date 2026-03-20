@@ -1,4 +1,4 @@
-import { AuthContext, getAuthHeaders } from '../config/index.js'
+import { type AuthContext, getAuthHeaders } from '../config/index.js'
 
 export interface APIResponse<T> {
   data?: T
@@ -38,7 +38,11 @@ export class APIClient {
           const raw = errorJson.message ?? errorJson.error ?? errorText
           if (typeof raw === 'string') {
             errorMessage = raw
-          } else if (raw && typeof raw === 'object' && typeof raw.message === 'string') {
+          } else if (
+            raw &&
+            typeof raw === 'object' &&
+            typeof raw.message === 'string'
+          ) {
             errorMessage = raw.message
           } else {
             errorMessage = JSON.stringify(raw)
