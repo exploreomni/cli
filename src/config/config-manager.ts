@@ -1,5 +1,10 @@
 import Conf from 'conf'
-import { Config, ConfigSchema, DEFAULT_CONFIG, Profile } from './schema.js'
+import {
+  type Config,
+  ConfigSchema,
+  DEFAULT_CONFIG,
+  type Profile,
+} from './schema.js'
 
 const CONFIG_NAME = 'omni-cli'
 

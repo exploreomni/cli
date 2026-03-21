@@ -1,17 +1,17 @@
-import React, { useState, useCallback } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
+import React, { useCallback, useState } from 'react'
+import { executeModelValidate } from '../../commands/model/validate.execute.js'
+import { Spinner } from '../../components/index.js'
 import {
-  RetroFrame,
   ActionBar,
-  ToastMessage,
   KeyValueFields,
+  RetroFrame,
+  ToastMessage,
 } from '../components/index.js'
-import { useRouter } from '../router.js'
 import { usePaneFocus } from '../focus.js'
 import { useAsyncData } from '../hooks/useAsyncData.js'
+import { useRouter } from '../router.js'
 import { RETRO } from '../theme.js'
-import { Spinner } from '../../components/index.js'
-import { executeModelValidate } from '../../commands/model/validate.execute.js'
 
 export const ModelDetailView = ({ modelId }: { modelId: string }) => {
   const { pop } = useRouter()
@@ -46,14 +46,10 @@ export const ModelDetailView = ({ modelId }: { modelId: string }) => {
     loading: yamlLoading,
     error: yamlError,
   } = useAsyncData(async () => {
-    const {
-      getConfigManager,
-      getAuthContext,
-      validateAuth,
-    } = await import('../../config/index.js')
-    const { createAPIClient, getModelYaml } = await import(
-      '../../api/index.js'
+    const { getConfigManager, getAuthContext, validateAuth } = await import(
+      '../../config/index.js'
     )
+    const { createAPIClient, getModelYaml } = await import('../../api/index.js')
 
     const configManager = getConfigManager()
     const profileData = configManager.getProfile()
@@ -124,7 +120,10 @@ export const ModelDetailView = ({ modelId }: { modelId: string }) => {
       if (showYaml) {
         if (key.downArrow || input === 'j') {
           setYamlScroll((prev) =>
-            Math.min(prev + 1, Math.max(0, yamlLines.length - VISIBLE_YAML_LINES))
+            Math.min(
+              prev + 1,
+              Math.max(0, yamlLines.length - VISIBLE_YAML_LINES)
+            )
           )
         }
         if (key.upArrow || input === 'k') {
@@ -236,7 +235,10 @@ export const ModelDetailView = ({ modelId }: { modelId: string }) => {
                 {yamlLines.length > VISIBLE_YAML_LINES && (
                   <Text color={RETRO.colors.dim}>
                     [{yamlScroll + 1}-
-                    {Math.min(yamlScroll + VISIBLE_YAML_LINES, yamlLines.length)}{' '}
+                    {Math.min(
+                      yamlScroll + VISIBLE_YAML_LINES,
+                      yamlLines.length
+                    )}{' '}
                     of {yamlLines.length} lines]
                   </Text>
                 )}

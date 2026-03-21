@@ -1,14 +1,32 @@
-export { APIClient, createAPIClient } from './client.js'
 export type { APIResponse } from './client.js'
-export { listModels, validateModel, getModelYaml } from './models.js'
+export { APIClient, createAPIClient } from './client.js'
 export type { ListModelsParams } from './models.js'
-export { generateQuery } from './query.js'
+export { getModelYaml, listModels, validateModel } from './models.js'
 export type {
+  GeneratedQuery,
   GenerateQueryParams,
   GenerateQueryResponse,
-  GeneratedQuery,
   QueryResult,
 } from './query.js'
+export { generateQuery } from './query.js'
+export type {
+  EmailRecipient,
+  RecipientsResponse,
+  ScheduleListItem,
+  ScheduleListResponse,
+  SuccessResponse,
+  UserGroupRecipient,
+} from './schedule-types.js'
+export type { ListSchedulesParams } from './schedules.js'
+export {
+  deleteSchedule,
+  getSchedule,
+  getScheduleRecipients,
+  listSchedules,
+  pauseSchedule,
+  resumeSchedule,
+  triggerSchedule,
+} from './schedules.js'
 export type {
   ModelMetadata,
   ModelYamlResponse,
@@ -16,24 +34,6 @@ export type {
   ValidationIssue,
   ValidationResponse,
 } from './types.js'
-export {
-  listSchedules,
-  getSchedule,
-  triggerSchedule,
-  pauseSchedule,
-  resumeSchedule,
-  deleteSchedule,
-  getScheduleRecipients,
-} from './schedules.js'
-export type { ListSchedulesParams } from './schedules.js'
-export type {
-  ScheduleListItem,
-  ScheduleListResponse,
-  SuccessResponse,
-  RecipientsResponse,
-  EmailRecipient,
-  UserGroupRecipient,
-} from './schedule-types.js'
-export { listUsers } from './users.js'
-export type { ListUsersParams } from './users.js'
 export type { UserListItem, UserListResponse } from './user-types.js'
+export type { ListUsersParams } from './users.js'
+export { listUsers } from './users.js'

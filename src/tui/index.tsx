@@ -1,16 +1,15 @@
-import React from 'react'
 import { render } from 'ink'
-import { RouterProvider, useRouter } from './router.js'
 import { FocusPaneProvider } from './focus.js'
+import { RouterProvider, useRouter } from './router.js'
 import { ShellLayout } from './ShellLayout.js'
 import {
-  ScheduleListView,
-  ScheduleDetailView,
-  ModelListView,
-  ModelDetailView,
   ConfigView,
-  UserListView,
+  ModelDetailView,
+  ModelListView,
+  ScheduleDetailView,
+  ScheduleListView,
   UserDetailView,
+  UserListView,
 } from './views/index.js'
 
 const ViewRouter = () => {
@@ -20,7 +19,12 @@ const ViewRouter = () => {
     case 'schedule-list':
       return <ScheduleListView />
     case 'schedule-detail':
-      return <ScheduleDetailView scheduleId={current.scheduleId} schedule={current.schedule} />
+      return (
+        <ScheduleDetailView
+          scheduleId={current.scheduleId}
+          schedule={current.schedule}
+        />
+      )
     case 'model-list':
       return <ModelListView />
     case 'model-detail':

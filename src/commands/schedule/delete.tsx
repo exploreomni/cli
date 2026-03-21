@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, render, useInput, useApp } from 'ink'
+import { Box, render, Text, useApp, useInput } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage } from '../../components/index.js'
+import type { OutputMode } from '../../output/index.js'
 import {
-  resolveOutputMode,
   renderJson,
   renderPosixError,
   renderPosixSuccess,
+  resolveOutputMode,
 } from '../../output/index.js'
-import type { OutputMode } from '../../output/index.js'
 import { executeScheduleDelete } from './delete.execute.js'
 
 interface ScheduleDeleteProps {
@@ -25,7 +26,7 @@ const ScheduleDelete: React.FC<ScheduleDeleteProps> = ({
   const [confirming, setConfirming] = useState(!force)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [_success, setSuccess] = useState(false)
 
   useInput((input) => {
     if (!confirming) return
@@ -106,9 +107,7 @@ export const runScheduleDelete = (options: {
       if (mode.format === 'json') {
         renderJson(result.data)
       } else {
-        renderPosixSuccess(
-          `Schedule ${options.scheduleId.slice(0, 8)} deleted`
-        )
+        renderPosixSuccess(`Schedule ${options.scheduleId.slice(0, 8)} deleted`)
       }
     })
     .catch((e: Error) => {
