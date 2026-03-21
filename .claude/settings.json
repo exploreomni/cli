@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "WebFetch",
+      "WebSearch",
+      "Bash(./gradlew:*)",
+      "Bash(./services/gradlew:*)",
+      "Bash(bin/fetch-pr-comments.sh:*)",
+      "Bash(bin/setup)",
+      "Bash(cat:*)",
+      "Bash(diff:*)",
+      "Bash(dirname:*)",
+      "Bash(done)",
+      "Bash(echo:*)",
+      "Bash(file:*)",
+      "Bash(find:*)",
+      "Bash(gh api:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(git --no-pager diff:*)",
+      "Bash(git add:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git merge:*)",
+      "Bash(git remote:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(git rebase:*)",
+      "Bash(git show:*)",
+      "Bash(git stash:*)",
+      "Bash(git status:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(jq:*)",
+      "Bash(ls:*)",
+      "Bash(node --version:*)",
+      "Bash(node bin/build-feature-flags.mjs:*)",
+      "Bash(npm --version:*)",
+      "Bash(npx tsc:*)",
+      "Bash(pwd)",
+      "Bash(readlink:*)",
+      "Bash(realpath:*)",
+      "Bash(sed:*)",
+      "Bash(stat:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)",
+      "Bash(xargs:*)",
+      "Bash(yarn build:dependencies:*)",
+      "Bash(bin/lint*)",
+      "Bash(yarn eslint:*)",
+      "Bash(yarn fix:kotlin:*)",
+      "Bash(yarn gw query-manager:test:*)",
+      "Bash(yarn gw:*)",
+      "Bash(yarn i18n:extract:*)",
+      "Bash(yarn install:*)",
+      "Bash(yarn prettier:*)",
+      "Bash(yarn test:ui:integration:*)",
+      "Bash(yarn test:ui:unit:*)",
+      "Bash(yarn test:ui:visual:*)",
+      "Bash(yarn tsc:*)",
+      "Bash(yarn tsc:check:*)",
+      "Bash(bin/logs-query.sh:*)",
+      "Bash(aws --profile ProductionOnCall sts get-caller-identity:*)",
+      "Bash(aws --profile ProductionReporting sts get-caller-identity:*)",
+      "Bash(yarn workspace:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "defaultMode": "acceptEdits"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/install_pkgs.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/scripts/setup-node.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/skills/document-infra/scripts/check-stale-docs.sh HEAD~1 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-code-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-code"
+      }
+    }
+  }
+}
