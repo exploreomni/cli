@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react'
-import { Box, Text, render } from 'ink'
+import { Box, render, Text } from 'ink'
+import type React from 'react'
+import { useEffect, useState } from 'react'
 import { Spinner, StatusMessage } from '../../components/index.js'
+import type { OutputMode, TabularData } from '../../output/index.js'
 import {
-  resolveOutputMode,
   renderPosix,
   renderPosixError,
+  resolveOutputMode,
 } from '../../output/index.js'
-import type { OutputMode, TabularData } from '../../output/index.js'
-import { executeModelValidate } from './validate.execute.js'
 import type { ModelValidateResult } from './validate.execute.js'
+import { executeModelValidate } from './validate.execute.js'
 
 interface ModelValidateProps {
   modelId: string

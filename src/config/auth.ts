@@ -33,9 +33,9 @@ export const getAuthHeaders = (
   }
 
   if (context.token) {
-    headers['Authorization'] = `Bearer ${context.token}`
+    headers.Authorization = `Bearer ${context.token}`
   } else if (context.apiKey) {
-    headers['Authorization'] = `Bearer ${context.apiKey}`
+    headers.Authorization = `Bearer ${context.apiKey}`
   }
 
   return headers

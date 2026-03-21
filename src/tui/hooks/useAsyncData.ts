@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface AsyncDataState<T> {
   data: T | null
@@ -14,17 +14,21 @@ export const useAsyncData = <T>(
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const fetcherRef = useRef(fetcher)
+  fetcherRef.current = fetcher
 
   const reload = useCallback(() => {
     setReloadKey((k) => k + 1)
   }, [])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey triggers manual refetch via reload()
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
 
-    fetcher()
+    fetcherRef
+      .current()
       .then((result) => {
         if (!cancelled) {
           setData(result)
@@ -41,7 +45,7 @@ export const useAsyncData = <T>(
     return () => {
       cancelled = true
     }
-  }, [reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reloadKey])
 
   return { data, loading, error, reload }
 }

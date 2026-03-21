@@ -1,11 +1,8 @@
-import React from 'react'
-import { Box, Text, render } from 'ink'
+import { Box, render, Text } from 'ink'
+import type React from 'react'
 import { Table } from '../../components/index.js'
-import {
-  resolveOutputMode,
-  renderPosix,
-} from '../../output/index.js'
 import type { OutputMode, TabularData } from '../../output/index.js'
+import { renderPosix, resolveOutputMode } from '../../output/index.js'
 import { executeConfigShow } from './show.execute.js'
 
 const CONFIG_COLUMNS = [
@@ -48,9 +45,7 @@ const ConfigShow: React.FC = () => {
   )
 }
 
-export const runConfigShow = (options?: {
-  outputMode?: OutputMode
-}): void => {
+export const runConfigShow = (options?: { outputMode?: OutputMode }): void => {
   const mode = options?.outputMode ?? resolveOutputMode({})
 
   if (mode.isTUI) {

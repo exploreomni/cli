@@ -1,4 +1,3 @@
-import React from 'react'
 import { Box, Text } from 'ink'
 import { RETRO } from '../theme.js'
 
@@ -7,7 +6,10 @@ interface KeyValueFieldsProps {
   labelWidth?: number
 }
 
-export const KeyValueFields = ({ fields, labelWidth = 14 }: KeyValueFieldsProps) => (
+export const KeyValueFields = ({
+  fields,
+  labelWidth = 14,
+}: KeyValueFieldsProps) => (
   <Box flexDirection="column">
     {fields.map(([label, value]) => (
       <Box key={label} gap={1}>
