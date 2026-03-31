@@ -1,5 +1,5 @@
 # Go binary
-/omni
+/bin/
 
 # Node (legacy TS CLI)
 node_modules/

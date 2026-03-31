@@ -1,9 +1,10 @@
 .PHONY: build clean test spec
 
-BINARY := omni
+BINARY := bin/omni
 VERSION ?= dev
 
 build: spec
+	@mkdir -p bin
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/omni
 
 spec:
