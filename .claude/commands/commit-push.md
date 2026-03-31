@@ -12,8 +12,8 @@ If the user provided context above, use it to inform commit grouping, message wo
 
 1. **Gate on quality** — Run the project's lint and test suites. If either fails, stop and show the errors. Do NOT commit anything.
    ```
-   npm run lint
-   npm test
+   make build
+   make test
    ```
 
 2. **Inventory changes** — Run `git diff HEAD --stat` and `git diff HEAD` to understand every changed, added, and deleted file. Include untracked files via `git ls-files --others --exclude-standard`.

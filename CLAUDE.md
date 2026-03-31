@@ -21,7 +21,6 @@ internal/
   output/output.go         # JSON output helpers
 api/
   openapi.json             # Source of truth OpenAPI spec
-ts/                        # Legacy TypeScript CLI (preserved)
 Makefile
 ```
 
@@ -47,7 +46,7 @@ Auth is resolved with this precedence (highest wins):
 3. `OMNI_API_KEY` env var
 4. Profile's `apiKey` from config file
 
-Config file lives at `~/.config/omni-cli/config.json` (compatible with the TS CLI format).
+Config file lives at `~/.config/omni-cli/config.json`.
 
 ## Output
 
