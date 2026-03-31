@@ -1,7 +1,15 @@
+# Go binary
+/bin/
+
+# Node (legacy TS CLI)
 node_modules/
 dist/
 *.tsbuildinfo
-.DS_Store
+
+# Environment
 .env
+.DS_Store
+
+# IDE / Settings
 .claude/settings.local.json
 .claude/worktrees
