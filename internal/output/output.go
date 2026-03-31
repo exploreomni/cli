@@ -8,19 +8,24 @@ import (
 	"os"
 )
 
-// JSON reads a response body and writes it as JSON to stdout.
+// JSON reads a response body and writes it as formatted JSON to stdout.
 func JSON(body io.Reader, compact bool) error {
+	return JSONTo(os.Stdout, body, compact)
+}
+
+// JSONTo reads a response body and writes it as formatted JSON to w.
+func JSONTo(w io.Writer, body io.Reader, compact bool) error {
 	data, err := io.ReadAll(body)
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
 	if compact {
-		_, err = os.Stdout.Write(data)
+		_, err = w.Write(data)
 		if err != nil {
 			return err
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 		return nil
 	}
 
@@ -28,28 +33,33 @@ func JSON(body io.Reader, compact bool) error {
 	var raw json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		// Not JSON — print raw
-		_, err = os.Stdout.Write(data)
-		fmt.Println()
+		_, err = w.Write(data)
+		fmt.Fprintln(w)
 		return err
 	}
 
 	pretty, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
-		_, err = os.Stdout.Write(data)
-		fmt.Println()
+		_, err = w.Write(data)
+		fmt.Fprintln(w)
 		return err
 	}
 
-	_, err = os.Stdout.Write(pretty)
+	_, err = w.Write(pretty)
 	if err != nil {
 		return err
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 	return nil
 }
 
 // Error prints a JSON error to stderr.
 func Error(statusCode int, detail string) {
+	ErrorTo(os.Stderr, statusCode, detail)
+}
+
+// ErrorTo prints a JSON error to w.
+func ErrorTo(w io.Writer, statusCode int, detail string) {
 	msg := struct {
 		Error  string `json:"error"`
 		Status int    `json:"status,omitempty"`
@@ -58,5 +68,5 @@ func Error(statusCode int, detail string) {
 		Status: statusCode,
 	}
 	data, _ := json.Marshal(msg)
-	fmt.Fprintln(os.Stderr, string(data))
+	fmt.Fprintln(w, string(data))
 }
