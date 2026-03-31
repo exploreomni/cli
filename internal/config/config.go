@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // Profile represents a saved API configuration.
@@ -115,11 +116,52 @@ func Save(cfg *Config) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
+// configDir returns the omni-cli config directory following XDG conventions
+// (like gh CLI): OMNI_CONFIG_DIR > XDG_CONFIG_HOME > ~/.config on Unix, %AppData% on Windows.
+func configDir() string {
+	if v := os.Getenv("OMNI_CONFIG_DIR"); v != "" {
+		return v
+	}
+	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+		return filepath.Join(v, "omni-cli")
+	}
+	if runtime.GOOS == "windows" {
+		appData, _ := os.UserConfigDir() // %AppData%
+		return filepath.Join(appData, "omni-cli")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "omni-cli")
+}
+
 // ConfigPath returns the path to the config file.
 func ConfigPath() string {
 	if v := os.Getenv("OMNI_CONFIG_PATH"); v != "" {
 		return v
 	}
-	home, _ := os.UserConfigDir()
-	return filepath.Join(home, "omni-cli", "config.json")
+	return filepath.Join(configDir(), "config.json")
+}
+
+// MigrateConfig copies the config from the legacy os.UserConfigDir() location
+// to the new XDG-style path if the new path doesn't exist yet.
+func MigrateConfig() {
+	newPath := ConfigPath()
+	if _, err := os.Stat(newPath); err == nil {
+		return // new location already exists
+	}
+	legacyDir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	legacyPath := filepath.Join(legacyDir, "omni-cli", "config.json")
+	data, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
+		return
+	}
+	if err := os.WriteFile(newPath, data, 0o600); err != nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Migrated config from %s to %s\n", legacyPath, newPath)
 }
