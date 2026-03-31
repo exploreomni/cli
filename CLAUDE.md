@@ -21,7 +21,6 @@ internal/
   output/output.go         # JSON output helpers
 api/
   openapi.json             # Source of truth OpenAPI spec
-ts/                        # Legacy TypeScript CLI (preserved)
 Makefile
 ```
 

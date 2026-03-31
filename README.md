@@ -1,114 +1,59 @@
 # Omni CLI
 
-Command-line tool for managing Omni resources — models, queries, and schedules.
+Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI spec at build time — no hand-written endpoint wrappers needed.
 
-## Getting started
+## Quick start
 
-### 1. Install dependencies
-
-```bash
-npm install
-```
-
-### 2. Create a profile
+### Build
 
 ```bash
-npx tsx ./bin/omni.ts config:init
+make build
 ```
 
-This walks you through setting up your organization, API endpoint, and authentication. You can create multiple profiles for different orgs or environments.
+### Configure a profile
 
-### 3. Set your API key
+```bash
+./bin/omni config init
+```
 
-Either enter it during `config:init`, or set the environment variable:
+This creates a profile with your organization, API endpoint, and API key. You can create multiple profiles for different orgs or environments.
+
+### Set your API key
+
+Either enter it during `config init`, or set the environment variable:
 
 ```bash
 export OMNI_API_KEY=omni_osk_...
 ```
 
-### 4. Run a command
+### Run a command
 
 ```bash
-npx tsx ./bin/omni.ts model:list
+./bin/omni models list
+./bin/omni dashboards list
+./bin/omni --help
 ```
 
-## Commands
+## How it works
 
-### Config
+The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup it parses the spec and generates cobra subcommands for every operation. Each API tag becomes a command group, path params become positional args, query params become flags, and request bodies are passed via `--body` or stdin.
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `config:init` | `ci` | Create a new profile (interactive wizard) |
-| `config:show` | `cs` | Display all configured profiles |
-| `config:use <profile>` | `cu` | Switch the active profile |
+Adding a new API endpoint requires no code changes — update `api/openapi.json` (or run `make sync-spec`) and rebuild.
 
-### Models
+## Auth
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `model:list` | `ml` | List models in the organization |
-| `model:validate <modelId>` | `mv` | Validate a model's schema |
+Auth is resolved with this precedence (highest wins):
 
-`model:list` flags: `--kind` (schema, shared, branch), `--profile`
+1. `--token` flag
+2. `OMNI_API_TOKEN` env var
+3. `OMNI_API_KEY` env var
+4. Profile's `apiKey` from config file
 
-`model:validate` flags: `--branch`, `--profile`
+Config file lives at `~/.config/omni-cli/config.json`.
 
-### Query
+## Output
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `query <prompt>` | `q` | Generate and run an AI query from natural language |
-
-Requires `--model` (`-m`). Optional: `--topic` (`-t`), `--profile` (`-p`).
-
-```bash
-npx tsx ./bin/omni.ts query "top 10 customers by revenue" -m <modelId>
-```
-
-### Schedules
-
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `schedule:list` | `sl` | List schedules with filtering and pagination |
-| `schedule:get <id>` | `sg` | Show schedule details |
-| `schedule:trigger <id>` | `st` | Trigger a schedule immediately |
-| `schedule:pause <id>` | `sp` | Pause a schedule |
-| `schedule:resume <id>` | `sr` | Resume a paused schedule |
-| `schedule:delete <id>` | `sd` | Delete a schedule |
-| `schedule:recipients <id>` | | List recipients for a schedule |
-
-`schedule:list` flags: `--status`, `--destination`, `--search`, `--sort`, `--sort-direction`, `--page-size`, `--page`
-
-### TUI
-
-```bash
-npx tsx ./bin/omni.ts tui
-```
-
-Launch the interactive terminal UI for browsing models, schedules, users, and configuration.
-
-## Output modes
-
-By default the CLI renders an interactive TUI with colors and spinners when running in a terminal. When piped or redirected, it automatically switches to JSON.
-
-You can control this explicitly:
-
-```bash
-# JSON output
-omni-cli model:list --format json
-omni-cli schedule:list -F json | jq '.[].name'
-
-# CSV output
-omni-cli model:list --format csv > models.csv
-
-# Plain table (no colors or spinners)
-omni-cli model:list --no-tui
-
-# Disable color (also respects NO_COLOR env var)
-omni-cli model:list --no-color
-```
-
-The `--format` (`-F`), `--no-tui`, and `--no-color` flags are available on all commands except `config:init`.
+All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for non-indented output (good for piping to `jq`).
 
 ## Environment variables
 
@@ -116,14 +61,12 @@ The `--format` (`-F`), `--no-tui`, and `--no-color` flags are available on all c
 |----------|-------------|
 | `OMNI_API_KEY` | API key for authentication |
 | `OMNI_API_TOKEN` | Bearer token (alternative to API key) |
-| `OMNI_ORG_ID` | Override the organization ID from your profile |
-| `NO_COLOR` | Disable colored output (standard convention) |
 
 ## Development
 
 ```bash
-npx tsx ./bin/omni.ts <command>   # Run the CLI
-npm run lint:ts                   # Type check
-npm test                          # Run tests
-npm run test:watch                # Run tests in watch mode
+make build       # Build the binary
+make test        # Run tests
+make sync-spec   # Update spec from monorepo
+make clean       # Remove built binary
 ```
