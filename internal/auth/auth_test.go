@@ -9,6 +9,13 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 )
 
+// These tests use httptest.NewServer to spin up a local HTTP server, then
+// call auth.Do() against it. This lets us inspect exactly what HTTP request
+// the CLI would send to the real Omni API — headers, method, path, and body —
+// without making any real network calls.
+
+// Verify that every request includes the correct auth and content headers.
+// The Omni API requires Bearer token auth and JSON content type.
 func TestDo_SetsHeaders(t *testing.T) {
 	var gotHeaders http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +46,8 @@ func TestDo_SetsHeaders(t *testing.T) {
 	}
 }
 
+// Verify that the HTTP method (GET, POST, etc.) and URL path are forwarded
+// correctly to the server.
 func TestDo_MethodAndPath(t *testing.T) {
 	tests := []struct {
 		method string
@@ -79,6 +88,7 @@ func TestDo_MethodAndPath(t *testing.T) {
 	}
 }
 
+// Verify that a JSON request body (for POST/PUT/PATCH) arrives intact.
 func TestDo_SendsBody(t *testing.T) {
 	body := []byte(`{"key":"value"}`)
 	var gotBody []byte
@@ -109,6 +119,7 @@ func TestDo_SendsBody(t *testing.T) {
 	}
 }
 
+// GET requests have no body — verify nothing is sent.
 func TestDo_NilBody(t *testing.T) {
 	var gotBody []byte
 
@@ -138,6 +149,9 @@ func TestDo_NilBody(t *testing.T) {
 	}
 }
 
+// If the user's config has a trailing slash on the base URL (like
+// "https://myorg.omni.co/"), we shouldn't end up with a double slash
+// in the final URL ("https://myorg.omni.co//api/v1/models").
 func TestDo_BaseURLTrailingSlash(t *testing.T) {
 	var gotPath string
 

@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+// These test the outputResponse function which is the last step before the
+// user sees output. It routes API responses: errors (4xx/5xx) return a Go
+// error so the CLI exits non-zero, 204 No Content prints "{}", and success
+// responses get pretty-printed.
+
+// A 400+ status should return an error (so the CLI exits with non-zero code).
 func TestOutputResponse_Error(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: 400,
@@ -21,6 +27,7 @@ func TestOutputResponse_Error(t *testing.T) {
 	}
 }
 
+// 204 No Content (e.g. after a successful DELETE) should print "{}" and not error.
 func TestOutputResponse_NoContent(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: 204,

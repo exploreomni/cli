@@ -7,7 +7,9 @@ import (
 	"testing"
 )
 
-// clearEnv unsets all config-related env vars via t.Setenv (auto-restored).
+// clearEnv unsets all Omni env vars so tests start from a clean slate.
+// t.Setenv snapshots the original value and restores it when the test ends,
+// so other tests and the user's shell aren't affected.
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
@@ -22,7 +24,8 @@ func clearEnv(t *testing.T) {
 	}
 }
 
-// writeConfig writes a config file to a temp dir and sets OMNI_CONFIG_PATH.
+// writeConfig saves a config file to a temp directory and points
+// OMNI_CONFIG_PATH at it, so the test uses this file instead of ~/.config/...
 func writeConfig(t *testing.T, cfg *Config) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -34,7 +37,15 @@ func writeConfig(t *testing.T, cfg *Config) string {
 }
 
 // --- Config resolution precedence ---
+//
+// The CLI resolves config from three sources with this priority:
+//   1. Command-line flags (--token, --base-url, --org) — highest priority
+//   2. Environment variables (OMNI_API_TOKEN, OMNI_BASE_URL, etc.)
+//   3. Config file (~/.config/omni-cli/config.json) — lowest priority
+//
+// These tests verify that higher-priority sources override lower ones.
 
+// All three sources set different values. Flags should win.
 func TestResolve_FlagsOverrideAll(t *testing.T) {
 	clearEnv(t)
 
@@ -73,6 +84,8 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	}
 }
 
+// Config file has values, env vars have different values, no flags.
+// Env vars should win over the file.
 func TestResolve_EnvOverridesFile(t *testing.T) {
 	clearEnv(t)
 
@@ -108,6 +121,9 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	}
 }
 
+// The CLI supports two env vars for the API token: OMNI_API_TOKEN (preferred)
+// and OMNI_API_KEY (fallback for backwards compat). This test verifies the
+// fallback works, and that OMNI_API_TOKEN takes priority when both are set.
 func TestResolve_APIKeyFallback(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
@@ -135,6 +151,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 	}
 }
 
+// No flags, no env vars — config file values should be used as-is.
 func TestResolve_FileValues(t *testing.T) {
 	clearEnv(t)
 
@@ -166,6 +183,9 @@ func TestResolve_FileValues(t *testing.T) {
 	}
 }
 
+// When the user doesn't pass --profile, the config's DefaultProfile field
+// determines which profile to use. This test has two profiles and verifies
+// the default is selected automatically.
 func TestResolve_DefaultProfile(t *testing.T) {
 	clearEnv(t)
 
@@ -203,6 +223,8 @@ func TestResolve_DefaultProfile(t *testing.T) {
 	}
 }
 
+// If no token is configured anywhere, Resolve should return a helpful error
+// telling the user how to set one up.
 func TestResolve_MissingToken(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
@@ -216,6 +238,7 @@ func TestResolve_MissingToken(t *testing.T) {
 	}
 }
 
+// Token is set but no base URL — should also error. Both are required.
 func TestResolve_MissingBaseURL(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
@@ -233,6 +256,10 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 }
 
 // --- Config path ---
+//
+// ConfigPath() determines where the config file lives on disk.
+// It defaults to ~/.config/omni-cli/config.json but can be overridden
+// via OMNI_CONFIG_PATH for testing or non-standard setups.
 
 func TestConfigPath_EnvOverride(t *testing.T) {
 	clearEnv(t)
@@ -255,7 +282,11 @@ func TestConfigPath_Default(t *testing.T) {
 }
 
 // --- Load/Save ---
+//
+// These test the JSON serialization of the config file. Save writes it,
+// Load reads it back. A round-trip test ensures no data is lost.
 
+// Write a config with multiple profiles, read it back, verify every field matches.
 func TestLoadSaveRoundTrip(t *testing.T) {
 	clearEnv(t)
 	path := filepath.Join(t.TempDir(), "config.json")
@@ -323,6 +354,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 }
 
+// Loading from a path that doesn't exist should return an error (not panic).
 func TestLoad_MissingFile(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "nonexistent", "config.json"))

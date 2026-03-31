@@ -9,13 +9,19 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
-
 )
 
 // ---------------------------------------------------------------------------
 // Helper unit tests
+//
+// These test the small string-manipulation functions that turn OpenAPI
+// identifiers into CLI-friendly names. For example, the API operation
+// "ModelsList" needs to become the CLI command "models list".
 // ---------------------------------------------------------------------------
 
+// slugify lowercases a string and replaces spaces/underscores with hyphens.
+// It's used to turn API tag names like "User Attributes" into command group
+// names like "user-attributes".
 func TestSlugify(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"User Attributes", "user-attributes"},
@@ -30,6 +36,8 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+// camelToKebab converts operationIds like "aiJobStatus" into kebab-case
+// "ai-job-status" for use as CLI subcommand names.
 func TestCamelToKebab(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"ModelsList", "models-list"},
@@ -44,6 +52,8 @@ func TestCamelToKebab(t *testing.T) {
 	}
 }
 
+// boolVal safely dereferences a *bool pointer — the OpenAPI spec uses
+// pointer bools for fields like "required" and "deprecated" that may be absent.
 func TestBoolVal(t *testing.T) {
 	tr, fa := true, false
 	cases := []struct {
@@ -61,8 +71,13 @@ func TestBoolVal(t *testing.T) {
 	}
 }
 
+// commandName derives the CLI subcommand name from an API operation. It strips
+// the tag prefix from the operationId so that e.g. "ModelsList" under the
+// "Models" tag becomes just "list" (the user types "omni models list").
+// When there's no operationId, it falls back to "method-resource".
 func TestCommandName(t *testing.T) {
-	// With operationID that has tag prefix → strip it
+	// With operationID that has tag prefix → strip it.
+	// "ModelsList" under tag "Models" → kebab "models-list" → strip "models-" → "list"
 	op := &operationInfo{
 		Tag:         "Models",
 		OperationID: "ModelsList",
@@ -73,7 +88,7 @@ func TestCommandName(t *testing.T) {
 		t.Errorf("commandName (with tag prefix) = %q, want %q", got, "list")
 	}
 
-	// Without operationID → method+path fallback
+	// Without operationID → falls back to "method-lastPathSegment"
 	op2 := &operationInfo{
 		Tag:    "misc",
 		Method: "GET",
@@ -83,7 +98,8 @@ func TestCommandName(t *testing.T) {
 		t.Errorf("commandName (no operationID) = %q, want %q", got, "get-widgets")
 	}
 
-	// Path ending in {param} → uses second-to-last segment
+	// Path ending in {param} → skips the param placeholder and uses the
+	// resource name before it, e.g. DELETE /widgets/{widgetId} → "delete-widgets"
 	op3 := &operationInfo{
 		Tag:    "misc",
 		Method: "DELETE",
@@ -94,6 +110,8 @@ func TestCommandName(t *testing.T) {
 	}
 }
 
+// deprecatedMsg returns a message string for deprecated operations (shown by
+// cobra when --help is used) or empty string for non-deprecated ones.
 func TestDeprecatedMsg(t *testing.T) {
 	if msg := deprecatedMsg(&operationInfo{Deprecated: true}); msg == "" {
 		t.Error("deprecatedMsg(true) should return a non-empty string")
@@ -105,8 +123,14 @@ func TestDeprecatedMsg(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Command generation from real spec
+//
+// These tests load the actual api/openapi.json file (the same spec that gets
+// embedded into the CLI binary) and verify that GenerateCommands produces
+// the expected command tree structure.
 // ---------------------------------------------------------------------------
 
+// loadSpec reads the real OpenAPI spec from disk. Tests that use this verify
+// the CLI will work with the actual spec, not just a synthetic test fixture.
 func loadSpec(t *testing.T) []byte {
 	t.Helper()
 	data, err := os.ReadFile("../../api/openapi.json")
@@ -116,9 +140,15 @@ func loadSpec(t *testing.T) []byte {
 	return data
 }
 
+// TestGenerateCommandsFromSpec is a smoke test: feed the real OpenAPI spec
+// into GenerateCommands and verify it produces a non-empty command tree.
+// Each API tag (like "Models", "Documents", "AI") becomes a parent command,
+// and each operation under that tag becomes a subcommand.
 func TestGenerateCommandsFromSpec(t *testing.T) {
 	specData := loadSpec(t)
 
+	// The executor is never actually called here — we're just checking that
+	// the spec parses and produces commands, not executing them.
 	noop := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands(specData, noop)
 	if err != nil {
@@ -128,6 +158,7 @@ func TestGenerateCommandsFromSpec(t *testing.T) {
 		t.Fatal("expected at least one tag group command")
 	}
 
+	// Count all subcommands (individual API operations) across all tags.
 	total := 0
 	for _, c := range cmds {
 		total += len(c.Commands())
@@ -140,8 +171,20 @@ func TestGenerateCommandsFromSpec(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Command behavior tests
+//
+// These use buildCommand directly with hand-crafted operationInfo structs
+// (not the real spec) to test specific behaviors: path parameter substitution,
+// query flag handling, body passing, and argument validation.
+//
+// The pattern: we pass a "recording" executor that saves the APIRequest it
+// receives, then inspect that captured request to verify the command wired
+// things up correctly.
 // ---------------------------------------------------------------------------
 
+// Verify that path parameters (like {orgId} and {widgetId} in the URL) are
+// replaced with the positional arguments the user passes on the command line.
+// e.g. "omni models get-view myModel myView" should produce the API path
+// "/api/v1/models/myModel/view/myView".
 func TestBuildCommand_PathParams(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
@@ -171,6 +214,10 @@ func TestBuildCommand_PathParams(t *testing.T) {
 	}
 }
 
+// Verify that query parameters defined in the spec become CLI flags, and
+// their values get appended to the URL as a query string.
+// e.g. "omni content list --page-size 50 --cursor abc" should produce
+// "?cursor=abc&page_size=50" on the API path.
 func TestBuildCommand_QueryFlags(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
@@ -200,6 +247,8 @@ func TestBuildCommand_QueryFlags(t *testing.T) {
 	}
 }
 
+// Verify that operations with a request body (POST/PUT/PATCH) get a --body
+// flag, and the JSON value passed to it ends up in APIRequest.Body.
 func TestBuildCommand_BodyFlag(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
@@ -223,6 +272,9 @@ func TestBuildCommand_BodyFlag(t *testing.T) {
 	}
 }
 
+// Verify that cobra rejects commands when the user provides the wrong number
+// of positional arguments. If an endpoint requires a {widgetId} path param,
+// the user must provide exactly 1 arg.
 func TestBuildCommand_WrongArgCount(t *testing.T) {
 	exec := func(req APIRequest) error { return nil }
 
@@ -248,9 +300,25 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Spec coverage reporter
+//
+// This is the centerpiece test. It answers: "does every API endpoint in our
+// OpenAPI spec actually produce a working CLI command?"
+//
+// How it works:
+//   1. Parse the OpenAPI spec ourselves to get a list of ALL operations
+//      (e.g. GET /api/v1/models, POST /api/v1/documents, etc.)
+//   2. Run GenerateCommands (the same code path the real CLI uses)
+//   3. For every generated subcommand, invoke it with dummy arguments and
+//      a no-op executor (no real HTTP calls)
+//   4. Track which operations executed successfully
+//   5. Print a per-tag coverage table and fail if anything is missing
+//
+// If someone adds a new endpoint to the OpenAPI spec and the code generator
+// can't handle it (e.g. a new parameter type), this test will catch it.
 // ---------------------------------------------------------------------------
 
-// specOperation holds parsed data about one operation from the spec.
+// specOperation holds data we parse from the spec independently of the
+// command generator, so we can cross-reference what the generator produced.
 type specOperation struct {
 	Tag         string
 	OperationID string
@@ -260,6 +328,9 @@ type specOperation struct {
 	HasBody     bool
 }
 
+// parseSpecOperations reads the OpenAPI spec directly (bypassing our generator)
+// to get the ground-truth list of every API operation. We use this to verify
+// that GenerateCommands didn't silently drop any endpoints.
 func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 	t.Helper()
 
@@ -322,7 +393,10 @@ func TestSpecCoverage(t *testing.T) {
 	specData := loadSpec(t)
 	specOps := parseSpecOperations(t, specData)
 
-	// Build mapping: "tag-slug/cmd-name" → specOperation
+	// Build a lookup table so we can match each generated cobra subcommand
+	// back to the spec operation it came from. The key is "tag-slug/cmd-name",
+	// e.g. "models/list" or "ai/generate-query". We compute this by running
+	// the same commandName() and slugify() functions the generator uses.
 	keyToOp := map[string]specOperation{}
 	for _, sop := range specOps {
 		info := &operationInfo{
@@ -337,7 +411,9 @@ func TestSpecCoverage(t *testing.T) {
 		keyToOp[key] = sop
 	}
 
-	// Generate commands with a no-op executor that records calls
+	// Generate all CLI commands from the spec, just like the real binary does
+	// at startup. The executor is a no-op — we're testing command generation
+	// and argument wiring, not HTTP requests.
 	called := map[string]bool{}
 	exec := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands(specData, exec)
@@ -345,7 +421,10 @@ func TestSpecCoverage(t *testing.T) {
 		t.Fatalf("GenerateCommands: %v", err)
 	}
 
-	// Walk command tree and execute each subcommand
+	// Walk the generated command tree and try to execute every subcommand.
+	// For each one, we supply dummy positional args ("test-id" for each path
+	// parameter) and an empty JSON body where needed. If RunE succeeds, the
+	// operation is marked as covered.
 	var failures []string
 	for _, tagCmd := range cmds {
 		for _, sub := range tagCmd.Commands() {
@@ -356,13 +435,15 @@ func TestSpecCoverage(t *testing.T) {
 				continue
 			}
 
-			// Build dummy args for path params
+			// Build dummy positional args — one per path parameter.
+			// e.g. "omni models get-view <modelId> <viewName>" needs 2 args.
 			args := make([]string, len(sop.PathParams))
 			for i := range args {
 				args[i] = "test-id"
 			}
 
-			// Set body flag if needed
+			// Operations with a request body (POST/PUT/PATCH) need --body set,
+			// otherwise the command would try to read from stdin.
 			if sop.HasBody {
 				if err := sub.Flags().Set("body", "{}"); err != nil {
 					failures = append(failures, fmt.Sprintf("%s: set body flag: %v", key, err))
@@ -370,7 +451,6 @@ func TestSpecCoverage(t *testing.T) {
 				}
 			}
 
-			// Execute via RunE
 			if sub.RunE == nil {
 				failures = append(failures, fmt.Sprintf("%s: no RunE", key))
 				continue
@@ -383,7 +463,8 @@ func TestSpecCoverage(t *testing.T) {
 		}
 	}
 
-	// Build coverage report by tag
+	// Build and print the coverage report. This is the output you see when
+	// running "go test -v -run TestSpecCoverage ./internal/openapi/"
 	type tagStats struct {
 		covered int
 		total   int
