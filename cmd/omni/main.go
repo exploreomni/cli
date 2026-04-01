@@ -17,9 +17,6 @@ var specFS embed.FS
 var version = "dev"
 
 func main() {
-	// Migrate config from legacy os.UserConfigDir() path to XDG-style ~/.config/
-	config.MigrateConfig()
-
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
