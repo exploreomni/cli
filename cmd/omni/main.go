@@ -36,6 +36,9 @@ func main() {
 				return nil
 			}
 			// Skip auth for help/version
+			if cmd.Name() == "agent-help" {
+				return nil
+			}
 			if cmd.Name() == "help" || cmd.Name() == "version" {
 				return nil
 			}
@@ -50,8 +53,9 @@ func main() {
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
 
 
-	// Config commands (hand-written, not from spec)
+	// Hand-written commands (not from spec)
 	addConfigCommands(root)
+	addAgentHelpCommand(root)
 
 	// Load OpenAPI spec and generate API commands
 	specData, err := specFS.ReadFile("openapi.json")

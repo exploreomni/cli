@@ -9,9 +9,10 @@ The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup
 ## Project Structure
 
 ```
-cmd/omni/                  # Entry point + config commands
+cmd/omni/                  # Entry point + hand-written commands
   main.go                  # Root cobra command, spec loading, global flags
   config_commands.go       # config init/show/use (hand-written)
+  agent_help.go            # omni agent-help (agent-oriented usage guide)
   output.go                # Response formatting
   openapi.json             # Embedded copy of spec (copied by Makefile)
 internal/
