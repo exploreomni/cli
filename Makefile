@@ -16,7 +16,10 @@ clean:
 test:
 	go test ./...
 
-# Update the OpenAPI spec from the monorepo
+# Update the OpenAPI spec from an external source
 sync-spec:
-	cp ~/src/omni/omni/packages/bi-app/app/types/api/openapi/openapi.json api/openapi.json
+ifndef OMNI_OPENAPI_SPEC
+	$(error OMNI_OPENAPI_SPEC is not set — point it at the path to your openapi.json)
+endif
+	cp $(OMNI_OPENAPI_SPEC) api/openapi.json
 	cp api/openapi.json cmd/omni/openapi.json
