@@ -9,6 +9,7 @@ import (
 
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func addConfigCommands(root *cobra.Command) {
@@ -51,8 +52,12 @@ func configInitCmd() *cobra.Command {
 			orgShortID = strings.TrimSpace(orgShortID)
 
 			fmt.Print("API key: ")
-			apiKey, _ := reader.ReadString('\n')
-			apiKey = strings.TrimSpace(apiKey)
+			apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println() // newline after hidden input
+			if err != nil {
+				return fmt.Errorf("reading API key: %w", err)
+			}
+			apiKey := strings.TrimSpace(string(apiKeyBytes))
 
 			cfg, err := config.Load()
 			if err != nil {
@@ -97,8 +102,10 @@ func configShowCmd() *cobra.Command {
 			// Redact API keys for display
 			display := *cfg
 			for name, p := range display.Profiles {
-				if p.APIKey != "" {
+				if len(p.APIKey) >= 12 {
 					p.APIKey = p.APIKey[:4] + "..." + p.APIKey[len(p.APIKey)-4:]
+				} else if p.APIKey != "" {
+					p.APIKey = "****"
 				}
 				display.Profiles[name] = p
 			}
