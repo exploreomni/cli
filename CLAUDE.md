@@ -46,6 +46,13 @@ API token is resolved with this precedence (highest wins):
 3. `OMNI_API_KEY` env var
 4. Profile's `apiKey` from config file
 
+Base URL is resolved with this precedence (highest wins):
+1. `--base-url` flag
+2. `OMNI_BASE_URL` env var
+3. Profile's `apiEndpoint` from config file
+
+The CLI refuses to send tokens over non-HTTPS or to unrecognized domains. Set `OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1` to bypass (e.g., local dev).
+
 Config directory is resolved as: `OMNI_CONFIG_DIR` > `XDG_CONFIG_HOME/omni-cli` > `~/.config/omni-cli` (macOS/Linux) or `%AppData%/omni-cli` (Windows). The config file is `config.json` within that directory. Override the full path with `OMNI_CONFIG_PATH`.
 
 ## Output
