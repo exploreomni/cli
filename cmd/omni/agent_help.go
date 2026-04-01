@@ -29,6 +29,10 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   omni query run --body '{"modelId":"MODEL_ID","query":{"fields":["view_name/field_name"],"limit":100}}'
 
 ### List dashboards
+  omni content list --compact
+  # Returns all content (dashboards, workbooks, folders). Dashboards have "hasDashboard": true.
+
+### Download a dashboard
   omni dashboards download <dashboard-id>
 
 ### Search Omni documentation
@@ -48,6 +52,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   scim          SCIM user/group provisioning
   schedules     Manage delivery schedules
   uploads       Upload and manage CSV files
+  unstable      Unstable/preview commands (document import/export)
   user-attributes  User attribute definitions
   users         User and group role management
   config        CLI configuration profiles
@@ -61,8 +66,8 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 
 ## Tips
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
-- Path parameters are positional args: omni models get <model-id>
-- Query parameters are flags: omni models list --page-size 10
+- Path parameters are positional args: omni dashboards download <dashboard-id>
+- Query parameters are flags: omni models list --pagesize 10
 - Run "omni <group> --help" to see all commands in a group.
 - Run "omni <group> <command> --help" to see flags for a specific command.
 `
