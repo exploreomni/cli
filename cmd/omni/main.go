@@ -39,7 +39,7 @@ func main() {
 	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
 	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
-	root.PersistentFlags().Bool("insecure", false, "allow non-HTTPS base URLs (dangerous: sends API token in plaintext)")
+
 
 	// Config commands (hand-written, not from spec)
 	addConfigCommands(root)
@@ -88,7 +88,6 @@ func resolveConfig(cmd *cobra.Command) (*config.ResolvedConfig, error) {
 	profileName, _ := cmd.Flags().GetString("profile")
 	tokenFlag, _ := cmd.Flags().GetString("token")
 	baseURLFlag, _ := cmd.Flags().GetString("base-url")
-	insecure, _ := cmd.Flags().GetBool("insecure")
 
-	return config.Resolve(profileName, tokenFlag, baseURLFlag, insecure)
+	return config.Resolve(profileName, tokenFlag, baseURLFlag)
 }

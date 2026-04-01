@@ -33,7 +33,7 @@ type ResolvedConfig struct {
 }
 
 // Resolve builds the runtime config with precedence: flags > env > config file.
-func Resolve(profileName, tokenFlag, baseURLFlag string, insecure bool) (*ResolvedConfig, error) {
+func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
 
 	// Start from config file
@@ -77,12 +77,13 @@ func Resolve(profileName, tokenFlag, baseURLFlag string, insecure bool) (*Resolv
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
 	}
+	insecure := os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != ""
 	if !insecure {
 		if !strings.HasPrefix(rc.BaseURL, "https://") {
-			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Use --insecure to override", rc.BaseURL)
+			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
 		}
 		if !isAllowedHost(rc.BaseURL) {
-			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Use --insecure to override", rc.BaseURL)
+			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
 		}
 	}
 

@@ -19,6 +19,7 @@ func clearEnv(t *testing.T) {
 		"OMNI_BASE_URL",
 		"OMNI_CONFIG_PATH",
 		"OMNI_CONFIG_DIR",
+		"OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS",
 		"XDG_CONFIG_HOME",
 	} {
 		t.Setenv(key, "")
@@ -68,7 +69,7 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
 
 	// Pass flags that should win
-	rc, err := Resolve("", "flag-token", "https://flag.omniapp.co", false)
+	rc, err := Resolve("", "flag-token", "https://flag.omniapp.co")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	t.Setenv("OMNI_API_TOKEN", "env-token")
 	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
 
-	rc, err := Resolve("", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 	t.Setenv("OMNI_API_KEY", "apikey-token")
 	t.Setenv("OMNI_BASE_URL", "https://test.omniapp.co")
 
-	rc, err := Resolve("", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +135,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 
 	// Now also set OMNI_API_TOKEN — it should take precedence
 	t.Setenv("OMNI_API_TOKEN", "token-wins")
-	rc, err = Resolve("", "", "", false)
+	rc, err = Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestResolve_FileValues(t *testing.T) {
 		},
 	})
 
-	rc, err := Resolve("", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestResolve_DefaultProfile(t *testing.T) {
 	})
 
 	// No profileName arg — should use DefaultProfile ("second")
-	rc, err := Resolve("", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,7 +213,7 @@ func TestResolve_MissingToken(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
-	_, err := Resolve("", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -229,7 +230,7 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 	// Token set, but no base URL
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 
-	_, err := Resolve("", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -241,7 +242,7 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 // --- Security: HTTPS and domain allowlist ---
 //
 // The CLI refuses to send API tokens over non-HTTPS connections or to
-// unrecognized domains, unless --insecure is explicitly set.
+// unrecognized domains, unless OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS is set.
 
 func TestResolve_RejectsHTTP(t *testing.T) {
 	clearEnv(t)
@@ -249,7 +250,7 @@ func TestResolve_RejectsHTTP(t *testing.T) {
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "http://myorg.omniapp.co")
 
-	_, err := Resolve("", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error for HTTP base URL, got nil")
 	}
@@ -264,7 +265,7 @@ func TestResolve_RejectsUnknownDomain(t *testing.T) {
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "https://evil.com")
 
-	_, err := Resolve("", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error for unrecognized domain, got nil")
 	}
@@ -273,15 +274,16 @@ func TestResolve_RejectsUnknownDomain(t *testing.T) {
 	}
 }
 
-func TestResolve_InsecureBypassesChecks(t *testing.T) {
+func TestResolve_InsecureEnvBypassesChecks(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "http://localhost:3000")
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
 
-	rc, err := Resolve("", "", "", true)
+	rc, err := Resolve("", "", "")
 	if err != nil {
-		t.Fatalf("expected --insecure to bypass checks, got: %v", err)
+		t.Fatalf("expected insecure env var to bypass checks, got: %v", err)
 	}
 	if rc.BaseURL != "http://localhost:3000" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "http://localhost:3000")
