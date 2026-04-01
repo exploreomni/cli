@@ -16,10 +16,10 @@ func clearEnv(t *testing.T) {
 	for _, key := range []string{
 		"OMNI_API_TOKEN",
 		"OMNI_API_KEY",
-		"OMNI_ORG_ID",
 		"OMNI_BASE_URL",
 		"OMNI_CONFIG_PATH",
 		"OMNI_CONFIG_DIR",
+		"OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS",
 		"XDG_CONFIG_HOME",
 	} {
 		t.Setenv(key, "")
@@ -42,7 +42,7 @@ func writeConfig(t *testing.T, cfg *Config) string {
 // --- Config resolution precedence ---
 //
 // The CLI resolves config from three sources with this priority:
-//   1. Command-line flags (--token, --base-url, --org) — highest priority
+//   1. Command-line flags (--token, --base-url) — highest priority
 //   2. Environment variables (OMNI_API_TOKEN, OMNI_BASE_URL, etc.)
 //   3. Config file (~/.config/omni-cli/config.json) — lowest priority
 //
@@ -58,9 +58,8 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 		DefaultProfile: "test",
 		Profiles: map[string]Profile{
 			"test": {
-				APIKey:         "file-token",
-				APIEndpoint:    "https://file.omniapp.co",
-				OrganizationID: "file-org",
+				APIKey:      "file-token",
+				APIEndpoint: "https://file.omniapp.co",
 			},
 		},
 	})
@@ -68,10 +67,9 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	// Set env vars with different values
 	t.Setenv("OMNI_API_TOKEN", "env-token")
 	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
-	t.Setenv("OMNI_ORG_ID", "env-org")
 
 	// Pass flags that should win
-	rc, err := Resolve("", "flag-token", "flag-org", "https://flag.omniapp.co", false)
+	rc, err := Resolve("", "flag-token", "https://flag.omniapp.co")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,9 +79,6 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	}
 	if rc.BaseURL != "https://flag.omniapp.co" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://flag.omniapp.co")
-	}
-	if rc.OrgID != "flag-org" {
-		t.Errorf("OrgID = %q, want %q", rc.OrgID, "flag-org")
 	}
 }
 
@@ -97,18 +92,16 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 		DefaultProfile: "test",
 		Profiles: map[string]Profile{
 			"test": {
-				APIKey:         "file-token",
-				APIEndpoint:    "https://file.omniapp.co",
-				OrganizationID: "file-org",
+				APIKey:      "file-token",
+				APIEndpoint: "https://file.omniapp.co",
 			},
 		},
 	})
 
 	t.Setenv("OMNI_API_TOKEN", "env-token")
 	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
-	t.Setenv("OMNI_ORG_ID", "env-org")
 
-	rc, err := Resolve("", "", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,9 +111,6 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	}
 	if rc.BaseURL != "https://env.omniapp.co" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://env.omniapp.co")
-	}
-	if rc.OrgID != "env-org" {
-		t.Errorf("OrgID = %q, want %q", rc.OrgID, "env-org")
 	}
 }
 
@@ -135,7 +125,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 	t.Setenv("OMNI_API_KEY", "apikey-token")
 	t.Setenv("OMNI_BASE_URL", "https://test.omniapp.co")
 
-	rc, err := Resolve("", "", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +135,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 
 	// Now also set OMNI_API_TOKEN — it should take precedence
 	t.Setenv("OMNI_API_TOKEN", "token-wins")
-	rc, err = Resolve("", "", "", "", false)
+	rc, err = Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,14 +153,13 @@ func TestResolve_FileValues(t *testing.T) {
 		DefaultProfile: "prod",
 		Profiles: map[string]Profile{
 			"prod": {
-				APIKey:         "file-token",
-				APIEndpoint:    "https://file.omniapp.co",
-				OrganizationID: "file-org",
+				APIKey:      "file-token",
+				APIEndpoint: "https://file.omniapp.co",
 			},
 		},
 	})
 
-	rc, err := Resolve("", "", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,9 +169,6 @@ func TestResolve_FileValues(t *testing.T) {
 	}
 	if rc.BaseURL != "https://file.omniapp.co" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://file.omniapp.co")
-	}
-	if rc.OrgID != "file-org" {
-		t.Errorf("OrgID = %q, want %q", rc.OrgID, "file-org")
 	}
 }
 
@@ -197,20 +183,18 @@ func TestResolve_DefaultProfile(t *testing.T) {
 		DefaultProfile: "second",
 		Profiles: map[string]Profile{
 			"first": {
-				APIKey:         "first-token",
-				APIEndpoint:    "https://first.test.omniapp.co",
-				OrganizationID: "first-org",
+				APIKey:      "first-token",
+				APIEndpoint: "https://first.test.omniapp.co",
 			},
 			"second": {
-				APIKey:         "second-token",
-				APIEndpoint:    "https://second.test.omniapp.co",
-				OrganizationID: "second-org",
+				APIKey:      "second-token",
+				APIEndpoint: "https://second.test.omniapp.co",
 			},
 		},
 	})
 
 	// No profileName arg — should use DefaultProfile ("second")
-	rc, err := Resolve("", "", "", "", false)
+	rc, err := Resolve("", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,9 +205,6 @@ func TestResolve_DefaultProfile(t *testing.T) {
 	if rc.BaseURL != "https://second.test.omniapp.co" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://second.test.omniapp.co")
 	}
-	if rc.OrgID != "second-org" {
-		t.Errorf("OrgID = %q, want %q", rc.OrgID, "second-org")
-	}
 }
 
 // If no token is configured anywhere, Resolve should return a helpful error
@@ -232,7 +213,7 @@ func TestResolve_MissingToken(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
-	_, err := Resolve("", "", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -249,7 +230,7 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 	// Token set, but no base URL
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 
-	_, err := Resolve("", "", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -261,7 +242,7 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 // --- Security: HTTPS and domain allowlist ---
 //
 // The CLI refuses to send API tokens over non-HTTPS connections or to
-// unrecognized domains, unless --insecure is explicitly set.
+// unrecognized domains, unless OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS is set.
 
 func TestResolve_RejectsHTTP(t *testing.T) {
 	clearEnv(t)
@@ -269,7 +250,7 @@ func TestResolve_RejectsHTTP(t *testing.T) {
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "http://myorg.omniapp.co")
 
-	_, err := Resolve("", "", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error for HTTP base URL, got nil")
 	}
@@ -284,7 +265,7 @@ func TestResolve_RejectsUnknownDomain(t *testing.T) {
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "https://evil.com")
 
-	_, err := Resolve("", "", "", "", false)
+	_, err := Resolve("", "", "")
 	if err == nil {
 		t.Fatal("expected error for unrecognized domain, got nil")
 	}
@@ -293,15 +274,16 @@ func TestResolve_RejectsUnknownDomain(t *testing.T) {
 	}
 }
 
-func TestResolve_InsecureBypassesChecks(t *testing.T) {
+func TestResolve_InsecureEnvBypassesChecks(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 	t.Setenv("OMNI_BASE_URL", "http://localhost:3000")
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
 
-	rc, err := Resolve("", "", "", "", true)
+	rc, err := Resolve("", "", "")
 	if err != nil {
-		t.Fatalf("expected --insecure to bypass checks, got: %v", err)
+		t.Fatalf("expected insecure env var to bypass checks, got: %v", err)
 	}
 	if rc.BaseURL != "http://localhost:3000" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "http://localhost:3000")
@@ -413,50 +395,6 @@ func TestConfigDir_OMNI_CONFIG_DIR_OverridesXDG(t *testing.T) {
 	}
 }
 
-func TestMigrateConfig(t *testing.T) {
-	clearEnv(t)
-
-	// Set up a "new" config dir that doesn't have a config yet
-	newDir := filepath.Join(t.TempDir(), "new")
-	t.Setenv("OMNI_CONFIG_DIR", newDir)
-
-	// Write a config at the legacy os.UserConfigDir() location
-	legacyDir, err := os.UserConfigDir()
-	if err != nil {
-		t.Skip("os.UserConfigDir() not available")
-	}
-	// Use a temp dir to simulate the legacy path without touching real config
-	tmpLegacy := t.TempDir()
-	legacyPath := filepath.Join(tmpLegacy, "omni-cli", "config.json")
-	os.MkdirAll(filepath.Dir(legacyPath), 0o700)
-	testData := []byte(`{"version":1,"profiles":{}}`)
-	os.WriteFile(legacyPath, testData, 0o600)
-
-	// We can't easily override os.UserConfigDir(), so test the migration logic directly:
-	// Verify that if new path doesn't exist and legacy does, the file gets copied.
-	// We'll test via the exported function by temporarily pointing OMNI_CONFIG_PATH.
-	_ = legacyDir // used above for reference
-
-	newPath := filepath.Join(newDir, "config.json")
-
-	// Directly test: new path shouldn't exist yet
-	if _, err := os.Stat(newPath); err == nil {
-		t.Fatal("new config path should not exist yet")
-	}
-
-	// Call MigrateConfig — since OMNI_CONFIG_DIR points to newDir,
-	// and no config exists there, it should try the legacy path.
-	// But os.UserConfigDir() returns the real system path, not our tmpLegacy.
-	// So we test the scenario where new path already exists (no-op).
-	os.MkdirAll(filepath.Dir(newPath), 0o700)
-	os.WriteFile(newPath, testData, 0o600)
-	MigrateConfig() // should be a no-op since new path exists
-	data, _ := os.ReadFile(newPath)
-	if string(data) != string(testData) {
-		t.Error("MigrateConfig modified existing config file")
-	}
-}
-
 // --- Load/Save ---
 //
 // These test the JSON serialization of the config file. Save writes it,
@@ -473,16 +411,13 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		DefaultProfile: "myprofile",
 		Profiles: map[string]Profile{
 			"myprofile": {
-				OrganizationID:      "org-123",
-				OrganizationShortID: "org",
-				APIEndpoint:         "https://api.test.omniapp.co",
-				AuthMethod:          "apiKey",
-				APIKey:              "secret-key",
+				APIEndpoint: "https://api.test.omniapp.co",
+				AuthMethod:  "apiKey",
+				APIKey:      "secret-key",
 			},
 			"other": {
-				OrganizationID: "org-456",
-				APIEndpoint:    "https://other.test.omniapp.co",
-				APIKey:         "other-key",
+				APIEndpoint: "https://other.test.omniapp.co",
+				APIKey:      "other-key",
 			},
 		},
 	}
@@ -511,12 +446,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		if !ok {
 			t.Errorf("profile %q missing after round-trip", name)
 			continue
-		}
-		if got.OrganizationID != orig.OrganizationID {
-			t.Errorf("profile %q OrganizationID = %q, want %q", name, got.OrganizationID, orig.OrganizationID)
-		}
-		if got.OrganizationShortID != orig.OrganizationShortID {
-			t.Errorf("profile %q OrganizationShortID = %q, want %q", name, got.OrganizationShortID, orig.OrganizationShortID)
 		}
 		if got.APIEndpoint != orig.APIEndpoint {
 			t.Errorf("profile %q APIEndpoint = %q, want %q", name, got.APIEndpoint, orig.APIEndpoint)

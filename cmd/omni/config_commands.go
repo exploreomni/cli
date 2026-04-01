@@ -43,14 +43,6 @@ func configInitCmd() *cobra.Command {
 			endpoint, _ := reader.ReadString('\n')
 			endpoint = strings.TrimSpace(endpoint)
 
-			fmt.Print("Organization ID: ")
-			orgID, _ := reader.ReadString('\n')
-			orgID = strings.TrimSpace(orgID)
-
-			fmt.Print("Organization short ID: ")
-			orgShortID, _ := reader.ReadString('\n')
-			orgShortID = strings.TrimSpace(orgShortID)
-
 			fmt.Print("API key: ")
 			apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println() // newline after hidden input
@@ -68,11 +60,9 @@ func configInitCmd() *cobra.Command {
 			}
 
 			cfg.Profiles[name] = config.Profile{
-				OrganizationID:      orgID,
-				OrganizationShortID: orgShortID,
-				APIEndpoint:         endpoint,
-				AuthMethod:          "api-key",
-				APIKey:              apiKey,
+				APIEndpoint: endpoint,
+				AuthMethod:  "api-key",
+				APIKey:      apiKey,
 			}
 
 			if cfg.DefaultProfile == "" {

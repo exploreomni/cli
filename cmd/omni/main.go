@@ -17,9 +17,6 @@ var specFS embed.FS
 var version = "dev"
 
 func main() {
-	// Migrate config from legacy os.UserConfigDir() path to XDG-style ~/.config/
-	config.MigrateConfig()
-
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
@@ -40,10 +37,9 @@ func main() {
 	// Global flags
 	root.PersistentFlags().StringP("profile", "p", "", "config profile to use")
 	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
-	root.PersistentFlags().String("org", "", "organization ID (overrides profile/env)")
 	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
-	root.PersistentFlags().Bool("insecure", false, "allow non-HTTPS base URLs (dangerous: sends API token in plaintext)")
+
 
 	// Config commands (hand-written, not from spec)
 	addConfigCommands(root)
@@ -91,9 +87,7 @@ func executeAPICall(req openapi.APIRequest) error {
 func resolveConfig(cmd *cobra.Command) (*config.ResolvedConfig, error) {
 	profileName, _ := cmd.Flags().GetString("profile")
 	tokenFlag, _ := cmd.Flags().GetString("token")
-	orgFlag, _ := cmd.Flags().GetString("org")
 	baseURLFlag, _ := cmd.Flags().GetString("base-url")
-	insecure, _ := cmd.Flags().GetBool("insecure")
 
-	return config.Resolve(profileName, tokenFlag, orgFlag, baseURLFlag, insecure)
+	return config.Resolve(profileName, tokenFlag, baseURLFlag)
 }

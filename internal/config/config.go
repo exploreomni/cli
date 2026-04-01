@@ -14,11 +14,9 @@ import (
 
 // Profile represents a saved API configuration.
 type Profile struct {
-	OrganizationID      string `json:"organizationId"`
-	OrganizationShortID string `json:"organizationShortId"`
-	APIEndpoint         string `json:"apiEndpoint"`
-	AuthMethod          string `json:"authMethod"`
-	APIKey              string `json:"apiKey,omitempty"`
+	APIEndpoint string `json:"apiEndpoint"`
+	AuthMethod  string `json:"authMethod"`
+	APIKey      string `json:"apiKey,omitempty"`
 }
 
 // Config is the on-disk config file format (compatible with the TS CLI).
@@ -32,11 +30,10 @@ type Config struct {
 type ResolvedConfig struct {
 	Token   string
 	BaseURL string
-	OrgID   string
 }
 
 // Resolve builds the runtime config with precedence: flags > env > config file.
-func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool) (*ResolvedConfig, error) {
+func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
 
 	// Start from config file
@@ -49,7 +46,6 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool)
 		if name != "" {
 			if p, ok := cfg.Profiles[name]; ok {
 				rc.BaseURL = p.APIEndpoint
-				rc.OrgID = p.OrganizationID
 				rc.Token = p.APIKey
 			}
 		}
@@ -62,9 +58,6 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool)
 	if v := os.Getenv("OMNI_API_KEY"); v != "" && rc.Token == "" {
 		rc.Token = v
 	}
-	if v := os.Getenv("OMNI_ORG_ID"); v != "" {
-		rc.OrgID = v
-	}
 	if v := os.Getenv("OMNI_BASE_URL"); v != "" {
 		rc.BaseURL = v
 	}
@@ -72,9 +65,6 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool)
 	// Flags override everything
 	if tokenFlag != "" {
 		rc.Token = tokenFlag
-	}
-	if orgFlag != "" {
-		rc.OrgID = orgFlag
 	}
 	if baseURLFlag != "" {
 		rc.BaseURL = baseURLFlag
@@ -87,12 +77,13 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool)
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
 	}
+	insecure := os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != ""
 	if !insecure {
 		if !strings.HasPrefix(rc.BaseURL, "https://") {
-			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Use --insecure to override", rc.BaseURL)
+			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
 		}
 		if !isAllowedHost(rc.BaseURL) {
-			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Use --insecure to override", rc.BaseURL)
+			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
 		}
 	}
 
@@ -176,27 +167,3 @@ func ConfigPath() string {
 	return filepath.Join(configDir(), "config.json")
 }
 
-// MigrateConfig copies the config from the legacy os.UserConfigDir() location
-// to the new XDG-style path if the new path doesn't exist yet.
-func MigrateConfig() {
-	newPath := ConfigPath()
-	if _, err := os.Stat(newPath); err == nil {
-		return // new location already exists
-	}
-	legacyDir, err := os.UserConfigDir()
-	if err != nil {
-		return
-	}
-	legacyPath := filepath.Join(legacyDir, "omni-cli", "config.json")
-	data, err := os.ReadFile(legacyPath)
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
-		return
-	}
-	if err := os.WriteFile(newPath, data, 0o600); err != nil {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "Migrated config from %s to %s\n", legacyPath, newPath)
-}
