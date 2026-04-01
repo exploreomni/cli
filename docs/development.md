@@ -13,8 +13,6 @@ make test        # Run tests
 make clean       # Remove built binary
 ```
 
-The build copies `api/openapi.json` into `cmd/omni/` and embeds it in the binary. The version defaults to `dev`; override with `VERSION=x.y.z make build`.
-
 ## Updating the OpenAPI Spec
 
 The CLI auto-generates commands from the embedded OpenAPI spec. To update it:
