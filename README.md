@@ -2,36 +2,65 @@
 
 Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI spec at build time — no hand-written endpoint wrappers needed.
 
-## Quick start
+## Installation
 
-### Build
+### Install script (macOS / Linux)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh
+```
+
+This downloads the latest release, verifies the SHA-256 checksum, and installs the `omni` binary to `/usr/local/bin` (or `~/.local/bin` if `/usr/local/bin` isn't writable).
+
+### Download from GitHub Releases
+
+Pre-built binaries for macOS, Linux, and Windows are available on the [Releases page](https://github.com/exploreomni/cli/releases). Download the archive for your platform, extract it, and place the `omni` binary somewhere on your `PATH`.
+
+| Platform | Architectures |
+|----------|---------------|
+| macOS    | amd64, arm64  |
+| Linux    | amd64, arm64  |
+| Windows  | amd64         |
+
+### Build from source
+
+```bash
+git clone https://github.com/exploreomni/cli.git
+cd cli
 make build
 ```
+
+The binary is written to `./bin/omni`.
+
+## Quick start
 
 ### Configure a profile
 
 ```bash
-./bin/omni config init
+omni config init
 ```
 
 This creates a profile with your organization, API endpoint, and API key. You can create multiple profiles for different orgs or environments.
 
-### Set your API key
+### Set your API token
 
-Either enter it during `config init`, or set the environment variable:
+Omni supports two types of API tokens:
+
+- **Organization-wide tokens** — shared tokens scoped to an entire org
+- **Personal access tokens (PATs)** — tokens tied to an individual user
+
+Either enter your token during `config init`, or set the environment variable:
 
 ```bash
-export OMNI_API_KEY=omni_osk_...
+export OMNI_API_TOKEN=omni_osk_...
 ```
 
 ### Run a command
 
 ```bash
-./bin/omni models list
-./bin/omni dashboards list
-./bin/omni --help
+omni models list
+omni dashboards list
+omni --help
 ```
 
 ## How it works
@@ -46,8 +75,7 @@ Auth is resolved with this precedence (highest wins):
 
 1. `--token` flag
 2. `OMNI_API_TOKEN` env var
-3. `OMNI_API_KEY` env var
-4. Profile's `apiKey` from config file
+3. Profile's `apiKey` from config file
 
 Config file lives at `~/.config/omni-cli/config.json`.
 
@@ -59,8 +87,7 @@ All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for n
 
 | Variable | Description |
 |----------|-------------|
-| `OMNI_API_KEY` | API key for authentication |
-| `OMNI_API_TOKEN` | Bearer token (alternative to API key) |
+| `OMNI_API_TOKEN` | API token for authentication |
 
 ## Development
 

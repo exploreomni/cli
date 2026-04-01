@@ -55,9 +55,6 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	if v := os.Getenv("OMNI_API_TOKEN"); v != "" {
 		rc.Token = v
 	}
-	if v := os.Getenv("OMNI_API_KEY"); v != "" && rc.Token == "" {
-		rc.Token = v
-	}
 	if v := os.Getenv("OMNI_BASE_URL"); v != "" {
 		rc.BaseURL = v
 	}

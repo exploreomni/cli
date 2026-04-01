@@ -1,6 +1,9 @@
 # Go binary
 /bin/
 
+# GoReleaser
+/dist/
+
 # Environment & secrets
 .env
 .env.*
@@ -16,3 +19,4 @@ config.json
 # IDE / Settings
 .claude/settings.local.json
 .claude/worktrees
+.claude/plans
