@@ -329,6 +329,15 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+const maxStdinSize = 10 << 20 // 10 MB
+
 func readStdin() ([]byte, error) {
-	return io.ReadAll(os.Stdin)
+	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxStdinSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxStdinSize {
+		return nil, fmt.Errorf("stdin input exceeds maximum size of 10 MB")
+	}
+	return data, nil
 }
