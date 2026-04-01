@@ -258,6 +258,93 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 	}
 }
 
+// --- Security: HTTPS and domain allowlist ---
+//
+// The CLI refuses to send API tokens over non-HTTPS connections or to
+// unrecognized domains, unless --insecure is explicitly set.
+
+func TestResolve_RejectsHTTP(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "http://myorg.omniapp.co")
+
+	_, err := Resolve("", "", "", "", false)
+	if err == nil {
+		t.Fatal("expected error for HTTP base URL, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("error = %q, want it to mention HTTPS", err.Error())
+	}
+}
+
+func TestResolve_RejectsUnknownDomain(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "https://evil.com")
+
+	_, err := Resolve("", "", "", "", false)
+	if err == nil {
+		t.Fatal("expected error for unrecognized domain, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a recognized Omni domain") {
+		t.Errorf("error = %q, want it to mention recognized domain", err.Error())
+	}
+}
+
+func TestResolve_InsecureBypassesChecks(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "http://localhost:3000")
+
+	rc, err := Resolve("", "", "", "", true)
+	if err != nil {
+		t.Fatalf("expected --insecure to bypass checks, got: %v", err)
+	}
+	if rc.BaseURL != "http://localhost:3000" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "http://localhost:3000")
+	}
+}
+
+func TestIsAllowedHost(t *testing.T) {
+	allowed := []string{
+		"https://omniapp.co",
+		"https://myorg.omniapp.co",
+		"https://deep.sub.omniapp.co",
+		"https://exploreomni.dev",
+		"https://myorg.exploreomni.dev",
+		"https://thundersalmon.com",
+		"https://myorg.thundersalmon.com",
+		"https://embed-omniapp.co",
+		"https://myorg.embed-omniapp.co",
+		"https://embed-exploreomni.dev",
+		"https://myorg.embed-exploreomni.dev",
+		"https://embed-thundersalmon.com",
+		"https://myorg.embed-thundersalmon.com",
+	}
+	for _, u := range allowed {
+		if !isAllowedHost(u) {
+			t.Errorf("isAllowedHost(%q) = false, want true", u)
+		}
+	}
+
+	blocked := []string{
+		"https://evil.com",
+		"https://omniapp.co.evil.com",
+		"https://notomniapp.co",
+		"https://localhost",
+		"https://169.254.169.254",
+		"https://evil.com/path?host=omniapp.co",
+	}
+	for _, u := range blocked {
+		if isAllowedHost(u) {
+			t.Errorf("isAllowedHost(%q) = true, want false", u)
+		}
+	}
+}
+
 // --- Config path ---
 //
 // ConfigPath() determines where the config file lives on disk.
