@@ -59,7 +59,7 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 		Profiles: map[string]Profile{
 			"test": {
 				APIKey:         "file-token",
-				APIEndpoint:    "https://file.example.com",
+				APIEndpoint:    "https://file.omniapp.co",
 				OrganizationID: "file-org",
 			},
 		},
@@ -67,11 +67,11 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 
 	// Set env vars with different values
 	t.Setenv("OMNI_API_TOKEN", "env-token")
-	t.Setenv("OMNI_BASE_URL", "https://env.example.com")
+	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
 	t.Setenv("OMNI_ORG_ID", "env-org")
 
 	// Pass flags that should win
-	rc, err := Resolve("", "flag-token", "flag-org", "https://flag.example.com")
+	rc, err := Resolve("", "flag-token", "flag-org", "https://flag.omniapp.co", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	if rc.Token != "flag-token" {
 		t.Errorf("Token = %q, want %q", rc.Token, "flag-token")
 	}
-	if rc.BaseURL != "https://flag.example.com" {
-		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://flag.example.com")
+	if rc.BaseURL != "https://flag.omniapp.co" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://flag.omniapp.co")
 	}
 	if rc.OrgID != "flag-org" {
 		t.Errorf("OrgID = %q, want %q", rc.OrgID, "flag-org")
@@ -98,17 +98,17 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 		Profiles: map[string]Profile{
 			"test": {
 				APIKey:         "file-token",
-				APIEndpoint:    "https://file.example.com",
+				APIEndpoint:    "https://file.omniapp.co",
 				OrganizationID: "file-org",
 			},
 		},
 	})
 
 	t.Setenv("OMNI_API_TOKEN", "env-token")
-	t.Setenv("OMNI_BASE_URL", "https://env.example.com")
+	t.Setenv("OMNI_BASE_URL", "https://env.omniapp.co")
 	t.Setenv("OMNI_ORG_ID", "env-org")
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,8 +116,8 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	if rc.Token != "env-token" {
 		t.Errorf("Token = %q, want %q", rc.Token, "env-token")
 	}
-	if rc.BaseURL != "https://env.example.com" {
-		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://env.example.com")
+	if rc.BaseURL != "https://env.omniapp.co" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://env.omniapp.co")
 	}
 	if rc.OrgID != "env-org" {
 		t.Errorf("OrgID = %q, want %q", rc.OrgID, "env-org")
@@ -133,9 +133,9 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 
 	// Only OMNI_API_KEY set (no OMNI_API_TOKEN)
 	t.Setenv("OMNI_API_KEY", "apikey-token")
-	t.Setenv("OMNI_BASE_URL", "https://example.com")
+	t.Setenv("OMNI_BASE_URL", "https://test.omniapp.co")
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 
 	// Now also set OMNI_API_TOKEN — it should take precedence
 	t.Setenv("OMNI_API_TOKEN", "token-wins")
-	rc, err = Resolve("", "", "", "")
+	rc, err = Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,13 +164,13 @@ func TestResolve_FileValues(t *testing.T) {
 		Profiles: map[string]Profile{
 			"prod": {
 				APIKey:         "file-token",
-				APIEndpoint:    "https://file.example.com",
+				APIEndpoint:    "https://file.omniapp.co",
 				OrganizationID: "file-org",
 			},
 		},
 	})
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,8 +178,8 @@ func TestResolve_FileValues(t *testing.T) {
 	if rc.Token != "file-token" {
 		t.Errorf("Token = %q, want %q", rc.Token, "file-token")
 	}
-	if rc.BaseURL != "https://file.example.com" {
-		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://file.example.com")
+	if rc.BaseURL != "https://file.omniapp.co" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://file.omniapp.co")
 	}
 	if rc.OrgID != "file-org" {
 		t.Errorf("OrgID = %q, want %q", rc.OrgID, "file-org")
@@ -198,19 +198,19 @@ func TestResolve_DefaultProfile(t *testing.T) {
 		Profiles: map[string]Profile{
 			"first": {
 				APIKey:         "first-token",
-				APIEndpoint:    "https://first.example.com",
+				APIEndpoint:    "https://first.test.omniapp.co",
 				OrganizationID: "first-org",
 			},
 			"second": {
 				APIKey:         "second-token",
-				APIEndpoint:    "https://second.example.com",
+				APIEndpoint:    "https://second.test.omniapp.co",
 				OrganizationID: "second-org",
 			},
 		},
 	})
 
 	// No profileName arg — should use DefaultProfile ("second")
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,8 +218,8 @@ func TestResolve_DefaultProfile(t *testing.T) {
 	if rc.Token != "second-token" {
 		t.Errorf("Token = %q, want %q", rc.Token, "second-token")
 	}
-	if rc.BaseURL != "https://second.example.com" {
-		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://second.example.com")
+	if rc.BaseURL != "https://second.test.omniapp.co" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://second.test.omniapp.co")
 	}
 	if rc.OrgID != "second-org" {
 		t.Errorf("OrgID = %q, want %q", rc.OrgID, "second-org")
@@ -232,7 +232,7 @@ func TestResolve_MissingToken(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
-	_, err := Resolve("", "", "", "")
+	_, err := Resolve("", "", "", "", false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -249,12 +249,99 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 	// Token set, but no base URL
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 
-	_, err := Resolve("", "", "", "")
+	_, err := Resolve("", "", "", "", false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "no API base URL") {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), "no API base URL")
+	}
+}
+
+// --- Security: HTTPS and domain allowlist ---
+//
+// The CLI refuses to send API tokens over non-HTTPS connections or to
+// unrecognized domains, unless --insecure is explicitly set.
+
+func TestResolve_RejectsHTTP(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "http://myorg.omniapp.co")
+
+	_, err := Resolve("", "", "", "", false)
+	if err == nil {
+		t.Fatal("expected error for HTTP base URL, got nil")
+	}
+	if !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("error = %q, want it to mention HTTPS", err.Error())
+	}
+}
+
+func TestResolve_RejectsUnknownDomain(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "https://evil.com")
+
+	_, err := Resolve("", "", "", "", false)
+	if err == nil {
+		t.Fatal("expected error for unrecognized domain, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a recognized Omni domain") {
+		t.Errorf("error = %q, want it to mention recognized domain", err.Error())
+	}
+}
+
+func TestResolve_InsecureBypassesChecks(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("OMNI_API_TOKEN", "some-token")
+	t.Setenv("OMNI_BASE_URL", "http://localhost:3000")
+
+	rc, err := Resolve("", "", "", "", true)
+	if err != nil {
+		t.Fatalf("expected --insecure to bypass checks, got: %v", err)
+	}
+	if rc.BaseURL != "http://localhost:3000" {
+		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "http://localhost:3000")
+	}
+}
+
+func TestIsAllowedHost(t *testing.T) {
+	allowed := []string{
+		"https://omniapp.co",
+		"https://myorg.omniapp.co",
+		"https://deep.sub.omniapp.co",
+		"https://exploreomni.dev",
+		"https://myorg.exploreomni.dev",
+		"https://thundersalmon.com",
+		"https://myorg.thundersalmon.com",
+		"https://embed-omniapp.co",
+		"https://myorg.embed-omniapp.co",
+		"https://embed-exploreomni.dev",
+		"https://myorg.embed-exploreomni.dev",
+		"https://embed-thundersalmon.com",
+		"https://myorg.embed-thundersalmon.com",
+	}
+	for _, u := range allowed {
+		if !isAllowedHost(u) {
+			t.Errorf("isAllowedHost(%q) = false, want true", u)
+		}
+	}
+
+	blocked := []string{
+		"https://evil.com",
+		"https://omniapp.co.evil.com",
+		"https://notomniapp.co",
+		"https://localhost",
+		"https://169.254.169.254",
+		"https://evil.com/path?host=omniapp.co",
+	}
+	for _, u := range blocked {
+		if isAllowedHost(u) {
+			t.Errorf("isAllowedHost(%q) = true, want false", u)
+		}
 	}
 }
 
@@ -388,13 +475,13 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 			"myprofile": {
 				OrganizationID:      "org-123",
 				OrganizationShortID: "org",
-				APIEndpoint:         "https://api.example.com",
+				APIEndpoint:         "https://api.test.omniapp.co",
 				AuthMethod:          "apiKey",
 				APIKey:              "secret-key",
 			},
 			"other": {
 				OrganizationID: "org-456",
-				APIEndpoint:    "https://other.example.com",
+				APIEndpoint:    "https://other.test.omniapp.co",
 				APIKey:         "other-key",
 			},
 		},

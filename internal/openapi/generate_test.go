@@ -122,6 +122,65 @@ func TestDeprecatedMsg(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// readStdin limit
+//
+// readStdin caps input at 10 MB. Verify it rejects oversized input.
+// ---------------------------------------------------------------------------
+
+func TestReadStdin_RejectsOversized(t *testing.T) {
+	// Create a reader that's 1 byte over the limit
+	oversize := make([]byte, maxStdinSize+1)
+	origStdin := os.Stdin
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+
+	go func() {
+		w.Write(oversize)
+		w.Close()
+	}()
+
+	_, err = readStdin()
+	os.Stdin = origStdin
+
+	if err == nil {
+		t.Fatal("expected error for oversized stdin, got nil")
+	}
+	if !strings.Contains(err.Error(), "10 MB") {
+		t.Errorf("error = %q, want it to mention 10 MB", err.Error())
+	}
+}
+
+func TestReadStdin_AcceptsWithinLimit(t *testing.T) {
+	data := []byte(`{"key":"value"}`)
+	origStdin := os.Stdin
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = r
+
+	go func() {
+		w.Write(data)
+		w.Close()
+	}()
+
+	got, err := readStdin()
+	os.Stdin = origStdin
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(got) != string(data) {
+		t.Errorf("got %q, want %q", string(got), string(data))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Command generation from real spec
 //
 // These tests load the actual api/openapi.json file (the same spec that gets

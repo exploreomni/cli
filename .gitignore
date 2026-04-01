@@ -1,8 +1,16 @@
 # Go binary
 /bin/
 
-# Environment
+# Environment & secrets
 .env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+config.json
+
+# OS
 .DS_Store
 
 # IDE / Settings
