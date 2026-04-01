@@ -40,7 +40,7 @@ You don't. Just update `api/openapi.json` (run `make sync-spec`) and rebuild. Ne
 
 ## Auth
 
-Auth is resolved with this precedence (highest wins):
+API token is resolved with this precedence (highest wins):
 1. `--token` flag
 2. `OMNI_API_TOKEN` env var
 3. `OMNI_API_KEY` env var
