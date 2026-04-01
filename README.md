@@ -18,12 +18,17 @@ make build
 
 This creates a profile with your organization, API endpoint, and API key. You can create multiple profiles for different orgs or environments.
 
-### Set your API key
+### Set your API token
 
-Either enter it during `config init`, or set the environment variable:
+Omni supports two types of API tokens:
+
+- **Organization-wide tokens** — shared tokens scoped to an entire org
+- **Personal access tokens (PATs)** — tokens tied to an individual user
+
+Either enter your token during `config init`, or set the environment variable:
 
 ```bash
-export OMNI_API_KEY=omni_osk_...
+export OMNI_API_TOKEN=omni_osk_...
 ```
 
 ### Run a command
@@ -46,8 +51,7 @@ Auth is resolved with this precedence (highest wins):
 
 1. `--token` flag
 2. `OMNI_API_TOKEN` env var
-3. `OMNI_API_KEY` env var
-4. Profile's `apiKey` from config file
+3. Profile's `apiKey` from config file
 
 Config file lives at `~/.config/omni-cli/config.json`.
 
@@ -59,8 +63,7 @@ All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for n
 
 | Variable | Description |
 |----------|-------------|
-| `OMNI_API_KEY` | API key for authentication |
-| `OMNI_API_TOKEN` | Bearer token (alternative to API key) |
+| `OMNI_API_TOKEN` | API token for authentication |
 
 ## Development
 

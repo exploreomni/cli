@@ -16,3 +16,4 @@ config.json
 # IDE / Settings
 .claude/settings.local.json
 .claude/worktrees
+.claude/plans

@@ -43,8 +43,7 @@ You don't. Just update `api/openapi.json` (run `make sync-spec`) and rebuild. Ne
 API token is resolved with this precedence (highest wins):
 1. `--token` flag
 2. `OMNI_API_TOKEN` env var
-3. `OMNI_API_KEY` env var
-4. Profile's `apiKey` from config file
+3. Profile's `apiKey` from config file
 
 Base URL is resolved with this precedence (highest wins):
 1. `--base-url` flag

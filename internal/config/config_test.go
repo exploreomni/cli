@@ -15,7 +15,6 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"OMNI_API_TOKEN",
-		"OMNI_API_KEY",
 		"OMNI_BASE_URL",
 		"OMNI_CONFIG_PATH",
 		"OMNI_CONFIG_DIR",
@@ -111,36 +110,6 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	}
 	if rc.BaseURL != "https://env.omniapp.co" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "https://env.omniapp.co")
-	}
-}
-
-// The CLI supports two env vars for the API token: OMNI_API_TOKEN (preferred)
-// and OMNI_API_KEY (fallback for backwards compat). This test verifies the
-// fallback works, and that OMNI_API_TOKEN takes priority when both are set.
-func TestResolve_APIKeyFallback(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
-
-	// Only OMNI_API_KEY set (no OMNI_API_TOKEN)
-	t.Setenv("OMNI_API_KEY", "apikey-token")
-	t.Setenv("OMNI_BASE_URL", "https://test.omniapp.co")
-
-	rc, err := Resolve("", "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rc.Token != "apikey-token" {
-		t.Errorf("Token = %q, want %q (OMNI_API_KEY fallback)", rc.Token, "apikey-token")
-	}
-
-	// Now also set OMNI_API_TOKEN — it should take precedence
-	t.Setenv("OMNI_API_TOKEN", "token-wins")
-	rc, err = Resolve("", "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rc.Token != "token-wins" {
-		t.Errorf("Token = %q, want %q (OMNI_API_TOKEN should beat OMNI_API_KEY)", rc.Token, "token-wins")
 	}
 }
 
