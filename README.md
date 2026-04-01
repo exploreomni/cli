@@ -2,18 +2,42 @@
 
 Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI spec at build time — no hand-written endpoint wrappers needed.
 
-## Quick start
+## Installation
 
-### Build
+### Install script (macOS / Linux)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh
+```
+
+This downloads the latest release, verifies the SHA-256 checksum, and installs the `omni` binary to `/usr/local/bin` (or `~/.local/bin` if `/usr/local/bin` isn't writable).
+
+### Download from GitHub Releases
+
+Pre-built binaries for macOS, Linux, and Windows are available on the [Releases page](https://github.com/exploreomni/cli/releases). Download the archive for your platform, extract it, and place the `omni` binary somewhere on your `PATH`.
+
+| Platform | Architectures |
+|----------|---------------|
+| macOS    | amd64, arm64  |
+| Linux    | amd64, arm64  |
+| Windows  | amd64         |
+
+### Build from source
+
+```bash
+git clone https://github.com/exploreomni/cli.git
+cd cli
 make build
 ```
+
+The binary is written to `./bin/omni`.
+
+## Quick start
 
 ### Configure a profile
 
 ```bash
-./bin/omni config init
+omni config init
 ```
 
 This creates a profile with your organization, API endpoint, and API key. You can create multiple profiles for different orgs or environments.
@@ -34,9 +58,9 @@ export OMNI_API_TOKEN=omni_osk_...
 ### Run a command
 
 ```bash
-./bin/omni models list
-./bin/omni dashboards list
-./bin/omni --help
+omni models list
+omni dashboards list
+omni --help
 ```
 
 ## How it works
