@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // Profile represents a saved API configuration.
@@ -34,7 +35,7 @@ type ResolvedConfig struct {
 }
 
 // Resolve builds the runtime config with precedence: flags > env > config file.
-func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string) (*ResolvedConfig, error) {
+func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
 
 	// Start from config file
@@ -84,6 +85,9 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string) (*ResolvedConf
 	}
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
+	}
+	if !strings.HasPrefix(rc.BaseURL, "https://") && !insecure {
+		return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Use --insecure to override", rc.BaseURL)
 	}
 
 	return rc, nil

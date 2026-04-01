@@ -71,7 +71,7 @@ func TestResolve_FlagsOverrideAll(t *testing.T) {
 	t.Setenv("OMNI_ORG_ID", "env-org")
 
 	// Pass flags that should win
-	rc, err := Resolve("", "flag-token", "flag-org", "https://flag.example.com")
+	rc, err := Resolve("", "flag-token", "flag-org", "https://flag.example.com", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestResolve_EnvOverridesFile(t *testing.T) {
 	t.Setenv("OMNI_BASE_URL", "https://env.example.com")
 	t.Setenv("OMNI_ORG_ID", "env-org")
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 	t.Setenv("OMNI_API_KEY", "apikey-token")
 	t.Setenv("OMNI_BASE_URL", "https://example.com")
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestResolve_APIKeyFallback(t *testing.T) {
 
 	// Now also set OMNI_API_TOKEN — it should take precedence
 	t.Setenv("OMNI_API_TOKEN", "token-wins")
-	rc, err = Resolve("", "", "", "")
+	rc, err = Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestResolve_FileValues(t *testing.T) {
 		},
 	})
 
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestResolve_DefaultProfile(t *testing.T) {
 	})
 
 	// No profileName arg — should use DefaultProfile ("second")
-	rc, err := Resolve("", "", "", "")
+	rc, err := Resolve("", "", "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestResolve_MissingToken(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 
-	_, err := Resolve("", "", "", "")
+	_, err := Resolve("", "", "", "", false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -249,7 +249,7 @@ func TestResolve_MissingBaseURL(t *testing.T) {
 	// Token set, but no base URL
 	t.Setenv("OMNI_API_TOKEN", "some-token")
 
-	_, err := Resolve("", "", "", "")
+	_, err := Resolve("", "", "", "", false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
