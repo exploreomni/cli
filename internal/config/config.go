@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -86,11 +87,41 @@ func Resolve(profileName, tokenFlag, orgFlag, baseURLFlag string, insecure bool)
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
 	}
-	if !strings.HasPrefix(rc.BaseURL, "https://") && !insecure {
-		return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Use --insecure to override", rc.BaseURL)
+	if !insecure {
+		if !strings.HasPrefix(rc.BaseURL, "https://") {
+			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Use --insecure to override", rc.BaseURL)
+		}
+		if !isAllowedHost(rc.BaseURL) {
+			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Use --insecure to override", rc.BaseURL)
+		}
 	}
 
 	return rc, nil
+}
+
+// allowedDomains are the Omni domains the CLI will send API tokens to.
+var allowedDomains = []string{
+	".omniapp.co",
+	".exploreomni.dev",
+	".thundersalmon.com",
+	".embed-omniapp.co",
+	".embed-exploreomni.dev",
+	".embed-thundersalmon.com",
+}
+
+// isAllowedHost checks whether the base URL's host is a recognized Omni domain.
+func isAllowedHost(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, domain := range allowedDomains {
+		if host == domain[1:] || strings.HasSuffix(host, domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads the config file from the default location.
