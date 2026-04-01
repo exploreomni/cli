@@ -7,7 +7,7 @@
 
 ## AI-Assisted Development
 
-Using Claude, Copilot, or other AI coding tools is expected and encouraged. However, all AI-generated code must be thoroughly reviewed and validated by a human before opening a PR. You are responsible for understanding and standing behind every line of code you submit.
+Using Claude, Copilot, or other AI coding tools is expected and encouraged. However, all AI-generated code must be thoroughly reviewed and validated before requesting review for a PR. You are responsible for understanding and standing behind every line of code you submit.
 
 ## Building
 
