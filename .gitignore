@@ -1,6 +1,9 @@
 # Go binary
 /bin/
 
+# GoReleaser
+/dist/
+
 # Environment & secrets
 .env
 .env.*

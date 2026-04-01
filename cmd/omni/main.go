@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/config"
@@ -15,6 +16,14 @@ import (
 var specFS embed.FS
 
 var version = "dev"
+
+func init() {
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+			version = info.Main.Version
+		}
+	}
+}
 
 func main() {
 	root := &cobra.Command{
