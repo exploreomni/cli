@@ -59,7 +59,7 @@ export OMNI_API_TOKEN=omni_osk_...
 
 ```bash
 omni models list
-omni dashboards list
+omni documents list
 omni --help
 ```
 
