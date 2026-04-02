@@ -25,6 +25,9 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ### List models (to find model IDs)
   omni models list --compact
 
+### Create a branch of a model
+  omni models create-branch <model-id> --name "my-branch"
+
 ### Run a semantic query directly
   omni query run --body '{"modelId":"MODEL_ID","query":{"fields":["view_name/field_name"],"limit":100}}'
 
