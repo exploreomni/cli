@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 
+	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/spf13/cobra"
 )
@@ -34,9 +36,41 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 			baseModelID := args[0]
 			name, _ := cmd.Flags().GetString("name")
 
+			// Look up the model to get its connectionId
+			cfg, err := resolveConfig(cmd)
+			if err != nil {
+				return err
+			}
+
+			resp, err := auth.Do(cfg, "GET", "/api/v1/models?modelId="+baseModelID, nil)
+			if err != nil {
+				return fmt.Errorf("looking up model: %w", err)
+			}
+			defer resp.Body.Close()
+
+			respBody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("reading model response: %w", err)
+			}
+
+			var modelResp struct {
+				Records []struct {
+					ConnectionID string `json:"connectionId"`
+				} `json:"records"`
+			}
+			if err := json.Unmarshal(respBody, &modelResp); err != nil {
+				return fmt.Errorf("parsing model response: %w", err)
+			}
+			if len(modelResp.Records) == 0 {
+				return fmt.Errorf("model %s not found", baseModelID)
+			}
+
+			connectionID := modelResp.Records[0].ConnectionID
+
 			body := map[string]interface{}{
-				"modelKind":   "BRANCH",
-				"baseModelId": baseModelID,
+				"modelKind":    "BRANCH",
+				"baseModelId":  baseModelID,
+				"connectionId": connectionID,
 			}
 			if name != "" {
 				body["modelName"] = name
