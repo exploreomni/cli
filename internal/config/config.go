@@ -10,13 +10,29 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/exploreomni/omni-cli/internal/oauth"
 )
 
 // Profile represents a saved API configuration.
 type Profile struct {
-	APIEndpoint string `json:"apiEndpoint"`
-	AuthMethod  string `json:"authMethod"`
-	APIKey      string `json:"apiKey,omitempty"`
+	APIEndpoint    string `json:"apiEndpoint"`
+	AuthMethod     string `json:"authMethod"`
+	APIKey         string `json:"apiKey,omitempty"`
+	AccessToken    string `json:"accessToken,omitempty"`
+	RefreshToken   string `json:"refreshToken,omitempty"`
+	TokenExpiresAt string `json:"tokenExpiresAt,omitempty"`
+}
+
+// IsTokenExpiringSoon returns true if the given RFC 3339 expiration time
+// is within bufferSeconds of now (or unparseable).
+func IsTokenExpiringSoon(expiresAt string, bufferSeconds int) bool {
+	t, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return true
+	}
+	return time.Until(t) < time.Duration(bufferSeconds)*time.Second
 }
 
 // Config is the on-disk config file format (compatible with the TS CLI).
@@ -38,6 +54,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 
 	// Start from config file
 	cfg, _ := Load()
+	var profile *Profile
 	if cfg != nil {
 		name := profileName
 		if name == "" {
@@ -45,8 +62,14 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 		}
 		if name != "" {
 			if p, ok := cfg.Profiles[name]; ok {
+				profile = &p
 				rc.BaseURL = p.APIEndpoint
-				rc.Token = p.APIKey
+				switch p.AuthMethod {
+				case "oauth":
+					rc.Token = p.AccessToken
+				default: // "api-key"
+					rc.Token = p.APIKey
+				}
 			}
 		}
 	}
@@ -65,6 +88,28 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	}
 	if baseURLFlag != "" {
 		rc.BaseURL = baseURLFlag
+	}
+
+	// Auto-refresh OAuth tokens expiring within 5 minutes
+	if profile != nil && profile.AuthMethod == "oauth" && profile.TokenExpiresAt != "" {
+		if IsTokenExpiringSoon(profile.TokenExpiresAt, 300) && profile.RefreshToken != "" {
+			refreshed, err := oauth.RefreshAccessToken(profile.APIEndpoint, profile.RefreshToken)
+			if err == nil {
+				profile.AccessToken = refreshed.AccessToken
+				profile.RefreshToken = refreshed.RefreshToken
+				profile.TokenExpiresAt = time.Now().Add(
+					time.Duration(refreshed.ExpiresIn) * time.Second,
+				).Format(time.RFC3339)
+				name := profileName
+				if name == "" {
+					name = cfg.DefaultProfile
+				}
+				cfg.Profiles[name] = *profile
+				_ = Save(cfg)
+				rc.Token = refreshed.AccessToken
+			}
+			// If refresh fails, continue with stale token — let the API call fail with 401
+		}
 	}
 
 	// Validate
