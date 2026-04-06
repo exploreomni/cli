@@ -7271,7 +7271,7 @@
             }
           },
           "403": {
-            "description": "AI query helper is not enabled for this organization.",
+            "description": "Workbook Agent is not enabled for this organization.",
             "content": {
               "application/json": {
                 "schema": {
