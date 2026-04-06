@@ -7271,7 +7271,7 @@
             }
           },
           "403": {
-            "description": "Workbook Agent is not enabled for this organization.",
+            "description": "Omni Agent is not enabled for this organization.",
             "content": {
               "application/json": {
                 "schema": {
