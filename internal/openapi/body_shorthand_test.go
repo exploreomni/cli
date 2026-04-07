@@ -10,6 +10,12 @@ import (
 
 // ---------------------------------------------------------------------------
 // assembleBody unit tests
+//
+// assembleBody converts positional CLI args and promoted flags into a JSON
+// request body. These tests verify that each transform type ("string",
+// "email-list", etc.) produces the correct JSON structure, that path params
+// are excluded from the body, that promoted flags merge in correctly, and
+// that bool flags are serialized as JSON booleans rather than strings.
 // ---------------------------------------------------------------------------
 
 func newMockCmd(flags map[string]string) *cobra.Command {
@@ -167,6 +173,12 @@ func TestAssembleBody_BoolFlag(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // flexibleArgs validator tests
+//
+// flexibleArgs returns a cobra arg validator that accepts different arg
+// counts depending on context: when --body/--json-body is provided, only
+// path params are expected; in shorthand mode, path params + shorthand args
+// are required; for flags-only shorthands, only path params are expected.
+// These tests verify each mode rejects wrong arg counts.
 // ---------------------------------------------------------------------------
 
 func TestFlexibleArgs_ShorthandMode(t *testing.T) {
@@ -233,6 +245,12 @@ func TestFlexibleArgs_FlagsOnly(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Integration tests: buildCommand + shorthand
+//
+// These tests wire up the full pipeline: buildCommand creates a cobra
+// command from an operationInfo, applyBodyShorthand attaches the shorthand,
+// and then we execute the command with real CLI args. A mock executor
+// captures the resulting APIRequest so we can verify the path, body JSON,
+// and flag values match what we'd expect from the shorthand expansion.
 // ---------------------------------------------------------------------------
 
 func TestShorthand_AiSearchOmniDocs(t *testing.T) {
@@ -518,6 +536,12 @@ func TestShorthand_ModelsGitSync_FlagsOnly(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Fallback / alias tests
+//
+// Shorthand is opt-in — users can always pass raw JSON via --body or the
+// hidden --json-body alias. These tests verify: (1) --body bypasses
+// shorthand and sends JSON verbatim, (2) --json-body works identically,
+// (3) using both at once returns an error, and (4) --body still works
+// alongside path params on commands that also have shorthand args.
 // ---------------------------------------------------------------------------
 
 func TestShorthand_BodyFlagOverride(t *testing.T) {
@@ -618,6 +642,11 @@ func TestShorthand_BodyWithPathParams(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Help text tests
+//
+// Verify that shorthand registration updates the command's help output:
+// the Example field should show both shorthand and JSON body usage, and
+// the Use string should include placeholder names for shorthand args
+// (e.g. "<question>", "<model-id> <prompt>").
 // ---------------------------------------------------------------------------
 
 func TestShorthand_HelpContainsExamples(t *testing.T) {
@@ -682,6 +711,11 @@ func TestShorthand_UseStringContainsMultipleArgs(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Verify all registered shorthands reference valid operations
+//
+// Guards against registry drift: checks that the shorthand count matches
+// expectations, and that every registered shorthand can be applied to a
+// command without panics — arg placeholders appear in Use, and all
+// promoted flags are registered on the command.
 // ---------------------------------------------------------------------------
 
 func TestShorthand_RegistryNotEmpty(t *testing.T) {
