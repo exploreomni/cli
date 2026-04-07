@@ -203,21 +203,31 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				path += "?" + query.Encode()
 			}
 
-			// Read body from stdin if this operation expects one
+			// Read body from stdin or flags
 			var body []byte
 			if op.HasBody {
 				bodyFlag, _ := cmd.Flags().GetString("body")
-				if bodyFlag == "-" || bodyFlag == "" {
-					// Check if stdin has data
-					if bodyFlag == "-" {
+				jsonBodyFlag, _ := cmd.Flags().GetString("json-body")
+
+				if bodyFlag != "" && jsonBodyFlag != "" {
+					return fmt.Errorf("cannot use both --body and --json-body; use one or the other")
+				}
+
+				effectiveBody := bodyFlag
+				if jsonBodyFlag != "" {
+					effectiveBody = jsonBodyFlag
+				}
+
+				if effectiveBody == "-" || effectiveBody == "" {
+					if effectiveBody == "-" {
 						var err error
 						body, err = readStdin()
 						if err != nil {
 							return fmt.Errorf("reading stdin: %w", err)
 						}
 					}
-				} else if bodyFlag != "" {
-					body = []byte(bodyFlag)
+				} else if effectiveBody != "" {
+					body = []byte(effectiveBody)
 				}
 			}
 
@@ -240,9 +250,16 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		cmd.Flags().String(flagName, "", desc)
 	}
 
-	// If the operation accepts a body, add a --body flag
+	// If the operation accepts a body, add --body and --json-body flags
 	if op.HasBody {
 		cmd.Flags().String("body", "", `request body as JSON string, or "-" for stdin`)
+		cmd.Flags().String("json-body", "", `request body as JSON string, or "-" for stdin (alias for --body)`)
+		cmd.Flags().MarkHidden("json-body")
+	}
+
+	// Apply body shorthand if one exists for this operation
+	if sh := GetBodyShorthand(op.OperationID); sh != nil {
+		applyBodyShorthand(cmd, op, sh)
 	}
 
 	return cmd
