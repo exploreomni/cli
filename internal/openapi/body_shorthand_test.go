@@ -632,14 +632,14 @@ func TestShorthand_HelpContainsExamples(t *testing.T) {
 	}
 
 	cmd := buildCommand(op, exec)
-	if !strings.Contains(cmd.Long, "Shorthand") {
-		t.Error("Long description should contain shorthand example")
+	if !strings.Contains(cmd.Example, "Shorthand") {
+		t.Error("Example should contain shorthand example")
 	}
-	if !strings.Contains(cmd.Long, "JSON body") {
-		t.Error("Long description should contain JSON body example")
+	if !strings.Contains(cmd.Example, "JSON body") {
+		t.Error("Example should contain JSON body example")
 	}
-	if !strings.Contains(cmd.Long, "search-omni-docs") {
-		t.Error("Long description should contain the command name in examples")
+	if !strings.Contains(cmd.Example, "search-omni-docs") {
+		t.Error("Example should contain the command name in examples")
 	}
 }
 
