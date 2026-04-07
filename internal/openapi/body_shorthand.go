@@ -50,7 +50,7 @@ var bodyShorthands = map[string]*BodyShorthand{
 			{Name: "prompt", FieldPath: "prompt", Description: "natural language query prompt", Transform: "string"},
 		},
 		Flags: []FlagMapping{
-			{FlagName: "run-query", FieldPath: "runQuery", Description: "execute the generated query (default true)", IsBool: true},
+			{FlagName: "run-query", FieldPath: "runQuery", Description: "execute the generated query (server default: true)", IsBool: true},
 			{FlagName: "user-id", FieldPath: "userId", Description: "user ID to execute as"},
 			{FlagName: "workbook-url", FieldPath: "workbookUrl", Description: "workbook URL for context"},
 			{FlagName: "current-topic-name", FieldPath: "currentTopicName", Description: "topic name to scope query generation"},
@@ -219,13 +219,10 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 		cmd.Use += " <" + a.Name + ">"
 	}
 
-	// Register promoted flags
+	// Register promoted flags (all as strings; bool flags are parsed from
+	// their string value in assembleBody)
 	for _, f := range sh.Flags {
-		if f.IsBool {
-			cmd.Flags().String(f.FlagName, f.Default, f.Description)
-		} else {
-			cmd.Flags().String(f.FlagName, f.Default, f.Description)
-		}
+		cmd.Flags().String(f.FlagName, f.Default, f.Description)
 	}
 
 	// Replace the Args validator with a flexible one
@@ -261,10 +258,9 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 		return originalRunE(cmd, args[:numPathParams])
 	}
 
-	// Append examples to Long description
-	examples := fmt.Sprintf("\n\nExamples:\n  # Shorthand\n  %s\n\n  # Equivalent JSON body\n  %s",
+	// Set examples using cobra's dedicated Example field
+	cmd.Example = fmt.Sprintf("  # Shorthand\n  %s\n\n  # Equivalent JSON body\n  %s",
 		sh.ExampleShort, sh.ExampleJSON)
-	cmd.Long = cmd.Long + examples
 }
 
 // flexibleArgs returns a positional args validator that accepts either:
