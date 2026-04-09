@@ -1,0 +1,22 @@
+name: Notify Downstream Repos
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger omni-agent-skills sync
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.SKILLS_REPO_TOKEN }}
+          repository: exploreomni/omni-agent-skills
+          event-type: cli-update
+          client-payload: >-
+            {
+              "release_tag": "${{ github.event.release.tag_name }}",
+              "release_url": "${{ github.event.release.html_url }}",
+              "commit_sha": "${{ github.sha }}"
+            }
