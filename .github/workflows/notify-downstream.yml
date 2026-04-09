@@ -1,13 +1,11 @@
 name: Notify Downstream Repos
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [main]
+  release:
+    types: [published]
 
 jobs:
   notify:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Trigger omni-agent-skills sync
@@ -18,7 +16,7 @@ jobs:
           event-type: cli-update
           client-payload: >-
             {
-              "pr_number": "${{ github.event.pull_request.number }}",
-              "pr_title": "${{ github.event.pull_request.title }}",
-              "pr_url": "${{ github.event.pull_request.html_url }}"
+              "release_tag": "${{ github.event.release.tag_name }}",
+              "release_url": "${{ github.event.release.html_url }}",
+              "commit_sha": "${{ github.sha }}"
             }
