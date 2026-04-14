@@ -92,33 +92,6 @@ goreleaser release --snapshot --clean
 
 This builds all artifacts into `dist/` without creating a GitHub release.
 
-### Testing the Homebrew Tap Locally
-
-To validate the tap formula against locally built artifacts instead of a real GitHub release:
-
-```bash
-goreleaser release --snapshot --clean
-python3 -m http.server 8000 --directory dist
-OMNI_RELEASE_BASE_URL=http://127.0.0.1:8000 \
-  bash scripts/render-homebrew-formula.sh v0.0.0-test dist/checksums.txt /tmp/omni.rb
-brew tap-new --no-git local/omni-test
-cp /tmp/omni.rb "$(brew --repository local/omni-test)/Formula/omni.rb"
-brew audit --strict --new local/omni-test/omni
-brew install local/omni-test/omni
-brew test local/omni-test/omni
-```
-
-When `OMNI_RELEASE_BASE_URL` is set, the formula renderer serves artifacts from that base URL and can infer the snapshot artifact version from `dist/checksums.txt`.
-
-Current Homebrew releases reject `brew audit /tmp/omni.rb` and `brew install --formula /tmp/omni.rb` for local formula files, so the supported local validation path is to copy the rendered formula into a temporary tap first.
-
-Clean up the local test tap afterward if desired:
-
-```bash
-brew uninstall omni
-brew untap local/omni-test
-```
-
 ### Versioning
 
 The version is baked into the binary via `-ldflags "-X main.version=..."`. GoReleaser sets this from the git tag automatically. For local builds, it defaults to `dev`.
