@@ -20,10 +20,35 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run GoReleaser
+      - name: Run GoReleaser (release artifacts only)
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: actions/checkout@v4
+        with:
+          repository: exploreomni/homebrew-tap
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Render Homebrew formula from release artifacts
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          bash scripts/render-homebrew-formula.sh "${GITHUB_REF_NAME}" dist/checksums.txt homebrew-tap/Formula/omni.rb
+
+      - name: Publish Homebrew formula
+        if: ${{ !contains(github.ref_name, '-') }}
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/omni.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "Brew formula update for omni version ${GITHUB_REF_NAME}"
+          git push origin HEAD:main

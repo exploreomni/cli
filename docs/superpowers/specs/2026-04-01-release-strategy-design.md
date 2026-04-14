@@ -6,11 +6,18 @@ omni-cli is a Go CLI that auto-generates commands from an embedded OpenAPI spec.
 
 ## Distribution Channels
 
-1. **GitHub Releases** — pre-built binaries with SHA256 checksums for macOS (arm64/amd64), Linux (arm64/amd64), Windows (amd64)
-2. **Install script** — `curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh`
-3. **`go install`** — `go install github.com/exploreomni/omni-cli/cmd/omni@latest`
+1. **Homebrew tap (phase 1)** — formula published to `exploreomni/homebrew-tap`
+2. **GitHub Releases** — pre-built binaries with SHA256 checksums for macOS (arm64/amd64), Linux (arm64/amd64), Windows (amd64)
+3. **Install script** — `curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh`
+4. **`go install`** — `go install github.com/exploreomni/omni-cli/cmd/omni@latest`
 
-Homebrew tap is deferred to a future iteration.
+## Homebrew Rollout Plan
+
+1. **Phase 1: tap formula.** Publish `omni` to `exploreomni/homebrew-tap` so users can run `brew install exploreomni/tap/omni`, or `brew tap exploreomni/tap && brew install omni`.
+2. **Phase 2: `homebrew/core`.** Submit a separate curated formula to `homebrew/core` so fresh installs can use `brew install omni` with no tap setup.
+3. **Migration window:** keep the tap formula working after the core formula lands so both install paths remain valid while docs and downstream skills migrate.
+
+Important constraint: GoReleaser still handles GitHub release artifacts and checksums, but the phase-1 tap formula is rendered by our release workflow from those tagged release artifacts. The eventual `homebrew/core` formula is intentionally a separate artifact that will be maintained independently.
 
 ## Release Trigger
 
@@ -34,6 +41,7 @@ GoReleaser v2 configuration:
 - **Targets:** darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - **Archives:** `omni_{Version}_{Os}_{Arch}` — tar.gz for unix, zip for windows
 - **Checksums:** SHA256, file named `checksums.txt`
+- **Homebrew tap:** render `Formula/omni.rb` from release artifacts and publish it to `exploreomni/homebrew-tap` for stable releases
 - **Changelog:** auto-generated from commits, filtered to exclude docs/test/ci/chore prefixes
 - **Release:** to `exploreomni/cli`, not draft, prerelease auto-detected from tag
 
@@ -44,7 +52,7 @@ GitHub Actions workflow:
 - **Trigger:** push tags matching `v*`
 - **Permissions:** `contents: write`
 - **Steps:** checkout (full history for changelog), setup-go (version from go.mod), goreleaser-action v6 with `release --clean`
-- **Secrets:** only `GITHUB_TOKEN` (no Homebrew tap token needed since we deferred that)
+- **Secrets:** `GITHUB_TOKEN` plus `HOMEBREW_TAP_GITHUB_TOKEN` with `contents:write` access to `exploreomni/homebrew-tap`
 
 ### `install.sh`
 
@@ -87,6 +95,8 @@ This gives `go install` users the correct version (Go stamps module version into
 4. Verify `checksums.txt` is generated
 5. Tag `v0.1.0` and push to trigger a real release
 6. Test each install method:
+   - Run `brew install exploreomni/tap/omni` and check version output
+   - Run `brew tap exploreomni/tap && brew install omni` and check version output
    - Download binary from GitHub Releases, verify checksum, run `omni --version`
    - Run the install script on macOS and Linux
    - Run `go install github.com/exploreomni/omni-cli/cmd/omni@v0.1.0` and check version output

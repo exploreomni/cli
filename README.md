@@ -4,6 +4,23 @@ Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install exploreomni/tap/omni
+```
+
+This installs the latest stable `omni` formula from the ExploreOmni Homebrew tap.
+
+Before `omni` lands in `homebrew/core`, tapping `exploreomni/tap` also enables the short form:
+
+```bash
+brew tap exploreomni/tap
+brew install omni
+```
+
+Homebrew rollout plan: ship `omni` in `exploreomni/homebrew-tap` first, then submit a separate curated formula to `homebrew/core` so `brew install omni` works without tapping. Once the core formula exists, `brew install omni` will resolve to `homebrew/core`, while explicit `brew install exploreomni/tap/omni` installs continue to work during the migration.
+
 ### Install script (macOS / Linux)
 
 ```bash
