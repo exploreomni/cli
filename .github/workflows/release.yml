@@ -40,7 +40,7 @@ jobs:
       - name: Render Homebrew formula from release artifacts
         if: ${{ !contains(github.ref_name, '-') }}
         run: |
-          bash scripts/render-homebrew-formula.sh "${GITHUB_REF_NAME}" dist/checksums.txt homebrew-tap/Formula/omni.rb
+          bash bin/render-homebrew-formula.sh "${GITHUB_REF_NAME}" dist/checksums.txt homebrew-tap/Formula/omni.rb
 
       - name: Publish Homebrew formula
         if: ${{ !contains(github.ref_name, '-') }}
