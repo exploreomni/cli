@@ -4,6 +4,12 @@ Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI
 
 ## Installation
 
+### Homebrew (macOS / Linux) Preferred
+
+```bash
+brew tap exploreomni/tap
+brew install omni
+```
 ### Install script (macOS / Linux)
 
 ```bash
