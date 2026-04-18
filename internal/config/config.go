@@ -21,9 +21,47 @@ type Profile struct {
 
 // Config is the on-disk config file format (compatible with the TS CLI).
 type Config struct {
-	Version        int                `json:"version"`
-	DefaultProfile string             `json:"defaultProfile,omitempty"`
-	Profiles       map[string]Profile `json:"profiles"`
+	Version             int                `json:"version"`
+	DefaultProfile      string             `json:"defaultProfile,omitempty"`
+	DefaultOutputFormat string             `json:"defaultOutputFormat,omitempty"`
+	Profiles            map[string]Profile `json:"profiles"`
+}
+
+// Output format values.
+const (
+	FormatAuto  = "auto"
+	FormatJSON  = "json"
+	FormatHuman = "human"
+)
+
+// ValidOutputFormat reports whether s is a recognized output format name.
+func ValidOutputFormat(s string) bool {
+	switch s {
+	case FormatAuto, FormatJSON, FormatHuman:
+		return true
+	}
+	return false
+}
+
+// ResolveOutputFormat picks the effective output format.
+// Precedence: flag > OMNI_OUTPUT_FORMAT env > config file > auto(TTY).
+// An "auto" result from any layer resolves to "human" when isTTY, else "json".
+func ResolveOutputFormat(flagValue string, isTTY bool) string {
+	chosen := ""
+	if flagValue != "" {
+		chosen = flagValue
+	} else if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
+		chosen = v
+	} else if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
+		chosen = cfg.DefaultOutputFormat
+	}
+	if chosen == "" || chosen == FormatAuto {
+		if isTTY {
+			return FormatHuman
+		}
+		return FormatJSON
+	}
+	return chosen
 }
 
 // ResolvedConfig is the final runtime config after merging flags, env, and file.
