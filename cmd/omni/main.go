@@ -10,6 +10,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 //go:embed openapi.json
@@ -51,6 +52,7 @@ func main() {
 	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
 	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
+	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
 
 
 	// Hand-written commands (not from spec)
@@ -96,7 +98,9 @@ func executeAPICall(req openapi.APIRequest) error {
 	defer resp.Body.Close()
 
 	compact, _ := req.Cmd.Flags().GetBool("compact")
-	return outputResponse(resp, compact)
+	formatFlag, _ := req.Cmd.Flags().GetString("format")
+	format := config.ResolveOutputFormat(formatFlag, term.IsTerminal(int(os.Stdout.Fd())))
+	return outputResponse(resp, format, compact)
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.
