@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Human reads a JSON response body and writes a human-friendly rendering to stdout.
@@ -129,7 +130,7 @@ func renderObject(w io.Writer, obj map[string]any) {
 		renderSections(w, obj, scalarKeys)
 	}
 	for _, k := range arrayKeys {
-		fmt.Fprintf(w, "\n%s\n", strings.ToUpper(k))
+		fmt.Fprintf(w, "\n%s\n", humanizeKey(k))
 		arr, _ := obj[k].([]any)
 		if len(arr) == 0 {
 			fmt.Fprintln(w, "(none)")
@@ -186,7 +187,7 @@ func renderSections(w io.Writer, obj map[string]any, keys []string) {
 		if len(shortKeys) > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintf(w, "%s\n", strings.ToUpper(e.key))
+		fmt.Fprintf(w, "%s\n", humanizeKey(e.key))
 		for _, line := range strings.Split(e.val, "\n") {
 			fmt.Fprintf(w, "  %s\n", line)
 		}
@@ -212,7 +213,7 @@ func renderTable(w io.Writer, rows []any) {
 	columns := pickColumns(records)
 	header := make([]string, len(columns))
 	for i, c := range columns {
-		header[i] = strings.ToUpper(c)
+		header[i] = humanizeKey(c)
 	}
 	table := [][]string{header}
 	for _, rec := range records {
@@ -222,7 +223,7 @@ func renderTable(w io.Writer, rows []any) {
 		}
 		table = append(table, row)
 	}
-	writeAligned(w, table)
+	writeAligned(w, table, true)
 }
 
 // renderKeyValue prints a single object as aligned key: value lines.
@@ -231,19 +232,22 @@ func renderKeyValue(w io.Writer, obj map[string]any) {
 	// Promote common identity fields to the top.
 	keys = promote(keys, []string{"id", "name", "modelKind", "dialect", "type", "kind"})
 
+	labels := make(map[string]string, len(keys))
 	maxKey := 0
 	for _, k := range keys {
-		if len(k) > maxKey {
-			maxKey = len(k)
+		l := humanizeKey(k)
+		labels[k] = l
+		if len(l) > maxKey {
+			maxKey = len(l)
 		}
 	}
 	for _, k := range keys {
 		v := obj[k]
 		if isComplex(v) {
-			fmt.Fprintf(w, "%-*s  %s\n", maxKey, k+":", summarizeComplex(v))
+			fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", summarizeComplex(v))
 			continue
 		}
-		fmt.Fprintf(w, "%-*s  %s\n", maxKey, k+":", formatScalar(v))
+		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatScalar(v))
 	}
 }
 
@@ -408,7 +412,7 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-func writeAligned(w io.Writer, rows [][]string) {
+func writeAligned(w io.Writer, rows [][]string, headerSeparator bool) {
 	if len(rows) == 0 {
 		return
 	}
@@ -423,7 +427,7 @@ func writeAligned(w io.Writer, rows [][]string) {
 			}
 		}
 	}
-	for _, row := range rows {
+	for r, row := range rows {
 		for i, cell := range row {
 			if i == len(row)-1 {
 				fmt.Fprint(w, cell)
@@ -436,7 +440,52 @@ func writeAligned(w io.Writer, rows [][]string) {
 			}
 		}
 		fmt.Fprintln(w)
+		if headerSeparator && r == 0 {
+			fmt.Fprintln(w)
+		}
 	}
+}
+
+// humanizeKey converts API field names like "modelKind", "MODEL_KIND", or
+// "created_at" into readable labels like "Model Kind" / "Created At".
+// camelCase splits on case transitions; snake_case / kebab-case become spaces.
+func humanizeKey(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.NewReplacer("_", " ", "-", " ").Replace(s)
+
+	var b strings.Builder
+	runes := []rune(s)
+	for i, r := range runes {
+		if i > 0 {
+			prev := runes[i-1]
+			var next rune
+			if i+1 < len(runes) {
+				next = runes[i+1]
+			}
+			switch {
+			case (unicode.IsLower(prev) || unicode.IsDigit(prev)) && unicode.IsUpper(r):
+				b.WriteRune(' ')
+			case unicode.IsUpper(prev) && unicode.IsUpper(r) && unicode.IsLower(next):
+				b.WriteRune(' ')
+			}
+		}
+		b.WriteRune(r)
+	}
+
+	fields := strings.Fields(b.String())
+	for i, f := range fields {
+		rs := []rune(f)
+		if len(rs) > 0 {
+			rs[0] = unicode.ToUpper(rs[0])
+			for j := 1; j < len(rs); j++ {
+				rs[j] = unicode.ToLower(rs[j])
+			}
+		}
+		fields[i] = string(rs)
+	}
+	return strings.Join(fields, " ")
 }
 
 // displayWidth returns rune count, which is a good enough width approximation

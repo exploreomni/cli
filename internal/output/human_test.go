@@ -20,7 +20,7 @@ func TestHumanTo_RecordsList(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ID") || !strings.Contains(out, "NAME") || !strings.Contains(out, "MODELKIND") {
+	if !strings.Contains(out, "Id") || !strings.Contains(out, "Name") || !strings.Contains(out, "Model Kind") {
 		t.Errorf("expected column headers in output:\n%s", out)
 	}
 	if !strings.Contains(out, "orders") || !strings.Contains(out, "users") {
@@ -28,6 +28,12 @@ func TestHumanTo_RecordsList(t *testing.T) {
 	}
 	if !strings.Contains(out, "Cursor: abc") {
 		t.Errorf("expected pagination footer:\n%s", out)
+	}
+	// Blank line between the header row and the first data row so the table
+	// is easier to scan at a glance.
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) != "" {
+		t.Errorf("expected blank separator after header row, got:\n%s", out)
 	}
 }
 
@@ -68,10 +74,10 @@ func TestHumanTo_SingleObject(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "id:") || !strings.Contains(out, "d1") {
+	if !strings.Contains(out, "Id:") || !strings.Contains(out, "d1") {
 		t.Errorf("expected key-value rendering:\n%s", out)
 	}
-	if !strings.Contains(out, "name:") || !strings.Contains(out, "my dashboard") {
+	if !strings.Contains(out, "Name:") || !strings.Contains(out, "my dashboard") {
 		t.Errorf("expected name field:\n%s", out)
 	}
 }
@@ -91,7 +97,7 @@ func TestHumanTo_SuccessEnvelope(t *testing.T) {
 	if !strings.Contains(out, "✓ Model created") {
 		t.Errorf("expected success check mark:\n%s", out)
 	}
-	if !strings.Contains(out, "id:") || !strings.Contains(out, "m1") {
+	if !strings.Contains(out, "Id:") || !strings.Contains(out, "m1") {
 		t.Errorf("expected inner model details:\n%s", out)
 	}
 }
@@ -128,7 +134,7 @@ func TestHumanTo_BareArray(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ID") || !strings.Contains(out, "NAME") {
+	if !strings.Contains(out, "Id") || !strings.Contains(out, "Name") {
 		t.Errorf("expected table headers:\n%s", out)
 	}
 }
@@ -148,17 +154,39 @@ func TestHumanTo_MixedScalarAndArray(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ANSWER") {
-		t.Errorf("expected ANSWER heading:\n%s", out)
+	if !strings.Contains(out, "Answer") {
+		t.Errorf("expected Answer heading:\n%s", out)
 	}
 	if !strings.Contains(out, "Use the format parameter.") {
 		t.Errorf("expected answer body text:\n%s", out)
 	}
-	if !strings.Contains(out, "SOURCES") {
-		t.Errorf("expected SOURCES heading:\n%s", out)
+	if !strings.Contains(out, "Sources") {
+		t.Errorf("expected Sources heading:\n%s", out)
 	}
 	if !strings.Contains(out, "Doc A") || !strings.Contains(out, "Doc B") {
 		t.Errorf("expected source rows:\n%s", out)
+	}
+}
+
+// humanizeKey turns API field names into readable labels.
+func TestHumanizeKey(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"id", "Id"},
+		{"name", "Name"},
+		{"modelKind", "Model Kind"},
+		{"MODEL_KIND", "Model Kind"},
+		{"baseModelId", "Base Model Id"},
+		{"createdAt", "Created At"},
+		{"snake_case_field", "Snake Case Field"},
+		{"kebab-case-field", "Kebab Case Field"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := humanizeKey(c.in); got != c.want {
+			t.Errorf("humanizeKey(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
