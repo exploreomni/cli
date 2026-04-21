@@ -114,7 +114,7 @@ func Login(apiEndpoint string) (*TokenResponse, error) {
 		"response_type":         {"code"},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"cli:access"},
+		"scope":                 {"user:default"},
 		"state":                 {state},
 	}.Encode()
 
