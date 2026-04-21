@@ -26,7 +26,7 @@ var spinnerPhrases = []string{
 	"summoning rows…",
 	"negotiating with the warehouse…",
 	"convincing BigQuery to hurry…",
-	"teaching the LLM SQL…",
+	"teaching the LLM OmniSQL…",
 	"crunching numbers…",
 }
 
