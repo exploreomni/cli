@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 )
 
 // Human reads a JSON response body and writes a human-friendly rendering to stdout.
@@ -194,7 +197,10 @@ func renderSections(w io.Writer, obj map[string]any, keys []string) {
 	}
 }
 
-// renderTable prints rows as a column-aligned table.
+// renderTable prints rows as a lipgloss-rendered table with box-drawing
+// borders. Headers render bold; identifier and timestamp columns render in
+// muted colors so the eye can skip past them. Color is auto-disabled when
+// stdout isn't a TTY (termenv's default renderer handles the downgrade).
 func renderTable(w io.Writer, rows []any) {
 	records := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
@@ -211,19 +217,53 @@ func renderTable(w io.Writer, rows []any) {
 	}
 
 	columns := pickColumns(records)
-	header := make([]string, len(columns))
+	headers := make([]string, len(columns))
 	for i, c := range columns {
-		header[i] = humanizeKey(c)
+		headers[i] = humanizeKey(c)
 	}
-	table := [][]string{header}
+
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Headers(headers...).
+		StyleFunc(styleFor(columns))
+
 	for _, rec := range records {
 		row := make([]string, len(columns))
 		for i, c := range columns {
 			row[i] = truncate(formatScalar(rec[c]), 60)
 		}
-		table = append(table, row)
+		t.Row(row...)
 	}
-	writeAligned(w, table, true)
+	fmt.Fprintln(w, t.Render())
+}
+
+// styleFor returns a StyleFunc that dims identifier columns and greys out
+// timestamps, keeping names and other scalars at default foreground.
+func styleFor(columns []string) func(row, col int) lipgloss.Style {
+	dim := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("8"))
+	grey := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("244"))
+	header := lipgloss.NewStyle().Padding(0, 1).Bold(true)
+	base := lipgloss.NewStyle().Padding(0, 1)
+
+	return func(row, col int) lipgloss.Style {
+		if row == table.HeaderRow {
+			return header
+		}
+		if col < 0 || col >= len(columns) {
+			return base
+		}
+		switch columns[col] {
+		case "id", "baseModelId", "connectionId", "parentId", "ownerId", "userId":
+			return dim
+		case "createdAt", "updatedAt", "deletedAt":
+			return grey
+		}
+		if strings.HasSuffix(columns[col], "Id") {
+			return dim
+		}
+		return base
+	}
 }
 
 // renderKeyValue prints a single object as aligned key: value lines.
@@ -412,40 +452,6 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-func writeAligned(w io.Writer, rows [][]string, headerSeparator bool) {
-	if len(rows) == 0 {
-		return
-	}
-	widths := make([]int, len(rows[0]))
-	for _, row := range rows {
-		for i, cell := range row {
-			if i >= len(widths) {
-				continue
-			}
-			if n := displayWidth(cell); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
-	for r, row := range rows {
-		for i, cell := range row {
-			if i == len(row)-1 {
-				fmt.Fprint(w, cell)
-			} else {
-				pad := widths[i] - displayWidth(cell)
-				if pad < 0 {
-					pad = 0
-				}
-				fmt.Fprint(w, cell, strings.Repeat(" ", pad), "  ")
-			}
-		}
-		fmt.Fprintln(w)
-		if headerSeparator && r == 0 {
-			fmt.Fprintln(w)
-		}
-	}
-}
-
 // humanizeKey converts API field names like "modelKind", "MODEL_KIND", or
 // "created_at" into readable labels like "Model Kind" / "Created At".
 // camelCase splits on case transitions; snake_case / kebab-case become spaces.
@@ -488,12 +494,3 @@ func humanizeKey(s string) string {
 	return strings.Join(fields, " ")
 }
 
-// displayWidth returns rune count, which is a good enough width approximation
-// for ASCII-heavy API output.
-func displayWidth(s string) int {
-	n := 0
-	for range s {
-		n++
-	}
-	return n
-}

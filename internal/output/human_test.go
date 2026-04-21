@@ -29,12 +29,6 @@ func TestHumanTo_RecordsList(t *testing.T) {
 	if !strings.Contains(out, "Cursor: abc") {
 		t.Errorf("expected pagination footer:\n%s", out)
 	}
-	// Blank line between the header row and the first data row so the table
-	// is easier to scan at a glance.
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[1]) != "" {
-		t.Errorf("expected blank separator after header row, got:\n%s", out)
-	}
 }
 
 // List with resource-named array (connections shape).
