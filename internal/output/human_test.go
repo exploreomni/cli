@@ -162,6 +162,27 @@ func TestHumanTo_MixedScalarAndArray(t *testing.T) {
 	}
 }
 
+// Null scalar fields are hidden in human mode so a successful response with
+// `"error": null` doesn't render as a scary `Error: -` line.
+func TestHumanTo_SkipsNullScalars(t *testing.T) {
+	body := strings.NewReader(`{
+		"error": null,
+		"topic": "Order Items",
+		"result": [{"month":"Jan 2023","count":1577}]
+	}`)
+	var buf bytes.Buffer
+	if err := HumanTo(&buf, body); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "Error") {
+		t.Errorf("expected null error field to be hidden, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Topic") || !strings.Contains(out, "Order Items") {
+		t.Errorf("expected topic to render:\n%s", out)
+	}
+}
+
 // humanizeKey turns API field names into readable labels.
 func TestHumanizeKey(t *testing.T) {
 	cases := []struct {

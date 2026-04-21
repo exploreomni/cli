@@ -171,6 +171,12 @@ func renderSections(w io.Writer, obj map[string]any, keys []string) {
 
 	for _, k := range keys {
 		v := obj[k]
+		// Nulls are visual noise in human mode (e.g. a null `error` field on
+		// a successful response renders as "Error: -" and looks scary).
+		// Skip them; JSON mode still shows the full response.
+		if v == nil {
+			continue
+		}
 		s, ok := v.(string)
 		if ok && (len(s) > 80 || strings.Contains(s, "\n")) {
 			longEntries = append(longEntries, longEntry{k, s})
@@ -267,21 +273,30 @@ func styleFor(columns []string) func(row, col int) lipgloss.Style {
 }
 
 // renderKeyValue prints a single object as aligned key: value lines.
+// Nulls are skipped — same rationale as renderSections.
 func renderKeyValue(w io.Writer, obj map[string]any) {
 	keys := sortedKeys(obj)
 	// Promote common identity fields to the top.
 	keys = promote(keys, []string{"id", "name", "modelKind", "dialect", "type", "kind"})
 
-	labels := make(map[string]string, len(keys))
-	maxKey := 0
+	visible := make([]string, 0, len(keys))
 	for _, k := range keys {
+		if obj[k] == nil {
+			continue
+		}
+		visible = append(visible, k)
+	}
+
+	labels := make(map[string]string, len(visible))
+	maxKey := 0
+	for _, k := range visible {
 		l := humanizeKey(k)
 		labels[k] = l
 		if len(l) > maxKey {
 			maxKey = len(l)
 		}
 	}
-	for _, k := range keys {
+	for _, k := range visible {
 		v := obj[k]
 		if isComplex(v) {
 			fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", summarizeComplex(v))
