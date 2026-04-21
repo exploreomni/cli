@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
@@ -91,16 +93,40 @@ func executeAPICall(req openapi.APIRequest) error {
 		return err
 	}
 
+	compact, _ := req.Cmd.Flags().GetBool("compact")
+	formatFlag, _ := req.Cmd.Flags().GetString("format")
+	format := config.ResolveOutputFormat(formatFlag, term.IsTerminal(int(os.Stdout.Fd())))
+
+	// Show a spinner on stderr while the request is in flight. Only when the
+	// user is at an interactive terminal AND they're going to see human output;
+	// scripts piping JSON shouldn't get decorative noise on stderr.
+	sp := maybeStartSpinner(format)
+
 	resp, err := auth.Do(cfg, req.Method, req.Path, req.Body)
+	if sp != nil {
+		sp.Stop()
+	}
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	compact, _ := req.Cmd.Flags().GetBool("compact")
-	formatFlag, _ := req.Cmd.Flags().GetString("format")
-	format := config.ResolveOutputFormat(formatFlag, term.IsTerminal(int(os.Stdout.Fd())))
 	return outputResponse(resp, format, compact)
+}
+
+// maybeStartSpinner returns a running spinner, or nil if the environment
+// doesn't warrant one (non-TTY stderr, or JSON output format).
+func maybeStartSpinner(format string) *spinner.Spinner {
+	if format != config.FormatHuman {
+		return nil
+	}
+	if !term.IsTerminal(int(os.Stderr.Fd())) {
+		return nil
+	}
+	s := spinner.New(spinner.CharSets[14], 80*time.Millisecond, spinner.WithWriter(os.Stderr))
+	s.Suffix = " waiting for Omni…"
+	s.Start()
+	return s
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.
