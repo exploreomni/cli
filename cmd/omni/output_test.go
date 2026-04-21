@@ -18,7 +18,7 @@ func TestOutputResponse_Error(t *testing.T) {
 		StatusCode: 400,
 		Body:       io.NopCloser(strings.NewReader(`{"error":"bad request"}`)),
 	}
-	err := outputResponse(resp, true)
+	err := outputResponse(resp, "json", true)
 	if err == nil {
 		t.Fatal("expected error for 400 status")
 	}
@@ -33,8 +33,20 @@ func TestOutputResponse_NoContent(t *testing.T) {
 		StatusCode: 204,
 		Body:       io.NopCloser(strings.NewReader("")),
 	}
-	err := outputResponse(resp, false)
+	err := outputResponse(resp, "json", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Human mode should also return an error for 400+ responses.
+func TestOutputResponse_Error_Human(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 404,
+		Body:       io.NopCloser(strings.NewReader(`{"detail":"not found"}`)),
+	}
+	err := outputResponse(resp, "human", false)
+	if err == nil {
+		t.Fatal("expected error for 404 status")
 	}
 }
