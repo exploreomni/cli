@@ -38,7 +38,6 @@ Releases are fully automated via GitHub Actions and [GoReleaser](https://gorelea
 2. **Create and push a version tag:**
 
    ```bash
-   git checkout main && git pull
    git tag v1.2.3
    git push origin v1.2.3
    ```
