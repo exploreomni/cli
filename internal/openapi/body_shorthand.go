@@ -201,6 +201,18 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni documents discard-draft <identifier> --branch-id <uuid>`,
 		ExampleJSON:  `omni documents discard-draft <identifier> --body '{"branchId":"<uuid>"}'`,
 	},
+	"documentsAddPermits": {
+		Args: []ArgMapping{
+			{Name: "role", FieldPath: "role", Description: "role to grant: NO_ACCESS, VIEWER, EXPLORER, EDITOR, MANAGER", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user membership UUIDs", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs", Transform: "string-list"},
+			{FlagName: "access-boost", FieldPath: "accessBoost", Description: "grant access boost", IsBool: true},
+		},
+		ExampleShort: `omni documents add-permits <identifier> VIEWER --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni documents add-permits <identifier> --body '{"role":"VIEWER","userIds":["uuid1","uuid2"]}'`,
+	},
 
 	// Dashboards
 	"dashboardsDownload": {
