@@ -100,6 +100,17 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni users assign-model-role <user-id> VIEWER --model-id <model-uuid>`,
 		ExampleJSON:  `omni users assign-model-role <user-id> --body '{"roleName":"VIEWER","modelId":"<model-uuid>"}'`,
 	},
+	"userGroupsAssignModelRole": {
+		Args: []ArgMapping{
+			{Name: "role-name", FieldPath: "roleName", Description: "role to assign (e.g. VIEWER, EXPLORER, EDITOR, MANAGER)", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "model-id", FieldPath: "modelId", Description: "model UUID (required unless --connection-id is given)"},
+			{FlagName: "connection-id", FieldPath: "connectionId", Description: "connection UUID (required unless --model-id is given)"},
+		},
+		ExampleShort: `omni user-groups assign-model-role <group-id> VIEWER --model-id <model-uuid>`,
+		ExampleJSON:  `omni user-groups assign-model-role <group-id> --body '{"roleName":"VIEWER","modelId":"<model-uuid>"}'`,
+	},
 
 	// Tier 2: User commands
 	"usersCreateEmailOnly": {
