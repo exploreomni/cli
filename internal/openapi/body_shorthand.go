@@ -186,6 +186,31 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Dashboards
+	"dashboardsDownload": {
+		Args: []ArgMapping{
+			{Name: "format", FieldPath: "format", Description: "output format: pdf, png, csv, xlsx, or json", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "filename", FieldPath: "filename", Description: "custom filename (without extension)"},
+			{FlagName: "filter-config", FieldPath: "filterConfig", Description: "filter conditions as JSON object", Transform: "json"},
+			{FlagName: "query-identifier-map-key", FieldPath: "queryIdentifierMapKey", Description: "query ID for single-tile tasks"},
+			{FlagName: "paper-format", FieldPath: "paperFormat", Description: "pdf paper size: a3, a4, letter, legal, fit_page, tabloid"},
+			{FlagName: "paper-orientation", FieldPath: "paperOrientation", Description: "pdf orientation: portrait or landscape"},
+			{FlagName: "max-row-limit", FieldPath: "maxRowLimit", Description: "max rows (csv/json/xlsx)", Transform: "json"},
+			{FlagName: "override-row-limit", FieldPath: "overrideRowLimit", Description: "override default row limit", IsBool: true},
+			{FlagName: "enable-formatting", FieldPath: "enableFormatting", Description: "enable formatting in output", IsBool: true},
+			{FlagName: "hide-hidden-fields", FieldPath: "hideHiddenFields", Description: "omit hidden fields from output", IsBool: true},
+			{FlagName: "hide-title", FieldPath: "hideTitle", Description: "hide content title in output", IsBool: true},
+			{FlagName: "show-content-link", FieldPath: "showContentLink", Description: "include link to content in output", IsBool: true},
+			{FlagName: "show-filters", FieldPath: "showFilters", Description: "include filters in output", IsBool: true},
+			{FlagName: "single-column-layout", FieldPath: "singleColumnLayout", Description: "stack tiles in a single column", IsBool: true},
+			{FlagName: "expand-tables-to-show-all-rows", FieldPath: "expandTablesToShowAllRows", Description: "include up to 1000 rows in table visualizations", IsBool: true},
+		},
+		ExampleShort: `omni dashboards download <identifier> pdf --paper-format letter --paper-orientation landscape`,
+		ExampleJSON:  `omni dashboards download <identifier> --body '{"format":"pdf","paperFormat":"letter","paperOrientation":"landscape"}'`,
+	},
+
 	// Connections
 	"connectionsDbtUpdate": {
 		Args: []ArgMapping{
