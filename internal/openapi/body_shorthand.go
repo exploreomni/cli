@@ -194,6 +194,20 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsContentValidatorReplace": {
+		Args: []ArgMapping{
+			{Name: "find", FieldPath: "find", Description: "string to find", Transform: "string"},
+			{Name: "replacement", FieldPath: "replacement", Description: "replacement string", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "find-or-replace-type", FieldPath: "find_or_replace_type", Description: "type: FIELD, VIEW, or TOPIC (required)"},
+			{FlagName: "branch-id", FieldPath: "branch_id", Description: "optional branch ID"},
+			{FlagName: "only-in-workbook-id", FieldPath: "only_in_workbook_id", Description: "limit replace scope to a specific workbook"},
+			{FlagName: "include-personal-folders", FieldPath: "include_personal_folders", Description: "include personal folders in the scope", IsBool: true},
+		},
+		ExampleShort: `omni models content-validator-replace <model-id> old_name new_name --find-or-replace-type FIELD`,
+		ExampleJSON:  `omni models content-validator-replace <model-id> --body '{"find":"old_name","replacement":"new_name","find_or_replace_type":"FIELD"}'`,
+	},
 	"modelsYamlCreate": {
 		Args: []ArgMapping{
 			{Name: "file-name", FieldPath: "fileName", Description: "file name to create or update", Transform: "string"},
