@@ -186,6 +186,20 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Embed
+	"embedSsoGenerateSession": {
+		Args: []ArgMapping{
+			{Name: "external-id", FieldPath: "externalId", Description: "external identifier for the user", Transform: "string"},
+			{Name: "name", FieldPath: "name", Description: "display name for the user", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "groups", FieldPath: "groups", Description: "comma-separated group names", Transform: "string-list"},
+			{FlagName: "user-attributes", FieldPath: "userAttributes", Description: "user attributes as JSON object", Transform: "json"},
+		},
+		ExampleShort: `omni embed sso-generate-session user-123 "John Doe" --groups engineering,sales`,
+		ExampleJSON:  `omni embed sso-generate-session --body '{"externalId":"user-123","name":"John Doe","groups":["engineering","sales"]}'`,
+	},
+
 	// Documents
 	"documentsCreateDraft": {
 		Flags: []FlagMapping{
