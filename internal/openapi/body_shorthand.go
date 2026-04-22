@@ -186,6 +186,20 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Folders
+	"foldersAddPermissions": {
+		Args: []ArgMapping{
+			{Name: "role", FieldPath: "role", Description: "role to grant: NO_ACCESS, VIEWER, EXPLORER, EDITOR, MANAGER", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user UUIDs", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs", Transform: "string-list"},
+			{FlagName: "access-boost", FieldPath: "accessBoost", Description: "grant access boost", IsBool: true},
+		},
+		ExampleShort: `omni folders add-permissions <folder-id> VIEWER --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni folders add-permissions <folder-id> --body '{"role":"VIEWER","userIds":["uuid1","uuid2"]}'`,
+	},
+
 	// Embed
 	"embedSsoGenerateSession": {
 		Args: []ArgMapping{
