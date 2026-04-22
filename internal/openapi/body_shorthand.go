@@ -198,6 +198,16 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni scim users-create user@example.com "John Doe"`,
 		ExampleJSON:  `omni scim users-create --body '{"userName":"user@example.com","displayName":"John Doe"}'`,
 	},
+	"scimGroupsCreate": {
+		Args: []ArgMapping{
+			{Name: "display-name", FieldPath: "displayName", Description: "display name of the group", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "member-ids", FieldPath: "members", Description: "comma-separated user membership UUIDs", Transform: "scim-member-list"},
+		},
+		ExampleShort: `omni scim groups-create "Engineering Team" --member-ids uuid1,uuid2`,
+		ExampleJSON:  `omni scim groups-create --body '{"displayName":"Engineering Team","members":[{"value":"uuid1"},{"value":"uuid2"}]}'`,
+	},
 	"scimUsersReplace": {
 		Args: []ArgMapping{
 			{Name: "user-name", FieldPath: "userName", Description: "email address (username) of the user", Transform: "string"},
