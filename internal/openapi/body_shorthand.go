@@ -213,6 +213,16 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni documents add-permits <identifier> VIEWER --user-ids uuid1,uuid2`,
 		ExampleJSON:  `omni documents add-permits <identifier> --body '{"role":"VIEWER","userIds":["uuid1","uuid2"]}'`,
 	},
+	"documentsUpdatePermits": {
+		Flags: []FlagMapping{
+			{FlagName: "role", FieldPath: "role", Description: "new role: NO_ACCESS, VIEWER, EXPLORER, EDITOR, MANAGER"},
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user membership UUIDs", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs", Transform: "string-list"},
+			{FlagName: "access-boost", FieldPath: "accessBoost", Description: "access boost setting", IsBool: true},
+		},
+		ExampleShort: `omni documents update-permits <identifier> --role EDITOR --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni documents update-permits <identifier> --body '{"role":"EDITOR","userIds":["uuid1","uuid2"]}'`,
+	},
 
 	// Dashboards
 	"dashboardsDownload": {
