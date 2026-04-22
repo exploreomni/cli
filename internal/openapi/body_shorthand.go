@@ -195,6 +195,14 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni connections schedules-create <connection-id> "0 2 * * ? *" "America/New_York"`,
 		ExampleJSON:  `omni connections schedules-create <connection-id> --body '{"schedule":"0 2 * * ? *","timezone":"America/New_York"}'`,
 	},
+	"connectionsSchedulesUpdate": {
+		Args: []ArgMapping{
+			{Name: "schedule", FieldPath: "schedule", Description: "AWS EventBridge cron expression", Transform: "string"},
+			{Name: "timezone", FieldPath: "timezone", Description: "IANA timezone for schedule execution", Transform: "string"},
+		},
+		ExampleShort: `omni connections schedules-update <connection-id> <schedule-id> "0 2 * * ? *" "America/New_York"`,
+		ExampleJSON:  `omni connections schedules-update <connection-id> <schedule-id> --body '{"schedule":"0 2 * * ? *","timezone":"America/New_York"}'`,
+	},
 
 	// Tier 4: Flags-only promotion (no new positional args)
 	"documentsUpdate": {
