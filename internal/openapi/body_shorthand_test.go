@@ -835,8 +835,8 @@ func TestShorthand_RegistryNotEmpty(t *testing.T) {
 	if len(bodyShorthands) == 0 {
 		t.Fatal("bodyShorthands registry is empty")
 	}
-	if len(bodyShorthands) != 52 {
-		t.Errorf("expected 52 shorthand entries, got %d", len(bodyShorthands))
+	if len(bodyShorthands) != 53 {
+		t.Errorf("expected 53 shorthand entries, got %d", len(bodyShorthands))
 	}
 }
 
