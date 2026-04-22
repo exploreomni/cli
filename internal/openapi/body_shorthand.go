@@ -201,6 +201,20 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni connections dbt-environments-create <connection-id> "PR_1111" "pr_1111"`,
 		ExampleJSON:  `omni connections dbt-environments-create <connection-id> --body '{"name":"PR_1111","targetSchema":"pr_1111"}'`,
 	},
+	"connectionsDbtEnvironmentsUpdate": {
+		Args: []ArgMapping{
+			{Name: "name", FieldPath: "name", Description: "environment name", Transform: "string"},
+			{Name: "target-schema", FieldPath: "targetSchema", Description: "target schema for this environment", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "owner-id", FieldPath: "ownerId", Description: "user ID of the environment owner"},
+			{FlagName: "target-database", FieldPath: "targetDatabase", Description: "target database override"},
+			{FlagName: "target-name", FieldPath: "targetName", Description: "target name override"},
+			{FlagName: "target-role", FieldPath: "targetRole", Description: "target role override"},
+		},
+		ExampleShort: `omni connections dbt-environments-update <connection-id> <env-id> "PR_1111" "pr_1111"`,
+		ExampleJSON:  `omni connections dbt-environments-update <connection-id> <env-id> --body '{"name":"PR_1111","targetSchema":"pr_1111"}'`,
+	},
 	"connectionsSchedulesCreate": {
 		Args: []ArgMapping{
 			{Name: "schedule", FieldPath: "schedule", Description: "AWS EventBridge cron expression", Transform: "string"},
