@@ -194,6 +194,22 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsGitCreate": {
+		Args: []ArgMapping{
+			{Name: "ssh-url", FieldPath: "sshUrl", Description: "SSH URL of the git repository", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "web-url", FieldPath: "webUrl", Description: "custom web URL for the git repository"},
+			{FlagName: "base-branch", FieldPath: "baseBranch", Description: "target branch for Omni pull requests (default: main)"},
+			{FlagName: "git-service-provider", FieldPath: "gitServiceProvider", Description: "git provider: github, gitlab, azure_devops, bitbucket, bitbucket_datacenter, auto"},
+			{FlagName: "model-path", FieldPath: "modelPath", Description: "path to model files in the repository"},
+			{FlagName: "require-pull-request", FieldPath: "requirePullRequest", Description: "when PRs are required: always, users-only, never"},
+			{FlagName: "branch-per-pull-request", FieldPath: "branchPerPullRequest", Description: "create a branch in Omni for every PR", IsBool: true},
+			{FlagName: "git-follower", FieldPath: "gitFollower", Description: "make the shared model read-only", IsBool: true},
+		},
+		ExampleShort: `omni models git-create <model-id> git@github.com:org/repo.git --base-branch main`,
+		ExampleJSON:  `omni models git-create <model-id> --body '{"sshUrl":"git@github.com:org/repo.git","baseBranch":"main"}'`,
+	},
 	"modelsGitUpdate": {
 		Flags: []FlagMapping{
 			{FlagName: "ssh-url", FieldPath: "sshUrl", Description: "SSH URL of the git repository"},
