@@ -186,6 +186,19 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Labels
+	"labelsUpdate": {
+		Flags: []FlagMapping{
+			{FlagName: "name", FieldPath: "name", Description: "label name"},
+			{FlagName: "color", FieldPath: "color", Description: "hex color (e.g. #0366d6)"},
+			{FlagName: "description", FieldPath: "description", Description: "label description"},
+			{FlagName: "homepage", FieldPath: "homepage", Description: "show label on homepage (admin only)", IsBool: true},
+			{FlagName: "verified", FieldPath: "verified", Description: "mark as verified label (admin only)", IsBool: true},
+		},
+		ExampleShort: `omni labels update <name> --color "#0366d6" --description "updated"`,
+		ExampleJSON:  `omni labels update <name> --body '{"color":"#0366d6","description":"updated"}'`,
+	},
+
 	// Folders
 	"foldersAddPermissions": {
 		Args: []ArgMapping{
