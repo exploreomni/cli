@@ -196,6 +196,15 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni schedules add-recipients <schedule-id> --emails a@co.com,b@co.com --user-ids uuid1`,
 		ExampleJSON:  `omni schedules add-recipients <schedule-id> --body '{"emails":["a@co.com"],"userIds":["uuid1"]}'`,
 	},
+	"schedulesRemoveRecipients": {
+		Flags: []FlagMapping{
+			{FlagName: "emails", FieldPath: "emails", Description: "comma-separated email addresses to remove", Transform: "string-list"},
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user UUIDs to remove", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group UUIDs to remove", Transform: "string-list"},
+		},
+		ExampleShort: `omni schedules remove-recipients <schedule-id> --emails a@co.com,b@co.com`,
+		ExampleJSON:  `omni schedules remove-recipients <schedule-id> --body '{"emails":["a@co.com","b@co.com"]}'`,
+	},
 
 	// SCIM
 	"scimUsersCreate": {
