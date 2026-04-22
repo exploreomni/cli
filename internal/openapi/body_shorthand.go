@@ -194,6 +194,21 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsCreate": {
+		Args: []ArgMapping{
+			{Name: "connection-id", FieldPath: "connectionId", Description: "connection ID for the model", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "model-name", FieldPath: "modelName", Description: "name for the model"},
+			{FlagName: "base-model-id", FieldPath: "baseModelId", Description: "base model ID for extension or branch models"},
+			{FlagName: "model-kind", FieldPath: "modelKind", Description: "model kind: SCHEMA, SHARED, SHARED_EXTENSION, BRANCH"},
+			{FlagName: "allow-as-workbook-base", FieldPath: "allowAsWorkbookBase", Description: "allow this model as a workbook base", IsBool: true},
+			{FlagName: "uses-isolated-branches", FieldPath: "usesIsolatedBranches", Description: "show branches on extension page (SHARED_EXTENSION only)", IsBool: true},
+			{FlagName: "access-grants", FieldPath: "accessGrants", Description: "access grants as JSON array", Transform: "json"},
+		},
+		ExampleShort: `omni models create <connection-id> --model-name "Sales" --model-kind SHARED`,
+		ExampleJSON:  `omni models create --body '{"connectionId":"<connection-id>","modelName":"Sales","modelKind":"SHARED"}'`,
+	},
 	"modelsContentValidatorReplace": {
 		Args: []ArgMapping{
 			{Name: "find", FieldPath: "find", Description: "string to find", Transform: "string"},
