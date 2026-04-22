@@ -223,6 +223,21 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni documents update-permits <identifier> --role EDITOR --user-ids uuid1,uuid2`,
 		ExampleJSON:  `omni documents update-permits <identifier> --body '{"role":"EDITOR","userIds":["uuid1","uuid2"]}'`,
 	},
+	"documentsUpdatePermissionSettings": {
+		Flags: []FlagMapping{
+			{FlagName: "organization-role", FieldPath: "organizationRole", Description: "org-wide role: viewer, editor, manager, no_access"},
+			{FlagName: "organization-access-boost", FieldPath: "organizationAccessBoost", Description: "boost organization access", IsBool: true},
+			{FlagName: "can-download", FieldPath: "canDownload", Description: "allow downloading", IsBool: true},
+			{FlagName: "can-drill", FieldPath: "canDrill", Description: "allow drill-down", IsBool: true},
+			{FlagName: "can-schedule", FieldPath: "canSchedule", Description: "allow scheduling", IsBool: true},
+			{FlagName: "can-upload", FieldPath: "canUpload", Description: "allow uploads", IsBool: true},
+			{FlagName: "can-use-dashboard-ai", FieldPath: "canUseDashboardAi", Description: "allow using dashboard AI", IsBool: true},
+			{FlagName: "can-view-workbook", FieldPath: "canViewWorkbook", Description: "allow viewing workbook", IsBool: true},
+			{FlagName: "require-pull-request-to-publish", FieldPath: "requirePullRequestToPublish", Description: "require PR to publish changes", IsBool: true},
+		},
+		ExampleShort: `omni documents update-permission-settings <identifier> --organization-role viewer --can-download false`,
+		ExampleJSON:  `omni documents update-permission-settings <identifier> --body '{"organizationRole":"viewer","canDownload":false}'`,
+	},
 
 	// Dashboards
 	"dashboardsDownload": {
