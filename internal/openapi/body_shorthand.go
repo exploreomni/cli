@@ -194,6 +194,21 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsYamlCreate": {
+		Args: []ArgMapping{
+			{Name: "file-name", FieldPath: "fileName", Description: "file name to create or update", Transform: "string"},
+			{Name: "yaml", FieldPath: "yaml", Description: "YAML content (use \"-\" to read from stdin via --body)", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "branch-id", FieldPath: "branchId", Description: "branch ID for branch-aware operations"},
+			{FlagName: "mode", FieldPath: "mode", Description: "IDE mode: combined, extension, staged, merged, history"},
+			{FlagName: "commit-message", FieldPath: "commitMessage", Description: "commit message for git sync"},
+			{FlagName: "fetched-at-millis", FieldPath: "fetchedAtMillis", Description: "timestamp when the file was fetched", Transform: "json"},
+			{FlagName: "previous-checksum", FieldPath: "previousChecksum", Description: "previous checksum for conflict detection"},
+		},
+		ExampleShort: `omni models yaml-create <model-id> my_view.view.yaml "view:\n  name: my_view\n"`,
+		ExampleJSON:  `omni models yaml-create <model-id> --body '{"fileName":"my_view.view.yaml","yaml":"view:\n  name: my_view\n"}'`,
+	},
 	"modelsCreateField": {
 		Args: []ArgMapping{
 			{Name: "view-name", FieldPath: "viewName", Description: "view to add the field to", Transform: "string"},
