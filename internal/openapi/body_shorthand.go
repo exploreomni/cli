@@ -208,6 +208,16 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni folders update <folder-id> --name "Q1 Reports" --path q1-reports`,
 		ExampleJSON:  `omni folders update <folder-id> --body '{"name":"Q1 Reports","path":"q1-reports"}'`,
 	},
+	"foldersUpdatePermissions": {
+		Flags: []FlagMapping{
+			{FlagName: "role", FieldPath: "role", Description: "new role: NO_ACCESS, VIEWER, EXPLORER, EDITOR, MANAGER"},
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user UUIDs", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs", Transform: "string-list"},
+			{FlagName: "access-boost", FieldPath: "accessBoost", Description: "access boost setting", IsBool: true},
+		},
+		ExampleShort: `omni folders update-permissions <folder-id> --role EDITOR --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni folders update-permissions <folder-id> --body '{"role":"EDITOR","userIds":["uuid1","uuid2"]}'`,
+	},
 
 	// Embed
 	"embedSsoGenerateSession": {
