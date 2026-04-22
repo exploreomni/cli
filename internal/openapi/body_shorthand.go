@@ -194,6 +194,16 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsMergeBranch": {
+		Flags: []FlagMapping{
+			{FlagName: "commit-message", FieldPath: "commit_message", Description: "custom commit message for git sync"},
+			{FlagName: "delete-branch", FieldPath: "delete_branch", Description: "delete the branch after merging", IsBool: true},
+			{FlagName: "force-override-git-settings", FieldPath: "force_override_git_settings", Description: "override PR-required or git-follower settings", IsBool: true},
+			{FlagName: "publish-drafts", FieldPath: "publish_drafts", Description: "publish branch-attached drafts", IsBool: true},
+		},
+		ExampleShort: `omni models merge-branch <model-id> <branch-name> --commit-message "Merging feature" --delete-branch true`,
+		ExampleJSON:  `omni models merge-branch <model-id> <branch-name> --body '{"commit_message":"Merging feature","delete_branch":true}'`,
+	},
 
 	// Labels
 	"labelsUpdate": {
