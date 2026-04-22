@@ -194,6 +194,13 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni documents create-draft <identifier> --branch-id <uuid>`,
 		ExampleJSON:  `omni documents create-draft <identifier> --body '{"branchId":"<uuid>"}'`,
 	},
+	"documentsDiscardDraft": {
+		Flags: []FlagMapping{
+			{FlagName: "branch-id", FieldPath: "branchId", Description: "branch ID for the draft"},
+		},
+		ExampleShort: `omni documents discard-draft <identifier> --branch-id <uuid>`,
+		ExampleJSON:  `omni documents discard-draft <identifier> --body '{"branchId":"<uuid>"}'`,
+	},
 
 	// Dashboards
 	"dashboardsDownload": {
