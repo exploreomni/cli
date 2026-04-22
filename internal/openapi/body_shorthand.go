@@ -186,6 +186,19 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// SCIM
+	"scimUsersCreate": {
+		Args: []ArgMapping{
+			{Name: "user-name", FieldPath: "userName", Description: "email address (username) of the user", Transform: "string"},
+			{Name: "display-name", FieldPath: "displayName", Description: "display name of the user", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "user-attributes", FieldPath: "urn:omni:params:1.0:UserAttribute", Description: "Omni user attributes as JSON object", Transform: "json"},
+		},
+		ExampleShort: `omni scim users-create user@example.com "John Doe"`,
+		ExampleJSON:  `omni scim users-create --body '{"userName":"user@example.com","displayName":"John Doe"}'`,
+	},
+
 	// Models
 	"modelsCacheReset": {
 		Flags: []FlagMapping{
