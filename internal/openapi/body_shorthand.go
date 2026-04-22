@@ -218,6 +218,14 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni folders update-permissions <folder-id> --role EDITOR --user-ids uuid1,uuid2`,
 		ExampleJSON:  `omni folders update-permissions <folder-id> --body '{"role":"EDITOR","userIds":["uuid1","uuid2"]}'`,
 	},
+	"foldersRevokePermissions": {
+		Flags: []FlagMapping{
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user UUIDs to revoke", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs to revoke", Transform: "string-list"},
+		},
+		ExampleShort: `omni folders revoke-permissions <folder-id> --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni folders revoke-permissions <folder-id> --body '{"userIds":["uuid1","uuid2"]}'`,
+	},
 
 	// Embed
 	"embedSsoGenerateSession": {
