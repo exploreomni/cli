@@ -187,6 +187,22 @@ var bodyShorthands = map[string]*BodyShorthand{
 	},
 
 	// Connections
+	"connectionsDbtUpdate": {
+		Args: []ArgMapping{
+			{Name: "branch", FieldPath: "branch", Description: "git branch name", Transform: "string"},
+			{Name: "ssh-url", FieldPath: "sshUrl", Description: "SSH URL for git repository", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "autogen-relationships", FieldPath: "autogenRelationships", Description: "automatically generate relationships from dbt (required)", IsBool: true},
+			{FlagName: "enable-virtual-schemas", FieldPath: "enableVirtualSchemas", Description: "enable virtual schemas from dbt (required)", IsBool: true},
+			{FlagName: "dbt-version", FieldPath: "dbtVersion", Description: "dbt version (e.g. 1.10, 1.11, Auto)"},
+			{FlagName: "enable-semantic-layer", FieldPath: "enableSemanticLayer", Description: "enable dbt semantic layer integration", IsBool: true},
+			{FlagName: "project-root-path", FieldPath: "projectRootPath", Description: "path to dbt project root within repository"},
+			{FlagName: "rotate-keys", FieldPath: "rotateKeys", Description: "rotate SSH deploy keys", IsBool: true},
+		},
+		ExampleShort: `omni connections dbt-update <connection-id> main git@github.com:org/repo.git --autogen-relationships true --enable-virtual-schemas false`,
+		ExampleJSON:  `omni connections dbt-update <connection-id> --body '{"branch":"main","sshUrl":"git@github.com:org/repo.git","autogenRelationships":true,"enableVirtualSchemas":false}'`,
+	},
 	"connectionsDbtEnvironmentsCreate": {
 		Args: []ArgMapping{
 			{Name: "name", FieldPath: "name", Description: "environment name", Transform: "string"},
