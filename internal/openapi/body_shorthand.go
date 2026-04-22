@@ -194,6 +194,19 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsUpdateView": {
+		Flags: []FlagMapping{
+			{FlagName: "new-view-name", FieldPath: "newViewName", Description: "new view name (for rename)"},
+			{FlagName: "label", FieldPath: "label", Description: "view label"},
+			{FlagName: "description", FieldPath: "description", Description: "view description"},
+			{FlagName: "format", FieldPath: "format", Description: "view format"},
+			{FlagName: "ai-context", FieldPath: "aiContext", Description: "AI context for the view"},
+			{FlagName: "hidden", FieldPath: "hidden", Description: "whether the view is hidden", IsBool: true},
+			{FlagName: "tags", FieldPath: "tags", Description: "comma-separated tags", Transform: "string-list"},
+		},
+		ExampleShort: `omni models update-view <model-id> <view-name> --label "Orders" --tags revenue,monthly`,
+		ExampleJSON:  `omni models update-view <model-id> <view-name> --body '{"label":"Orders","tags":["revenue","monthly"]}'`,
+	},
 	"modelsUpdateTopic": {
 		Flags: []FlagMapping{
 			{FlagName: "new-topic-name", FieldPath: "newTopicName", Description: "new topic name (for rename)"},
