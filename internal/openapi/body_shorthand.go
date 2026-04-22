@@ -198,6 +198,19 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni scim users-create user@example.com "John Doe"`,
 		ExampleJSON:  `omni scim users-create --body '{"userName":"user@example.com","displayName":"John Doe"}'`,
 	},
+	"scimUsersReplace": {
+		Args: []ArgMapping{
+			{Name: "user-name", FieldPath: "userName", Description: "email address (username) of the user", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "display-name", FieldPath: "displayName", Description: "display name of the user"},
+			{FlagName: "active", FieldPath: "active", Description: "whether the user is active", IsBool: true},
+			{FlagName: "user-attributes", FieldPath: "urn:omni:params:1.0:UserAttribute", Description: "Omni user attributes as JSON object", Transform: "json"},
+			{FlagName: "enterprise-attributes", FieldPath: "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User", Description: "enterprise SCIM user attributes as JSON object", Transform: "json"},
+		},
+		ExampleShort: `omni scim users-replace <id> user@example.com --display-name "John Doe" --active true`,
+		ExampleJSON:  `omni scim users-replace <id> --body '{"userName":"user@example.com","displayName":"John Doe","active":true}'`,
+	},
 
 	// Models
 	"modelsCacheReset": {
