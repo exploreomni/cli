@@ -100,6 +100,119 @@ func TestAssembleBody_EmailListTrimsWhitespace(t *testing.T) {
 	}
 }
 
+func TestAssembleBody_StringListTransform_Arg(t *testing.T) {
+	sh := &BodyShorthand{
+		Args: []ArgMapping{
+			{FieldPath: "userIds", Transform: "string-list"},
+		},
+	}
+	cmd := newMockCmd(nil)
+	body, err := assembleBody(sh, []string{"uuid-1, uuid-2 ,uuid-3"}, 0, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	json.Unmarshal(body, &parsed)
+	ids, ok := parsed["userIds"].([]interface{})
+	if !ok {
+		t.Fatalf("userIds is not an array: %T", parsed["userIds"])
+	}
+	want := []string{"uuid-1", "uuid-2", "uuid-3"}
+	if len(ids) != len(want) {
+		t.Fatalf("expected %d ids, got %d", len(want), len(ids))
+	}
+	for i, id := range ids {
+		if id != want[i] {
+			t.Errorf("userIds[%d] = %v, want %s", i, id, want[i])
+		}
+	}
+}
+
+func TestAssembleBody_StringListTransform_Flag(t *testing.T) {
+	sh := &BodyShorthand{
+		Flags: []FlagMapping{
+			{FlagName: "user-ids", FieldPath: "userIds", Transform: "string-list"},
+		},
+	}
+	cmd := newMockCmd(map[string]string{"user-ids": "a,b,c"})
+	body, err := assembleBody(sh, nil, 0, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	json.Unmarshal(body, &parsed)
+	ids := parsed["userIds"].([]interface{})
+	if len(ids) != 3 || ids[0] != "a" || ids[2] != "c" {
+		t.Errorf("userIds = %v, want [a b c]", ids)
+	}
+}
+
+func TestAssembleBody_ScimMemberListTransform(t *testing.T) {
+	sh := &BodyShorthand{
+		Flags: []FlagMapping{
+			{FlagName: "member-ids", FieldPath: "members", Transform: "scim-member-list"},
+		},
+	}
+	cmd := newMockCmd(map[string]string{"member-ids": "uuid-1,uuid-2"})
+	body, err := assembleBody(sh, nil, 0, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	json.Unmarshal(body, &parsed)
+	members := parsed["members"].([]interface{})
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(members))
+	}
+	first := members[0].(map[string]interface{})
+	if first["value"] != "uuid-1" {
+		t.Errorf("members[0].value = %v, want uuid-1", first["value"])
+	}
+}
+
+func TestAssembleBody_JsonTransform_Array(t *testing.T) {
+	sh := &BodyShorthand{
+		Flags: []FlagMapping{
+			{FlagName: "group-filters", FieldPath: "groupFilters", Transform: "json"},
+		},
+	}
+	cmd := newMockCmd(map[string]string{"group-filters": `[{"field":"a"},{"field":"b"}]`})
+	body, err := assembleBody(sh, nil, 0, cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	json.Unmarshal(body, &parsed)
+	filters := parsed["groupFilters"].([]interface{})
+	if len(filters) != 2 {
+		t.Fatalf("expected 2 filters, got %d", len(filters))
+	}
+	first := filters[0].(map[string]interface{})
+	if first["field"] != "a" {
+		t.Errorf("groupFilters[0].field = %v, want a", first["field"])
+	}
+}
+
+func TestAssembleBody_JsonTransform_InvalidReturnsError(t *testing.T) {
+	sh := &BodyShorthand{
+		Flags: []FlagMapping{
+			{FlagName: "data", FieldPath: "data", Transform: "json"},
+		},
+	}
+	cmd := newMockCmd(map[string]string{"data": "not json{"})
+	_, err := assembleBody(sh, nil, 0, cmd)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid JSON") {
+		t.Errorf("error = %q, want 'invalid JSON'", err.Error())
+	}
+}
+
 func TestAssembleBody_WithPathParams(t *testing.T) {
 	sh := &BodyShorthand{
 		Args: []ArgMapping{

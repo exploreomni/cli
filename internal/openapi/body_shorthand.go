@@ -23,6 +23,7 @@ type FlagMapping struct {
 	Description string
 	Default     string
 	IsBool      bool
+	Transform   string // "string" (default), "string-list", "scim-member-list", "json"
 }
 
 // BodyShorthand defines how a single operation's body can be simplified.
@@ -303,38 +304,74 @@ func assembleBody(sh *BodyShorthand, args []string, pathParamCount int, cmd *cob
 		if i >= len(shorthandArgs) {
 			break
 		}
-		val := shorthandArgs[i]
-		switch mapping.Transform {
-		case "string", "uuid":
-			body[mapping.FieldPath] = val
-		case "email-list":
-			parts := strings.Split(val, ",")
-			users := make([]map[string]string, 0, len(parts))
-			for _, e := range parts {
-				e = strings.TrimSpace(e)
-				if e != "" {
-					users = append(users, map[string]string{"email": e})
-				}
-			}
-			body[mapping.FieldPath] = users
-		default:
-			body[mapping.FieldPath] = val
+		v, err := transformValue(mapping.Transform, shorthandArgs[i])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", mapping.Name, err)
 		}
+		body[mapping.FieldPath] = v
 	}
 
 	for _, fm := range sh.Flags {
-		if fm.IsBool {
-			val, _ := cmd.Flags().GetString(fm.FlagName)
-			if val != "" {
-				body[fm.FieldPath] = (val == "true")
-			}
-		} else {
-			val, _ := cmd.Flags().GetString(fm.FlagName)
-			if val != "" {
-				body[fm.FieldPath] = val
-			}
+		val, _ := cmd.Flags().GetString(fm.FlagName)
+		if val == "" {
+			continue
 		}
+		if fm.IsBool {
+			body[fm.FieldPath] = (val == "true")
+			continue
+		}
+		v, err := transformValue(fm.Transform, val)
+		if err != nil {
+			return nil, fmt.Errorf("--%s: %w", fm.FlagName, err)
+		}
+		body[fm.FieldPath] = v
 	}
 
 	return json.Marshal(body)
+}
+
+// transformValue converts a CLI string value into the JSON shape indicated by the transform.
+func transformValue(transform, val string) (interface{}, error) {
+	switch transform {
+	case "", "string", "uuid":
+		return val, nil
+	case "email-list":
+		parts := strings.Split(val, ",")
+		users := make([]map[string]string, 0, len(parts))
+		for _, e := range parts {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				users = append(users, map[string]string{"email": e})
+			}
+		}
+		return users, nil
+	case "string-list":
+		parts := strings.Split(val, ",")
+		out := make([]string, 0, len(parts))
+		for _, s := range parts {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	case "scim-member-list":
+		parts := strings.Split(val, ",")
+		members := make([]map[string]string, 0, len(parts))
+		for _, id := range parts {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				members = append(members, map[string]string{"value": id})
+			}
+		}
+		return members, nil
+	case "json":
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(val), &parsed); err != nil {
+			return nil, fmt.Errorf("invalid JSON: %w", err)
+		}
+		return parsed, nil
+	default:
+		return val, nil
+	}
 }
