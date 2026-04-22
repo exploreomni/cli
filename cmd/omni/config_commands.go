@@ -25,6 +25,7 @@ func addConfigCommands(root *cobra.Command) {
 	configCmd.AddCommand(configUseCmd())
 	configCmd.AddCommand(configLoginCmd())
 	configCmd.AddCommand(configLogoutCmd())
+	configCmd.AddCommand(configSetFormatCmd())
 
 	root.AddCommand(configCmd)
 }
@@ -145,6 +146,35 @@ func configShowCmd() *cobra.Command {
 
 			data, _ := json.MarshalIndent(display, "", "  ")
 			fmt.Println(string(data))
+			return nil
+		},
+	}
+}
+
+func configSetFormatCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-format <json|human|auto>",
+		Short: "Set the default output format",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format := strings.ToLower(strings.TrimSpace(args[0]))
+			if !config.ValidOutputFormat(format) {
+				return fmt.Errorf("invalid format %q — must be one of: json, human, auto", args[0])
+			}
+
+			cfg, err := config.Load()
+			if err != nil {
+				cfg = &config.Config{
+					Version:  1,
+					Profiles: make(map[string]config.Profile),
+				}
+			}
+			cfg.DefaultOutputFormat = format
+			if err := config.Save(cfg); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
+
+			fmt.Printf("Default output format set to %q\n", format)
 			return nil
 		},
 	}

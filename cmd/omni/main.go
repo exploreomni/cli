@@ -10,6 +10,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 //go:embed openapi.json
@@ -51,6 +52,7 @@ func main() {
 	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
 	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
+	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
 
 
 	// Hand-written commands (not from spec)
@@ -89,14 +91,23 @@ func executeAPICall(req openapi.APIRequest) error {
 		return err
 	}
 
+	compact, _ := req.Cmd.Flags().GetBool("compact")
+	formatFlag, _ := req.Cmd.Flags().GetString("format")
+	format := config.ResolveOutputFormat(formatFlag, term.IsTerminal(int(os.Stdout.Fd())))
+
+	// Show a spinner on stderr while the request is in flight. Only when the
+	// user is at an interactive terminal AND they're going to see human output;
+	// scripts piping JSON shouldn't get decorative noise on stderr.
+	sp := maybeStartSpinner(format)
+
 	resp, err := auth.Do(cfg, req.Method, req.Path, req.Body)
+	sp.Stop()
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	compact, _ := req.Cmd.Flags().GetBool("compact")
-	return outputResponse(resp, compact)
+	return outputResponse(resp, format, compact)
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.

@@ -4,6 +4,12 @@ Command-line tool for the Omni API. Commands are auto-generated from the OpenAPI
 
 ## Installation
 
+### Homebrew (macOS / Linux) Preferred
+
+```bash
+brew tap exploreomni/tap
+brew install omni
+```
 ### Install script (macOS / Linux)
 
 ```bash
@@ -62,6 +68,55 @@ omni models list
 omni documents list
 omni --help
 ```
+
+## Shell completions
+
+`omni` supports tab completion for bash, zsh, fish, and PowerShell. Pick your shell below and run the snippet once — tab completion works on every new shell thereafter.
+
+### zsh
+
+Source on every shell start (simplest):
+
+```bash
+echo 'source <(omni completion zsh)' >> ~/.zshrc
+```
+
+Or install into your fpath for faster startup:
+
+```bash
+omni completion zsh > "${fpath[1]}/_omni"
+# ensure `autoload -U compinit && compinit` runs in your .zshrc
+```
+
+### bash
+
+Requires the `bash-completion` package.
+
+```bash
+echo 'source <(omni completion bash)' >> ~/.bashrc
+```
+
+System-wide install (Linux):
+
+```bash
+omni completion bash | sudo tee /etc/bash_completion.d/omni > /dev/null
+```
+
+### fish
+
+```bash
+omni completion fish > ~/.config/fish/completions/omni.fish
+```
+
+### PowerShell
+
+```powershell
+omni completion powershell | Out-String | Invoke-Expression
+```
+
+Add that line to your PowerShell profile to persist it across sessions.
+
+After installing, restart your shell and try: `omni <TAB>`, `omni ai <TAB>`, `omni ai sea<TAB>` → `omni ai search-omni-docs`.
 
 ## How it works
 

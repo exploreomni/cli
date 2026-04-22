@@ -1,0 +1,29 @@
+name: Notify Docs on Changes
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - "!.github/**"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger mintlify-omni docs sync
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          repository: exploreomni/mintlify-omni
+          event-type: cli-docs-update
+          client-payload: >-
+            {
+              "source": "cli",
+              "trigger": "${{ github.event_name == 'release' && 'release' || 'push' }}",
+              "release_tag": "${{ github.event.release.tag_name || '' }}",
+              "commit_sha": "${{ github.sha }}",
+              "before_sha": "${{ github.event.before || '' }}"
+            }

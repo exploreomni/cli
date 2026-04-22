@@ -1,5 +1,5 @@
 # Go binary
-/bin/
+/bin/omni
 
 # GoReleaser
 /dist/
