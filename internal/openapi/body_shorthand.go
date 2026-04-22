@@ -223,6 +223,14 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni documents update-permits <identifier> --role EDITOR --user-ids uuid1,uuid2`,
 		ExampleJSON:  `omni documents update-permits <identifier> --body '{"role":"EDITOR","userIds":["uuid1","uuid2"]}'`,
 	},
+	"documentsRevokePermits": {
+		Flags: []FlagMapping{
+			{FlagName: "user-ids", FieldPath: "userIds", Description: "comma-separated user membership UUIDs to revoke", Transform: "string-list"},
+			{FlagName: "user-group-ids", FieldPath: "userGroupIds", Description: "comma-separated user group IDs to revoke", Transform: "string-list"},
+		},
+		ExampleShort: `omni documents revoke-permits <identifier> --user-ids uuid1,uuid2`,
+		ExampleJSON:  `omni documents revoke-permits <identifier> --body '{"userIds":["uuid1","uuid2"]}'`,
+	},
 	"documentsUpdatePermissionSettings": {
 		Flags: []FlagMapping{
 			{FlagName: "organization-role", FieldPath: "organizationRole", Description: "org-wide role: viewer, editor, manager, no_access"},
