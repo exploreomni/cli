@@ -186,6 +186,15 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Documents
+	"documentsCreateDraft": {
+		Flags: []FlagMapping{
+			{FlagName: "branch-id", FieldPath: "branchId", Description: "branch ID for the draft"},
+		},
+		ExampleShort: `omni documents create-draft <identifier> --branch-id <uuid>`,
+		ExampleJSON:  `omni documents create-draft <identifier> --body '{"branchId":"<uuid>"}'`,
+	},
+
 	// Dashboards
 	"dashboardsDownload": {
 		Args: []ArgMapping{
