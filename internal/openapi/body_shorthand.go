@@ -186,6 +186,15 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleJSON:  `omni folders create --body '{"name":"My New Folder"}'`,
 	},
 
+	// Models
+	"modelsCacheReset": {
+		Flags: []FlagMapping{
+			{FlagName: "reset-at", FieldPath: "resetAt", Description: "ISO-8601 timestamp for when to reset the cache"},
+		},
+		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
+		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
+	},
+
 	// Labels
 	"labelsUpdate": {
 		Flags: []FlagMapping{
