@@ -199,6 +199,15 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni folders add-permissions <folder-id> VIEWER --user-ids uuid1,uuid2`,
 		ExampleJSON:  `omni folders add-permissions <folder-id> --body '{"role":"VIEWER","userIds":["uuid1","uuid2"]}'`,
 	},
+	"foldersUpdate": {
+		Flags: []FlagMapping{
+			{FlagName: "name", FieldPath: "name", Description: "new display name"},
+			{FlagName: "path", FieldPath: "path", Description: "new URL path segment (alphanumeric and dashes)"},
+			{FlagName: "resolve-path-conflict", FieldPath: "resolvePathConflict", Description: "auto-resolve path collisions with a numeric suffix", IsBool: true},
+		},
+		ExampleShort: `omni folders update <folder-id> --name "Q1 Reports" --path q1-reports`,
+		ExampleJSON:  `omni folders update <folder-id> --body '{"name":"Q1 Reports","path":"q1-reports"}'`,
+	},
 
 	// Embed
 	"embedSsoGenerateSession": {
