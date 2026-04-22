@@ -194,6 +194,25 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsCreateField": {
+		Args: []ArgMapping{
+			{Name: "view-name", FieldPath: "viewName", Description: "view to add the field to", Transform: "string"},
+			{Name: "field-name", FieldPath: "fieldName", Description: "new field name", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "label", FieldPath: "label", Description: "field label"},
+			{FlagName: "description", FieldPath: "description", Description: "field description"},
+			{FlagName: "sql", FieldPath: "sql", Description: "SQL expression for the field"},
+			{FlagName: "format", FieldPath: "format", Description: "field format"},
+			{FlagName: "aggregate-type", FieldPath: "aggregateType", Description: "aggregate type for measures"},
+			{FlagName: "ai-context", FieldPath: "aiContext", Description: "AI context for the field"},
+			{FlagName: "topic-context", FieldPath: "topicContext", Description: "topic context for topic-scoped fields"},
+			{FlagName: "tags", FieldPath: "tags", Description: "comma-separated tags", Transform: "string-list"},
+			{FlagName: "hidden", FieldPath: "hidden", Description: "whether the field is hidden", IsBool: true},
+		},
+		ExampleShort: `omni models create-field <model-id> orders total_revenue --sql "SUM(amount)" --aggregate-type sum`,
+		ExampleJSON:  `omni models create-field <model-id> --body '{"viewName":"orders","fieldName":"total_revenue","sql":"SUM(amount)"}'`,
+	},
 	"modelsGitCreate": {
 		Args: []ArgMapping{
 			{Name: "ssh-url", FieldPath: "sshUrl", Description: "SSH URL of the git repository", Transform: "string"},
