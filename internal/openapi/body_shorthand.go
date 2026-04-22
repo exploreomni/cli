@@ -194,6 +194,17 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models cache-reset <model-id> <policy-name> --reset-at 2024-01-15T12:00:00Z`,
 		ExampleJSON:  `omni models cache-reset <model-id> <policy-name> --body '{"resetAt":"2024-01-15T12:00:00Z"}'`,
 	},
+	"modelsUpdateTopic": {
+		Flags: []FlagMapping{
+			{FlagName: "new-topic-name", FieldPath: "newTopicName", Description: "new topic name (for rename)"},
+			{FlagName: "label", FieldPath: "label", Description: "topic label"},
+			{FlagName: "description", FieldPath: "description", Description: "topic description"},
+			{FlagName: "group-label", FieldPath: "groupLabel", Description: "group label for the topic"},
+			{FlagName: "hidden", FieldPath: "hidden", Description: "whether the topic is hidden", IsBool: true},
+		},
+		ExampleShort: `omni models update-topic <model-id> <topic-name> --label "Revenue" --hidden false`,
+		ExampleJSON:  `omni models update-topic <model-id> <topic-name> --body '{"label":"Revenue","hidden":false}'`,
+	},
 	"modelsMergeBranch": {
 		Flags: []FlagMapping{
 			{FlagName: "commit-message", FieldPath: "commit_message", Description: "custom commit message for git sync"},
