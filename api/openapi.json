@@ -16,6 +16,10 @@
       "name": "AI"
     },
     {
+      "description": "API token administration. List organization, personal, and MCP tokens.",
+      "name": "API Tokens"
+    },
+    {
       "description": "Database connections and environments",
       "name": "Connections"
     },
@@ -318,6 +322,10 @@
                 "type": "string",
                 "description": "The natural language prompt describing the data you want to retrieve.",
                 "example": "Show me total revenue by month for the last year"
+              },
+              "queryAllViews": {
+                "type": "boolean",
+                "description": "If true and the model has query_all_views_and_fields enabled, AI can query views not in any topic."
               },
               "runQuery": {
                 "type": "boolean",
@@ -928,6 +936,126 @@
           "error"
         ]
       },
+      "ApiKeyListResponse": {
+        "type": "object",
+        "properties": {
+          "pageInfo": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiKey"
+            }
+          }
+        },
+        "required": [
+          "pageInfo",
+          "records"
+        ]
+      },
+      "PageInfo": {
+        "type": "object",
+        "properties": {
+          "hasNextPage": {
+            "type": "boolean",
+            "description": "Whether more results are available"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cursor for fetching the next page"
+          },
+          "pageSize": {
+            "type": "number",
+            "description": "Number of results per page"
+          },
+          "totalRecords": {
+            "type": "number",
+            "description": "Total number of records matching the query"
+          }
+        },
+        "required": [
+          "hasNextPage",
+          "nextCursor",
+          "pageSize",
+          "totalRecords"
+        ]
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of when the token was created",
+            "example": "2026-01-15T10:00:00.000Z"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the token can currently authenticate. Organization tokens may be disabled by admins; personal and MCP tokens are always `true` (revocation deletes them).",
+            "example": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the token",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "membershipId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Membership ID of the user the token is scoped to. Null for organization-level tokens.",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the token",
+            "example": "CI deployment key"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "personal",
+              "mcp"
+            ],
+            "description": "Token type: `organization` (org-level), `personal` (user-created personal access token), or `mcp` (MCP OAuth grant).",
+            "example": "organization"
+          }
+        },
+        "required": [
+          "createdAt",
+          "enabled",
+          "id",
+          "membershipId",
+          "name",
+          "type"
+        ]
+      },
+      "DbtEnvironmentListResponse": {
+        "type": "object",
+        "properties": {
+          "pageInfo": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DbtEnvironmentItem"
+            }
+          }
+        },
+        "required": [
+          "pageInfo",
+          "records"
+        ]
+      },
       "DbtEnvironmentItem": {
         "type": "object",
         "properties": {
@@ -994,9 +1122,7 @@
           "targetRole",
           "targetSchema",
           "variables"
-        ],
-        "description": "Created dbt environment",
-        "title": "DbtEnvironmentCreateResponse"
+        ]
       },
       "DbtEnvironmentResponseVariable": {
         "type": "object",
@@ -1192,6 +1318,25 @@
           }
         ]
       },
+      "DbtEnvironmentDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Confirmation message",
+            "example": "dbt environment deleted successfully"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether the deletion was successful",
+            "example": true
+          }
+        },
+        "required": [
+          "message",
+          "success"
+        ]
+      },
       "ContentListResponse": {
         "type": "object",
         "properties": {
@@ -1321,36 +1466,6 @@
         "required": [
           "pageInfo",
           "records"
-        ]
-      },
-      "PageInfo": {
-        "type": "object",
-        "properties": {
-          "hasNextPage": {
-            "type": "boolean",
-            "description": "Whether more results are available"
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Cursor for fetching the next page"
-          },
-          "pageSize": {
-            "type": "number",
-            "description": "Number of results per page"
-          },
-          "totalRecords": {
-            "type": "number",
-            "description": "Total number of records matching the query"
-          }
-        },
-        "required": [
-          "hasNextPage",
-          "nextCursor",
-          "pageSize",
-          "totalRecords"
         ]
       },
       "OwnerInternal": {
@@ -1484,6 +1599,14 @@
             },
             "description": "Applied labels"
           },
+          "lastViewedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last time the dashboard was viewed"
+          },
           "updatedAt": {
             "type": [
               "string",
@@ -1496,6 +1619,13 @@
             "type": "string",
             "description": "URL to view the document. Returns dashboard URL if document has a dashboard, otherwise workbook URL.",
             "example": "https://org.omni.co/dashboards/abc123"
+          },
+          "visits": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Number of dashboard visits"
           }
         },
         "required": [
@@ -1632,6 +1762,12 @@
           "singleColumnLayout": {
             "type": "boolean",
             "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+            "example": false
+          },
+          "useCache": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries.",
             "example": false
           },
           "filename": {
@@ -1974,6 +2110,9 @@
             },
             "description": "Order of filters in the dashboard"
           },
+          "identifier": {
+            "$ref": "#/components/schemas/DocumentIdentifier"
+          },
           "metadata": {
             "description": "Dashboard metadata"
           },
@@ -2050,7 +2189,7 @@
                   "description": "Topic name"
                 },
                 "visConfig": {
-                  "description": "Visualization configuration"
+                  "$ref": "#/components/schemas/ApiVisConfig"
                 }
               },
               "required": [
@@ -2065,6 +2204,55 @@
           "modelId",
           "name"
         ]
+      },
+      "DocumentIdentifier": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 48,
+        "description": "Optional document identifier. If omitted, an identifier is auto-generated. Must be unique within the organization."
+      },
+      "ApiVisConfig": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Visualization spec (chart configuration)"
+          },
+          "fields": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Field names used in the visualization"
+          },
+          "visType": {
+            "type": "string",
+            "enum": [
+              "vegalite",
+              "omni-ai-summary-markdown",
+              "basic",
+              "omni-kpi",
+              "map",
+              "omni-markdown",
+              "funnel",
+              "sankey",
+              "single-record",
+              "svg-map",
+              "omni-spreadsheet",
+              "spreadsheet-tab",
+              "summary-value",
+              "omni-table"
+            ],
+            "description": "Visualization type (e.g. basic, omni-markdown, omni-table)"
+          }
+        },
+        "additionalProperties": {},
+        "description": "Visualization configuration"
       },
       "DocumentsGetResponse": {
         "type": "object",
@@ -2123,6 +2311,208 @@
           "refreshInterval"
         ]
       },
+      "DocumentsPutResponse": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Document description"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Document identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Updated document name"
+          }
+        },
+        "required": [
+          "identifier",
+          "name"
+        ]
+      },
+      "DocumentsPutBody": {
+        "type": "object",
+        "properties": {
+          "clearExistingDraft": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clear existing draft before updating (for published documents with drafts)"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Document description"
+          },
+          "documentMetadata": {
+            "description": "Document presentation metadata"
+          },
+          "facetFilters": {
+            "type": "boolean",
+            "description": "Enable facet filters"
+          },
+          "filterConfig": {
+            "description": "Filter configuration"
+          },
+          "filterOrder": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Order of filters"
+          },
+          "modelId": {
+            "type": "string",
+            "description": "Model ID"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 254,
+            "description": "Document name"
+          },
+          "queryPresentations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentsPutQueryPresentation"
+            },
+            "minItems": 1,
+            "description": "Query presentations (full replacement)"
+          },
+          "refreshInterval": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 60,
+            "description": "Auto-refresh interval in seconds"
+          }
+        },
+        "required": [
+          "facetFilters",
+          "filterOrder",
+          "modelId",
+          "name",
+          "queryPresentations",
+          "refreshInterval"
+        ]
+      },
+      "DocumentsPutQueryPresentation": {
+        "type": "object",
+        "properties": {
+          "aiConfig": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "object",
+                "properties": {
+                  "aiContext": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "subTitle": {
+                "type": "object",
+                "properties": {
+                  "aiContext": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "description": "AI configuration"
+          },
+          "chartType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "auto",
+              "area",
+              "areaStacked",
+              "areaStackedPercentage",
+              "bar",
+              "barLine",
+              "barGrouped",
+              "barStacked",
+              "barStackedPercentage",
+              "boxplot",
+              "code",
+              "column",
+              "columnGrouped",
+              "columnStacked",
+              "columnStackedPercentage",
+              "heatmap",
+              "kpi",
+              "line",
+              "lineColor",
+              "map",
+              "regionMap",
+              "markdown",
+              "omni-ai-summary-markdown",
+              "pie",
+              "funnel",
+              "sankey",
+              "point",
+              "pointColor",
+              "pointSize",
+              "pointSizeColor",
+              "singleRecord",
+              "omni-spreadsheet",
+              "summaryValue",
+              "svgMap",
+              "table",
+              null
+            ],
+            "description": "Chart type"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description"
+          },
+          "name": {
+            "type": "string",
+            "description": "Query presentation name"
+          },
+          "prefersChart": {
+            "type": "boolean",
+            "description": "Whether to prefer chart view"
+          },
+          "query": {
+            "description": "Query definition"
+          },
+          "resultConfig": {
+            "description": "Result config"
+          },
+          "subTitle": {
+            "type": "string",
+            "description": "Subtitle"
+          },
+          "topicName": {
+            "type": "string",
+            "description": "Topic name"
+          },
+          "visConfig": {
+            "$ref": "#/components/schemas/ApiVisConfig"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "DocumentsUpdateResponse": {
         "type": "object",
         "properties": {
@@ -2161,6 +2551,16 @@
               "null"
             ],
             "description": "Document description"
+          },
+          "identifier": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DocumentIdentifier"
+              },
+              {
+                "description": "New identifier for the document. Must be unique within the organization. The previous identifier is retained in the document identifier history and continues to redirect."
+              }
+            ]
           },
           "name": {
             "type": "string",
@@ -3537,6 +3937,21 @@
           "status"
         ]
       },
+      "ModelsGetSchemasResponse": {
+        "type": "object",
+        "properties": {
+          "schemas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sorted list of all available schema names (catalog-scoped if applicable, e.g. warehouse.reporting)"
+          }
+        },
+        "required": [
+          "schemas"
+        ]
+      },
       "ModelsGetViewResponse": {
         "type": "object",
         "properties": {
@@ -3557,7 +3972,25 @@
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Field name"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "dimension",
+                          "measure",
+                          "filter"
+                        ],
+                        "description": "Field type"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type"
+                    ]
                   },
                   "description": "Fields in the view"
                 },
@@ -4041,6 +4474,113 @@
           "targetModelId"
         ]
       },
+      "ModelsDbtExposuresResponse": {
+        "type": "object",
+        "properties": {
+          "pageInfo": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DbtExposureWithMeta"
+            }
+          }
+        },
+        "required": [
+          "pageInfo",
+          "records"
+        ]
+      },
+      "DbtExposureWithMeta": {
+        "type": "object",
+        "properties": {
+          "dashboard_identifier": {
+            "type": "string",
+            "description": "Identifier of the dashboard that generated this exposure"
+          },
+          "deduplication_name": {
+            "type": "string",
+            "description": "A unique name for this exposure. Use this instead of exposure.name to avoid duplicate names, or use it as a fallback when exposure.name collides with another exposure."
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/DbtExposure"
+          }
+        },
+        "required": [
+          "dashboard_identifier",
+          "deduplication_name",
+          "exposure"
+        ]
+      },
+      "DbtExposure": {
+        "type": "object",
+        "properties": {
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of dbt model references (e.g. ref('model_name'))",
+            "example": [
+              "ref('orders')",
+              "ref('customers')"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Original dashboard name"
+          },
+          "name": {
+            "type": "string",
+            "description": "Sanitized exposure name. May contain duplicates across exposures; use deduplication_name for a guaranteed-unique alternative.",
+            "example": "my_dashboard"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/DbtExposureOwner"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "dashboard",
+              "notebook",
+              "analysis",
+              "ml",
+              "application"
+            ],
+            "description": "Type of the exposure",
+            "example": "dashboard"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL of the dashboard"
+          }
+        },
+        "required": [
+          "depends_on",
+          "name",
+          "owner",
+          "type"
+        ],
+        "description": "The dbt exposure for this dashboard."
+      },
+      "DbtExposureOwner": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Email of the dashboard owner"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the dashboard owner"
+          }
+        },
+        "required": [
+          "email",
+          "name"
+        ]
+      },
       "ModelsBranchDbtBody": {
         "type": "object",
         "properties": {
@@ -4179,6 +4719,15 @@
       "ModelsGitGetResponse": {
         "type": "object",
         "properties": {
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "https_token"
+            ],
+            "description": "Authentication method. \"ssh\" for deploy key, \"https_token\" for deploy token/PAT.",
+            "example": "ssh"
+          },
           "baseBranch": {
             "type": "string",
             "description": "The target branch for Omni pull requests",
@@ -4188,6 +4737,11 @@
             "type": "boolean",
             "description": "If true, all pull requests will create a branch in Omni, even those created outside of the tool",
             "example": false
+          },
+          "cloneUrl": {
+            "type": "string",
+            "description": "Clone URL of the git repository (SSH or HTTPS)",
+            "example": "git@github.com:org/repo.git"
           },
           "gitFollower": {
             "type": "boolean",
@@ -4208,8 +4762,11 @@
             "example": "omni/my_model"
           },
           "publicKey": {
-            "type": "string",
-            "description": "SSH public key for repository access (deploy key)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SSH public key for repository access (deploy key). Null for HTTPS token auth.",
             "example": "ssh-ed25519 AAAA..."
           },
           "requirePullRequest": {
@@ -4224,8 +4781,8 @@
           },
           "sshUrl": {
             "type": "string",
-            "description": "SSH URL of the git repository",
-            "example": "git@github.com:org/repo.git"
+            "deprecated": true,
+            "description": "Deprecated — use cloneUrl. Clone URL of the git repository."
           },
           "webUrl": {
             "type": [
@@ -4246,8 +4803,10 @@
           }
         },
         "required": [
+          "authMethod",
           "baseBranch",
           "branchPerPullRequest",
+          "cloneUrl",
           "gitFollower",
           "gitServiceProvider",
           "modelPath",
@@ -4261,6 +4820,15 @@
       "ModelsGitCreateResponse": {
         "type": "object",
         "properties": {
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "https_token"
+            ],
+            "description": "Authentication method. \"ssh\" for deploy key, \"https_token\" for deploy token/PAT.",
+            "example": "ssh"
+          },
           "baseBranch": {
             "type": "string",
             "description": "The target branch for Omni pull requests",
@@ -4270,6 +4838,11 @@
             "type": "boolean",
             "description": "If true, all pull requests will create a branch in Omni, even those created outside of the tool",
             "example": false
+          },
+          "cloneUrl": {
+            "type": "string",
+            "description": "Clone URL of the git repository (SSH or HTTPS)",
+            "example": "git@github.com:org/repo.git"
           },
           "gitFollower": {
             "type": "boolean",
@@ -4290,8 +4863,11 @@
             "example": "omni/my_model"
           },
           "publicKey": {
-            "type": "string",
-            "description": "SSH public key for repository access (deploy key)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SSH public key for repository access (deploy key). Null for HTTPS token auth.",
             "example": "ssh-ed25519 AAAA..."
           },
           "requirePullRequest": {
@@ -4306,8 +4882,8 @@
           },
           "sshUrl": {
             "type": "string",
-            "description": "SSH URL of the git repository",
-            "example": "git@github.com:org/repo.git"
+            "deprecated": true,
+            "description": "Deprecated — use cloneUrl. Clone URL of the git repository."
           },
           "webUrl": {
             "type": [
@@ -4328,8 +4904,10 @@
           }
         },
         "required": [
+          "authMethod",
           "baseBranch",
           "branchPerPullRequest",
+          "cloneUrl",
           "gitFollower",
           "gitServiceProvider",
           "modelPath",
@@ -4343,6 +4921,16 @@
       "ModelsGitCreateBody": {
         "type": "object",
         "properties": {
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "https_token"
+            ],
+            "default": "ssh",
+            "description": "Authentication method. \"ssh\" for deploy key (default), \"https_token\" for deploy token/PAT.",
+            "example": "ssh"
+          },
           "baseBranch": {
             "type": "string",
             "default": "main",
@@ -4354,6 +4942,12 @@
             "default": false,
             "description": "If true, all pull requests will create a branch in Omni. Defaults to false",
             "example": false
+          },
+          "cloneUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Clone URL of the git repository. SSH (git@...) for deploy key auth, HTTPS (https://...) for token auth.",
+            "example": "git@github.com:org/repo.git"
           },
           "gitFollower": {
             "type": "boolean",
@@ -4394,22 +4988,35 @@
           "sshUrl": {
             "type": "string",
             "minLength": 1,
-            "description": "SSH URL of the git repository (required)",
-            "example": "git@github.com:org/repo.git"
+            "description": "Deprecated — use cloneUrl. Clone URL of the git repository.",
+            "example": "git@github.com:org/repo.git",
+            "deprecated": true
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 1000,
+            "pattern": "^[a-zA-Z0-9_\\-.]+$",
+            "description": "HTTPS token for authentication (deploy token value, PAT, etc.). Required when authMethod is \"https_token\"."
           },
           "webUrl": {
             "type": "string",
-            "description": "Custom web URL for the git repository. Use when the SSH URL goes through a tunnel/VPC and differs from the inferred HTTPS address",
+            "description": "Custom web URL for the git repository. Use when the clone URL goes through a tunnel/VPC and differs from the inferred HTTPS address",
             "example": "https://github.com/org/repo"
           }
-        },
-        "required": [
-          "sshUrl"
-        ]
+        }
       },
       "ModelsGitUpdateResponse": {
         "type": "object",
         "properties": {
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "https_token"
+            ],
+            "description": "Authentication method. \"ssh\" for deploy key, \"https_token\" for deploy token/PAT.",
+            "example": "ssh"
+          },
           "baseBranch": {
             "type": "string",
             "description": "The target branch for Omni pull requests",
@@ -4419,6 +5026,11 @@
             "type": "boolean",
             "description": "If true, all pull requests will create a branch in Omni, even those created outside of the tool",
             "example": false
+          },
+          "cloneUrl": {
+            "type": "string",
+            "description": "Clone URL of the git repository (SSH or HTTPS)",
+            "example": "git@github.com:org/repo.git"
           },
           "gitFollower": {
             "type": "boolean",
@@ -4439,8 +5051,11 @@
             "example": "omni/my_model"
           },
           "publicKey": {
-            "type": "string",
-            "description": "SSH public key for repository access (deploy key)",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SSH public key for repository access (deploy key). Null for HTTPS token auth.",
             "example": "ssh-ed25519 AAAA..."
           },
           "requirePullRequest": {
@@ -4455,8 +5070,8 @@
           },
           "sshUrl": {
             "type": "string",
-            "description": "SSH URL of the git repository",
-            "example": "git@github.com:org/repo.git"
+            "deprecated": true,
+            "description": "Deprecated — use cloneUrl. Clone URL of the git repository."
           },
           "webUrl": {
             "type": [
@@ -4477,8 +5092,10 @@
           }
         },
         "required": [
+          "authMethod",
           "baseBranch",
           "branchPerPullRequest",
+          "cloneUrl",
           "gitFollower",
           "gitServiceProvider",
           "modelPath",
@@ -4492,6 +5109,15 @@
       "ModelsGitUpdateBody": {
         "type": "object",
         "properties": {
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "ssh",
+              "https_token"
+            ],
+            "description": "Authentication method to change to.",
+            "example": "ssh"
+          },
           "baseBranch": {
             "type": "string",
             "description": "The target branch for Omni pull requests",
@@ -4501,6 +5127,12 @@
             "type": "boolean",
             "description": "If true, all pull requests will create a branch in Omni",
             "example": false
+          },
+          "cloneUrl": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Clone URL of the git repository (SSH or HTTPS).",
+            "example": "git@github.com:org/repo.git"
           },
           "gitFollower": {
             "type": "boolean",
@@ -4538,12 +5170,19 @@
           "sshUrl": {
             "type": "string",
             "minLength": 1,
-            "description": "SSH URL of the git repository",
-            "example": "git@github.com:org/repo.git"
+            "description": "Deprecated — use cloneUrl. Clone URL of the git repository.",
+            "example": "git@github.com:org/repo.git",
+            "deprecated": true
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 1000,
+            "pattern": "^[a-zA-Z0-9_\\-.]+$",
+            "description": "HTTPS token for authentication (deploy token value, PAT, etc.)."
           },
           "webUrl": {
             "type": "string",
-            "description": "Custom web URL for the git repository. Use when the SSH URL goes through a tunnel/VPC and differs from the inferred HTTPS address",
+            "description": "Custom web URL for the git repository. Use when the clone URL goes through a tunnel/VPC and differs from the inferred HTTPS address",
             "example": "https://github.com/org/repo"
           }
         }
@@ -4607,6 +5246,78 @@
           }
         }
       },
+      "ModelsContentValidatorGetResponse": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Branch UUID"
+              },
+              "name": {
+                "type": "string",
+                "description": "Branch name"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "description": "Branch info (present if branch_id was specified)"
+          },
+          "content": {
+            "type": "array",
+            "items": {},
+            "description": "Documents with their validation results"
+          },
+          "model_id": {
+            "type": "string",
+            "description": "Model UUID"
+          }
+        },
+        "required": [
+          "branch",
+          "content",
+          "model_id"
+        ]
+      },
+      "ModelsContentValidatorReplaceResponse": {
+        "type": "object",
+        "properties": {
+          "replaced_dashboard_filters_count": {
+            "type": "integer",
+            "description": "Number of dashboard filters replaced"
+          },
+          "replaced_documents_count": {
+            "type": "integer",
+            "description": "Number of documents modified"
+          },
+          "replaced_queries_count": {
+            "type": "integer",
+            "description": "Number of queries replaced"
+          },
+          "replaced_workbook_models_count": {
+            "type": "integer",
+            "description": "Number of workbook models replaced"
+          },
+          "skipped_pr_required_count": {
+            "type": "integer",
+            "description": "Number of documents skipped due to pull request requirements"
+          }
+        },
+        "required": [
+          "replaced_dashboard_filters_count",
+          "replaced_documents_count",
+          "replaced_queries_count",
+          "replaced_workbook_models_count",
+          "skipped_pr_required_count"
+        ]
+      },
       "ModelsContentValidatorReplaceBody": {
         "type": "object",
         "properties": {
@@ -4633,6 +5344,10 @@
             "type": "boolean",
             "default": false,
             "description": "Whether to include personal folders"
+          },
+          "labels": {
+            "type": "string",
+            "description": "Comma-separated label names to scope replacement. Unknown labels return 400."
           },
           "only_in_workbook_id": {
             "type": "string",
@@ -4786,6 +5501,12 @@
       "QueryRunBody": {
         "type": "object",
         "properties": {
+          "branchId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Optional model branch to run the query against. Must belong to the same shared model as the query. When omitted, the query runs against the shared model. Takes precedence over the legacy `?branch_id=` URL query parameter.",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
           "cache": {
             "type": "string",
             "enum": [
@@ -4875,7 +5596,7 @@
           },
           "destinationType": {
             "type": "string",
-            "description": "Delivery destination type: email, slack, webhook, sftp, google_sheets",
+            "description": "Delivery destination type: email, slack, webhook, sftp, s3, google_sheets",
             "example": "email"
           },
           "disabledAt": {
@@ -5249,6 +5970,7 @@
             "enum": [
               "email",
               "google_sheets",
+              "s3",
               "sftp",
               "slack",
               "webhook"
@@ -7271,7 +7993,7 @@
             }
           },
           "403": {
-            "description": "AI query helper is not enabled for this organization.",
+            "description": "Omni Agent is not enabled for this organization.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7358,7 +8080,7 @@
             }
           },
           "404": {
-            "description": "The specified model was not found in the organization, or the branchId does not belong to the specified model.",
+            "description": "The specified model was not found in the organization, the branchId does not belong to the specified model, or the topicName does not exist in the model (or is excluded by ai_chat_topics restrictions).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7671,6 +8393,109 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/api-keys": {
+      "get": {
+        "description": "Returns all API tokens in the organization, including organization-level keys, personal access tokens, and MCP OAuth grants. Secrets are never returned. Requires organization admin permissions.",
+        "operationId": "apiKeysList",
+        "summary": "List API tokens",
+        "tags": [
+          "API Tokens"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor from the previous response (token UUID)"
+            },
+            "required": false,
+            "description": "Cursor from the previous response (token UUID)",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Number of results per page (1-100)",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
+            },
+            "required": false,
+            "description": "Sort direction for results",
+            "name": "sortDirection",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "name"
+              ],
+              "default": "createdAt"
+            },
+            "required": false,
+            "name": "sortField",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "organization",
+                "personal",
+                "mcp"
+              ],
+              "description": "Filter by API token type. When omitted, all types are returned.",
+              "example": "personal"
+            },
+            "required": false,
+            "description": "Filter by API token type. When omitted, all types are returned.",
+            "name": "type",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of API tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient permissions"
           }
         }
       }
@@ -8578,6 +9403,105 @@
       }
     },
     "/api/v1/connections/{connectionId}/dbt/environments": {
+      "get": {
+        "description": "List all dbt environments for a connection.",
+        "operationId": "connectionsDbtEnvironmentsList",
+        "summary": "List dbt environments",
+        "tags": [
+          "Connections"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Connection ID",
+              "example": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "required": true,
+            "description": "Connection ID",
+            "name": "connectionId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for pagination (from previous response nextCursor)",
+              "example": "eyJpZCI6IjEyMzQ1In0"
+            },
+            "required": false,
+            "description": "Cursor for pagination (from previous response nextCursor)",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Number of results per page (1-100)",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
+            },
+            "required": false,
+            "description": "Sort direction for results",
+            "name": "sortDirection",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name"
+              ],
+              "default": "name",
+              "description": "Field to sort results by",
+              "example": "name"
+            },
+            "required": false,
+            "description": "Field to sort results by",
+            "name": "sortField",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of dbt environments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbtEnvironmentListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied or connection does not support dbt"
+          },
+          "404": {
+            "description": "Connection not found"
+          }
+        }
+      },
       "post": {
         "description": "Create a new dbt environment for a connection.",
         "operationId": "connectionsDbtEnvironmentsCreate",
@@ -8615,7 +9539,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DbtEnvironmentItem"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/DbtEnvironmentItem"
+                    },
+                    {
+                      "description": "Created dbt environment",
+                      "title": "DbtEnvironmentCreateResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -8700,6 +9632,61 @@
           },
           "400": {
             "description": "Invalid request body"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied or connection does not support dbt"
+          },
+          "404": {
+            "description": "Connection or environment not found"
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete a dbt environment from a connection.",
+        "operationId": "connectionsDbtEnvironmentsDelete",
+        "summary": "Delete dbt environment",
+        "tags": [
+          "Connections"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Connection ID",
+              "example": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "required": true,
+            "description": "Connection ID",
+            "name": "connectionId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Environment ID",
+              "example": "247dc6dc-2a58-4688-9521-c5ed3e99c1e8"
+            },
+            "required": true,
+            "description": "Environment ID",
+            "name": "environmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "dbt environment deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbtEnvironmentDeleteResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "Authentication required"
@@ -10281,6 +11268,59 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        }
+      },
+      "put": {
+        "operationId": "documentsPut",
+        "summary": "Replace document (full replacement)",
+        "tags": [
+          "Documents"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Document identifier (either document ID or identifier slug)",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Document identifier (either document ID or identifier slug)",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentsPutBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document replaced successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsPutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
           },
           "401": {
             "description": "Authentication required"
@@ -12473,6 +13513,62 @@
         }
       }
     },
+    "/api/v1/models/{modelId}/schemas": {
+      "get": {
+        "operationId": "modelsGetSchemas",
+        "summary": "List available schemas for a model",
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Model UUID",
+              "example": "123e4567-e89b-12d3-a456-426614174000"
+            },
+            "required": true,
+            "description": "Model UUID",
+            "name": "modelId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Branch ID to use for branch-aware operations",
+              "example": "123e4567-e89b-12d3-a456-426614174001"
+            },
+            "required": false,
+            "description": "Branch ID to use for branch-aware operations",
+            "name": "branch_id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of available schemas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsGetSchemasResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Model not found"
+          }
+        }
+      }
+    },
     "/api/v1/models/{modelId}/view": {
       "get": {
         "operationId": "modelsGetViews",
@@ -13437,6 +14533,96 @@
         }
       }
     },
+    "/api/v1/models/{modelId}/dbt-exposures": {
+      "get": {
+        "description": "Returns the dbt exposures for a model, computed on-demand by analyzing which dbt models are referenced by dashboards that use this model. Returns exactly one record per dashboard. The exposure field is null when a dashboard does not reference any dbt models. Exposure names (exposure.name) may contain duplicates when multiple dashboards produce the same name; use deduplication_name for a guaranteed-unique value, or use it as a fallback when names collide.",
+        "operationId": "modelsDbtExposures",
+        "summary": "Get dbt exposures",
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Model UUID",
+              "example": "123e4567-e89b-12d3-a456-426614174000"
+            },
+            "required": true,
+            "description": "Model UUID",
+            "name": "modelId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Branch ID to use for branch-aware operations",
+              "example": "123e4567-e89b-12d3-a456-426614174001"
+            },
+            "required": false,
+            "description": "Branch ID to use for branch-aware operations",
+            "name": "branch_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0,
+              "description": "Zero-indexed page number",
+              "example": 0
+            },
+            "required": false,
+            "description": "Zero-indexed page number",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 1000,
+              "description": "Number of documents to process per page (1-1000). The number of records returned may be less than this if some dashboards do not reference dbt models.",
+              "example": 1000
+            },
+            "required": false,
+            "description": "Number of documents to process per page (1-1000). The number of records returned may be less than this if some dashboards do not reference dbt models.",
+            "name": "pageSize",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of dbt exposures for the model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsDbtExposuresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Model not found"
+          }
+        }
+      }
+    },
     "/api/v1/models/{modelId}/branch/{branchName}/dbt": {
       "post": {
         "description": "Set the active dbt environment on a branch.",
@@ -13933,16 +15119,49 @@
           },
           {
             "schema": {
-              "type": [
-                "boolean",
-                "null"
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional value to find. Used with find_type to scope validation to a single view, field, or topic. Requires find_type to be provided."
+            },
+            "required": false,
+            "description": "Optional value to find. Used with find_type to scope validation to a single view, field, or topic. Requires find_type to be provided.",
+            "name": "find",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "FIELD",
+                "TOPIC",
+                "VIEW",
+                "REPAIR"
               ],
-              "default": false,
+              "description": "Optional type of find operation (VIEW, FIELD, TOPIC). Requires find to be provided. FIELD values must be scoped by view name (e.g. view_name.field_name)."
+            },
+            "required": false,
+            "description": "Optional type of find operation (VIEW, FIELD, TOPIC). Requires find to be provided. FIELD values must be scoped by view name (e.g. view_name.field_name).",
+            "name": "find_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean",
               "description": "Whether to include personal folders in validation"
             },
             "required": false,
             "description": "Whether to include personal folders in validation",
             "name": "include_personal_folders",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated label names. Documents matching any label are included. Unknown labels return 400."
+            },
+            "required": false,
+            "description": "Comma-separated label names. Documents matching any label are included. Unknown labels return 400.",
+            "name": "labels",
             "in": "query"
           },
           {
@@ -13958,7 +15177,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Content validation results"
+            "description": "Content validation results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsContentValidatorGetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters or unknown labels"
           },
           "401": {
             "description": "Authentication required"
@@ -14012,7 +15241,14 @@
         },
         "responses": {
           "200": {
-            "description": "Replace operation completed"
+            "description": "Replace operation completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsContentValidatorReplaceResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request body or REPAIR type not supported"
@@ -14100,6 +15336,16 @@
             "required": false,
             "description": "Include checksums in response",
             "name": "includeChecksums",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A single schema name (optionally catalog-scoped, e.g. 'warehouse.reporting') to additionally load into the response. Use this to include view YAML from a schema that isn't active in the model (inactive or offloaded). Only views from this schema will be returned (views with no schema are always included)."
+            },
+            "required": false,
+            "description": "A single schema name (optionally catalog-scoped, e.g. 'warehouse.reporting') to additionally load into the response. Use this to include view YAML from a schema that isn't active in the model (inactive or offloaded). Only views from this schema will be returned (views with no schema are always included).",
+            "name": "includeSchemas",
             "in": "query"
           }
         ],
@@ -14314,7 +15560,7 @@
             "description": "Permission denied - querier role required on the model"
           },
           "404": {
-            "description": "Model, topic, or view not found"
+            "description": "Model, topic, view, or branch not found"
           },
           "408": {
             "description": "Query timed out. The response includes remaining_job_ids that can be polled via the query/wait endpoint.",
@@ -14479,15 +15725,16 @@
               "enum": [
                 "email",
                 "google_sheets",
+                "s3",
                 "sftp",
                 "slack",
                 "webhook"
               ],
-              "description": "Filter schedules by destination type: email, slack, webhook, sftp.",
+              "description": "Filter schedules by destination type: email, slack, webhook, sftp, s3.",
               "example": "email"
             },
             "required": false,
-            "description": "Filter schedules by destination type: email, slack, webhook, sftp.",
+            "description": "Filter schedules by destination type: email, slack, webhook, sftp, s3.",
             "name": "destination",
             "in": "query"
           },
@@ -14619,6 +15866,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "bucketName": {
+                    "type": "string",
+                    "description": "S3 bucket name (S3 destination only). Must be 3-63 characters, lowercase.",
+                    "example": "my-reports-bucket"
+                  },
                   "conditionQueryMapKey": {
                     "type": "string",
                     "description": "The ID of the query to monitor for triggering an alert. Required if conditionType is provided.",
@@ -14641,7 +15893,8 @@
                       "email",
                       "webhook",
                       "sftp",
-                      "slack"
+                      "slack",
+                      "s3"
                     ],
                     "description": "The delivery destination type",
                     "example": "email"
@@ -14693,6 +15946,11 @@
                     "description": "The ID of the dashboard to schedule",
                     "example": "12db1a0a"
                   },
+                  "keyPrefix": {
+                    "type": "string",
+                    "description": "S3 key prefix / folder path (S3 destination only). Leading slashes are normalized.",
+                    "example": "reports/weekly/"
+                  },
                   "killJobsOnFailure": {
                     "type": "boolean",
                     "description": "If true, stop entire job if any queries fail",
@@ -14720,6 +15978,16 @@
                       ]
                     },
                     "description": "Email recipients (email destination only). For Slack destinations, use the \"recipients\" field with a channel ID string or user ID(s) as a string or array."
+                  },
+                  "region": {
+                    "type": "string",
+                    "description": "AWS region where the S3 bucket is located (S3 destination only).",
+                    "example": "us-east-1"
+                  },
+                  "roleArn": {
+                    "type": "string",
+                    "description": "ARN of the cross-account IAM role Omni will assume to write to the S3 bucket (S3 destination only).",
+                    "example": "arn:aws:iam::123456789012:role/OmniS3DeliveryRole"
                   },
                   "schedule": {
                     "type": "string",
@@ -14780,6 +16048,17 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "delivererRoleArn": {
+                      "type": "string",
+                      "description": "The ARN of the Omni deliverer role. Use this as the Principal in your IAM role trust policy. Only returned for S3 destinations.",
+                      "example": "arn:aws:iam::529831494235:role/OmniSchedulerDelivererRole"
+                    },
+                    "externalId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The organization ID used as the external ID for confused deputy prevention. Add this to your IAM role trust policy as the sts:ExternalId condition. Static across all S3 destinations for your organization. Only returned for S3 destinations.",
+                      "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
                     "id": {
                       "type": "string",
                       "format": "uuid",
