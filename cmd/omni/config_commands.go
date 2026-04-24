@@ -11,8 +11,17 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/oauth"
 	"github.com/spf13/cobra"
+	"golang.org/x/oauth2"
 	"golang.org/x/term"
 )
+
+// applyOAuthToken copies an oauth2.Token into a config.Profile in OAuth mode.
+func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
+	p.AuthMethod = "oauth"
+	p.AccessToken = tok.AccessToken
+	p.RefreshToken = tok.RefreshToken
+	p.TokenExpiresAt = tok.Expiry.Format(time.RFC3339)
+}
 
 func addConfigCommands(root *cobra.Command) {
 	configCmd := &cobra.Command{
@@ -65,26 +74,13 @@ func configInitCmd() *cobra.Command {
 
 			switch choice {
 			case "2", "o", "oauth":
-				// Save profile with endpoint first so login can use it
-				cfg.Profiles[name] = config.Profile{
-					APIEndpoint: endpoint,
-					AuthMethod:  "oauth",
-				}
-				if cfg.DefaultProfile == "" {
-					cfg.DefaultProfile = name
-				}
-
-				tokens, err := oauth.Login(endpoint)
+				tok, err := oauth.Login(endpoint)
 				if err != nil {
 					return fmt.Errorf("OAuth login failed: %w", err)
 				}
 
-				p := cfg.Profiles[name]
-				p.AccessToken = tokens.AccessToken
-				p.RefreshToken = tokens.RefreshToken
-				p.TokenExpiresAt = time.Now().Add(
-					time.Duration(tokens.ExpiresIn) * time.Second,
-				).Format(time.RFC3339)
+				p := config.Profile{APIEndpoint: endpoint}
+				applyOAuthToken(&p, tok)
 				cfg.Profiles[name] = p
 
 			default: // "1", "a", "api-key", or empty
@@ -238,17 +234,12 @@ func configLoginCmd() *cobra.Command {
 				return fmt.Errorf("profile %q not found", name)
 			}
 
-			tokens, err := oauth.Login(p.APIEndpoint)
+			tok, err := oauth.Login(p.APIEndpoint)
 			if err != nil {
 				return fmt.Errorf("OAuth login failed: %w", err)
 			}
 
-			p.AuthMethod = "oauth"
-			p.AccessToken = tokens.AccessToken
-			p.RefreshToken = tokens.RefreshToken
-			p.TokenExpiresAt = time.Now().Add(
-				time.Duration(tokens.ExpiresIn) * time.Second,
-			).Format(time.RFC3339)
+			applyOAuthToken(&p, tok)
 			cfg.Profiles[name] = p
 
 			if err := config.Save(cfg); err != nil {
