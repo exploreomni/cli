@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"os/exec"
@@ -70,7 +71,7 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 				msg = fmt.Sprintf("%s — %s", msg, errDesc)
 			}
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%s</p></body></html>", msg)
+			fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%s</p></body></html>", html.EscapeString(msg))
 			resultCh <- authResult{err: fmt.Errorf("%s", msg)}
 			return
 		}
