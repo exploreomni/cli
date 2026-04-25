@@ -1,11 +1,16 @@
 package config
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // clearEnv unsets all Omni env vars so tests start from a clean slate.
@@ -256,6 +261,161 @@ func TestResolve_InsecureEnvBypassesChecks(t *testing.T) {
 	}
 	if rc.BaseURL != "http://localhost:3000" {
 		t.Errorf("BaseURL = %q, want %q", rc.BaseURL, "http://localhost:3000")
+	}
+}
+
+// ValidateEndpoint is the single gate that prevents API tokens or OAuth
+// credentials from leaving for a non-HTTPS or non-Omni host. These tests cover
+// it directly so we're not relying on Resolve() to exercise all the edge cases.
+
+func TestValidateEndpoint_RejectsHTTP(t *testing.T) {
+	clearEnv(t)
+	if err := ValidateEndpoint("http://myorg.omniapp.co"); err == nil {
+		t.Fatal("expected error for http://, got nil")
+	} else if !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("error = %q, want it to mention HTTPS", err.Error())
+	}
+}
+
+func TestValidateEndpoint_RejectsUnknownDomain(t *testing.T) {
+	clearEnv(t)
+	if err := ValidateEndpoint("https://evil.com"); err == nil {
+		t.Fatal("expected error for non-Omni domain, got nil")
+	} else if !strings.Contains(err.Error(), "not a recognized Omni domain") {
+		t.Errorf("error = %q, want it to mention recognized domain", err.Error())
+	}
+}
+
+func TestValidateEndpoint_AllowsOmniHTTPS(t *testing.T) {
+	clearEnv(t)
+	if err := ValidateEndpoint("https://myorg.omniapp.co"); err != nil {
+		t.Errorf("unexpected error for valid Omni endpoint: %v", err)
+	}
+}
+
+func TestValidateEndpoint_InsecureBypass(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+	if err := ValidateEndpoint("http://localhost:3000"); err != nil {
+		t.Errorf("expected insecure bypass to allow http://localhost, got: %v", err)
+	}
+	if err := ValidateEndpoint("https://evil.com"); err != nil {
+		t.Errorf("expected insecure bypass to allow non-Omni domain, got: %v", err)
+	}
+}
+
+// --- OAuth refresh safety ---
+
+// If the saved profile's apiEndpoint isn't an allowlisted HTTPS Omni domain,
+// Resolve() must NOT send the refresh token there, even if env vars or flags
+// point rc.BaseURL at a legitimate host. This protects against a poisoned
+// profile exfiltrating the refresh token on every CLI invocation.
+func TestResolve_SkipsRefreshForNonAllowlistedEndpoint(t *testing.T) {
+	clearEnv(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// Return a real-looking token — if the CLI ignores validation and
+		// hits us anyway, we want the refresh to visibly "succeed" so the
+		// failure mode is clear rather than appearing as an oauth2 error.
+		_, _ = w.Write([]byte(`{"access_token":"leaked","refresh_token":"leaked","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL, // attacker-controlled, non-Omni, http://
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339), // expired
+			},
+		},
+	})
+
+	// Mask the bad profile endpoint with a legitimate base URL so that the
+	// final validation passes and we get to observe what happened during refresh.
+	t.Setenv("OMNI_BASE_URL", "https://myorg.omniapp.co")
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hits.Load() != 0 {
+		t.Errorf("Resolve made %d request(s) to non-allowlisted endpoint; refresh token was leaked", hits.Load())
+	}
+	// Falls through with the stale access token — exactly the documented behavior.
+	if rc.Token != "old-access" {
+		t.Errorf("rc.Token = %q, want the stale %q (refresh should have been skipped)", rc.Token, "old-access")
+	}
+}
+
+// Positive counterpart: when the endpoint passes validation (via the insecure
+// override), the refresh actually happens and rc.Token reflects the new token.
+// This guards against over-correcting and breaking legitimate refreshes.
+func TestResolve_RefreshesWhenEndpointValid(t *testing.T) {
+	clearEnv(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hits.Load() != 1 {
+		t.Errorf("expected exactly 1 refresh request, got %d", hits.Load())
+	}
+	if rc.Token != "new-access" {
+		t.Errorf("rc.Token = %q, want %q (refresh should have succeeded)", rc.Token, "new-access")
+	}
+
+	// Sanity check: the refreshed token should have been persisted back to disk.
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after refresh: %v", err)
+	}
+	if got := loaded.Profiles["test"].AccessToken; got != "new-access" {
+		t.Errorf("persisted AccessToken = %q, want %q", got, "new-access")
+	}
+}
+
+// Ensure the test-server URL we generated above is actually not on the
+// allowlist — otherwise TestResolve_SkipsRefreshForNonAllowlistedEndpoint
+// would pass vacuously.
+func TestHttptestURLIsNotAllowed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	if isAllowedHost(srv.URL) {
+		t.Errorf("httptest URL %q (host %q) unexpectedly matched allowlist", srv.URL, u.Host)
 	}
 }
 
