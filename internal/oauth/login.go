@@ -126,7 +126,8 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 
 // openBrowser opens the given URL in the user's default browser.
 // Best-effort — if it fails, the URL is already printed to the terminal.
-func openBrowser(url string) {
+// It's a var (not a func) so tests can replace it to drive the callback flow.
+var openBrowser = func(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

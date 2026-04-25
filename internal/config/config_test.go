@@ -407,6 +407,123 @@ func TestResolve_RefreshesWhenEndpointValid(t *testing.T) {
 	}
 }
 
+// An OAuth profile with no refresh token shouldn't trigger any network call —
+// the CLI just hands the stored access token to the caller. The most common
+// way this happens: the org's auth server didn't issue a refresh_token.
+func TestResolve_OAuthProfileWithoutRefreshTokenSkipsNetwork(t *testing.T) {
+	clearEnv(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "stored-access",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339), // expired but no refresh token
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hits.Load() != 0 {
+		t.Errorf("Resolve made %d request(s); should be zero when refresh token is absent", hits.Load())
+	}
+	if rc.Token != "stored-access" {
+		t.Errorf("rc.Token = %q, want %q", rc.Token, "stored-access")
+	}
+}
+
+// If the refresh request fails (server down, 5xx, network error), Resolve
+// should NOT return an error — it should fall through with the stale access
+// token and let the eventual API call return 401, giving the user a clearer
+// "your session expired, run `omni config login`" signal than a refresh
+// transport error would.
+func TestResolve_OAuthRefreshFailureFallsThrough(t *testing.T) {
+	clearEnv(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "stale-access",
+				RefreshToken:   "stale-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("Resolve returned error on refresh failure; expected fall-through: %v", err)
+	}
+	if rc.Token != "stale-access" {
+		t.Errorf("rc.Token = %q, want %q (the stale token)", rc.Token, "stale-access")
+	}
+}
+
+// A non-expired OAuth token shouldn't be refreshed — the oauth2 library only
+// hits the network when the token is near/past expiry. This test guards against
+// a future change accidentally inverting that behavior and refreshing on every
+// CLI invocation.
+func TestResolve_OAuthFreshTokenSkipsRefresh(t *testing.T) {
+	clearEnv(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "fresh-access",
+				RefreshToken:   "fresh-refresh",
+				TokenExpiresAt: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hits.Load() != 0 {
+		t.Errorf("Resolve made %d request(s); a non-expired token must not trigger refresh", hits.Load())
+	}
+	if rc.Token != "fresh-access" {
+		t.Errorf("rc.Token = %q, want %q", rc.Token, "fresh-access")
+	}
+}
+
 // Ensure the test-server URL we generated above is actually not on the
 // allowlist — otherwise TestResolve_SkipsRefreshForNonAllowlistedEndpoint
 // would pass vacuously.
