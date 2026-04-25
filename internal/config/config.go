@@ -152,17 +152,27 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
 	}
-	insecure := os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != ""
-	if !insecure {
-		if !strings.HasPrefix(rc.BaseURL, "https://") {
-			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
-		}
-		if !isAllowedHost(rc.BaseURL) {
-			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
-		}
+	if err := ValidateEndpoint(rc.BaseURL); err != nil {
+		return nil, err
 	}
 
 	return rc, nil
+}
+
+// ValidateEndpoint reports whether url is safe to send API tokens or OAuth
+// credentials to: it must be HTTPS and on an allowlisted Omni domain. Setting
+// OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 bypasses both checks.
+func ValidateEndpoint(url string) error {
+	if os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != "" {
+		return nil
+	}
+	if !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("endpoint %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", url)
+	}
+	if !isAllowedHost(url) {
+		return fmt.Errorf("endpoint %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", url)
+	}
+	return nil
 }
 
 // allowedDomains are the Omni domains the CLI will send API tokens to.
