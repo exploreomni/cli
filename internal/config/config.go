@@ -123,7 +123,12 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	// Auto-refresh OAuth tokens via oauth2.TokenSource — it only calls the refresh
 	// endpoint when the token is near/past expiry. If refresh fails, fall through
 	// with the stale token and let the API return 401.
-	if profile != nil && profile.AuthMethod == "oauth" && profile.RefreshToken != "" {
+	//
+	// Validate the profile's endpoint before hitting the network: if an attacker-
+	// supplied APIEndpoint ever made it into the config, we must not POST the
+	// refresh token there just because a flag/env has since redirected rc.BaseURL
+	// to a legitimate host.
+	if profile != nil && profile.AuthMethod == "oauth" && profile.RefreshToken != "" && ValidateEndpoint(profile.APIEndpoint) == nil {
 		expiry, _ := time.Parse(time.RFC3339, profile.TokenExpiresAt)
 		current := &oauth2.Token{
 			AccessToken:  profile.AccessToken,

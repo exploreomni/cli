@@ -74,6 +74,9 @@ func configInitCmd() *cobra.Command {
 
 			switch choice {
 			case "2", "o", "oauth":
+				if err := config.ValidateEndpoint(endpoint); err != nil {
+					return err
+				}
 				tok, err := oauth.Login(endpoint)
 				if err != nil {
 					return fmt.Errorf("OAuth login failed: %w", err)
@@ -234,6 +237,9 @@ func configLoginCmd() *cobra.Command {
 				return fmt.Errorf("profile %q not found", name)
 			}
 
+			if err := config.ValidateEndpoint(p.APIEndpoint); err != nil {
+				return err
+			}
 			tok, err := oauth.Login(p.APIEndpoint)
 			if err != nil {
 				return fmt.Errorf("OAuth login failed: %w", err)
