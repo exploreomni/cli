@@ -3,6 +3,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -10,13 +11,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
+
+	"github.com/exploreomni/omni-cli/internal/oauth"
+	"golang.org/x/oauth2"
 )
 
 // Profile represents a saved API configuration.
 type Profile struct {
-	APIEndpoint string `json:"apiEndpoint"`
-	AuthMethod  string `json:"authMethod"`
-	APIKey      string `json:"apiKey,omitempty"`
+	APIEndpoint    string `json:"apiEndpoint"`
+	AuthMethod     string `json:"authMethod"`
+	APIKey         string `json:"apiKey,omitempty"`
+	AccessToken    string `json:"accessToken,omitempty"`
+	RefreshToken   string `json:"refreshToken,omitempty"`
+	TokenExpiresAt string `json:"tokenExpiresAt,omitempty"`
 }
 
 // Config is the on-disk config file format (compatible with the TS CLI).
@@ -76,6 +84,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 
 	// Start from config file
 	cfg, _ := Load()
+	var profile *Profile
 	if cfg != nil {
 		name := profileName
 		if name == "" {
@@ -83,8 +92,14 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 		}
 		if name != "" {
 			if p, ok := cfg.Profiles[name]; ok {
+				profile = &p
 				rc.BaseURL = p.APIEndpoint
-				rc.Token = p.APIKey
+				switch p.AuthMethod {
+				case "oauth":
+					rc.Token = p.AccessToken
+				default: // "api-key"
+					rc.Token = p.APIKey
+				}
 			}
 		}
 	}
@@ -105,6 +120,36 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 		rc.BaseURL = baseURLFlag
 	}
 
+	// Auto-refresh OAuth tokens via oauth2.TokenSource — it only calls the refresh
+	// endpoint when the token is near/past expiry. If refresh fails, fall through
+	// with the stale token and let the API return 401.
+	//
+	// Validate the profile's endpoint before hitting the network: if an attacker-
+	// supplied APIEndpoint ever made it into the config, we must not POST the
+	// refresh token there just because a flag/env has since redirected rc.BaseURL
+	// to a legitimate host.
+	if profile != nil && profile.AuthMethod == "oauth" && profile.RefreshToken != "" && ValidateEndpoint(profile.APIEndpoint) == nil {
+		expiry, _ := time.Parse(time.RFC3339, profile.TokenExpiresAt)
+		current := &oauth2.Token{
+			AccessToken:  profile.AccessToken,
+			RefreshToken: profile.RefreshToken,
+			Expiry:       expiry,
+		}
+		src := oauth.Config(profile.APIEndpoint, "").TokenSource(context.Background(), current)
+		if refreshed, err := src.Token(); err == nil && refreshed.AccessToken != current.AccessToken {
+			profile.AccessToken = refreshed.AccessToken
+			profile.RefreshToken = refreshed.RefreshToken
+			profile.TokenExpiresAt = refreshed.Expiry.Format(time.RFC3339)
+			name := profileName
+			if name == "" {
+				name = cfg.DefaultProfile
+			}
+			cfg.Profiles[name] = *profile
+			_ = Save(cfg)
+			rc.Token = refreshed.AccessToken
+		}
+	}
+
 	// Validate
 	if rc.Token == "" {
 		return nil, fmt.Errorf("no API token configured. Set OMNI_API_TOKEN, use --token, or run `omni config init`")
@@ -112,17 +157,27 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	if rc.BaseURL == "" {
 		return nil, fmt.Errorf("no API base URL configured. Set OMNI_BASE_URL, use --base-url, or run `omni config init`")
 	}
-	insecure := os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != ""
-	if !insecure {
-		if !strings.HasPrefix(rc.BaseURL, "https://") {
-			return nil, fmt.Errorf("base URL %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
-		}
-		if !isAllowedHost(rc.BaseURL) {
-			return nil, fmt.Errorf("base URL %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", rc.BaseURL)
-		}
+	if err := ValidateEndpoint(rc.BaseURL); err != nil {
+		return nil, err
 	}
 
 	return rc, nil
+}
+
+// ValidateEndpoint reports whether url is safe to send API tokens or OAuth
+// credentials to: it must be HTTPS and on an allowlisted Omni domain. Setting
+// OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 bypasses both checks.
+func ValidateEndpoint(url string) error {
+	if os.Getenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS") != "" {
+		return nil
+	}
+	if !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("endpoint %q does not use HTTPS — refusing to send API token in plaintext. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", url)
+	}
+	if !isAllowedHost(url) {
+		return fmt.Errorf("endpoint %q is not a recognized Omni domain — refusing to send API token. Set OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 to override", url)
+	}
+	return nil
 }
 
 // allowedDomains are the Omni domains the CLI will send API tokens to.
