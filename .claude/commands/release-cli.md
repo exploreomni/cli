@@ -4,17 +4,23 @@ A release here is just `git tag <version>` followed by `git push origin <version
 
 ## User context
 
-The user may pass one argument controlling the version:
+The user may pass arguments controlling the version and whether to actually release:
 
 > $ARGUMENTS
 
-Resolve `$ARGUMENTS` to a target version using these rules:
+Parse `$ARGUMENTS` for two independent things:
+
+**Version selector** (at most one):
 
 - Empty → defaults to `patch` (bump the patch component of the latest tag by 1, e.g. `v1.0.2` → `v1.0.3`).
 - `patch` → same as the default. Accept it explicitly so users can be unambiguous.
 - `minor` → bump the minor component, reset patch to 0 (e.g. `v1.0.2` → `v1.1.0`).
 - `major` → bump the major component, reset minor and patch to 0 (e.g. `v1.0.2` → `v2.0.0`).
 - A literal version like `v2.2.0` (with or without leading `v` — normalize to include it) → use it verbatim.
+
+**Dry-run flag** (optional, can be combined with any version selector):
+
+- `--dry-run`, `-n`, or the bare word `dry-run` → run all the pre-flight checks and version computation, show what *would* happen, but **do not run `git tag` or `git push`** and do not prompt for confirmation. Examples: `/release-cli --dry-run`, `/release-cli minor --dry-run`, `/release-cli v2.2.0 --dry-run`.
 
 Anything else: stop and ask the user what they meant.
 
@@ -38,16 +44,18 @@ Anything else: stop and ask the user what they meant.
    - Skipping components without zeroing the lower ones (e.g. `v1.0.2` → `v1.2.5`): call that out — `"Current version: <latest>. <version> skips the usual minor reset and is unusual, confirm?"`.
    - Otherwise (literal version that's a clean forward bump): `"Current version: <latest>. This will release version <version>. Confirm before proceeding:"`
 
-   Show the message and **wait for an explicit yes** before continuing. Never tag without confirmation.
+   In **dry-run mode**, prefix the message with `[DRY RUN] ` and **do not** wait for a yes. Print the exact commands that *would* run (`git tag <version>` and `git push origin <version>`) and skip to the report step.
 
-5. **Tag and push** — On confirmation:
+   In normal mode, show the message and **wait for an explicit yes** before continuing. Never tag without confirmation.
+
+5. **Tag and push** — Skip this step entirely in dry-run mode. On confirmation:
    ```
    git tag <version>
    git push origin <version>
    ```
    If the push fails, surface the error verbatim and stop.
 
-6. **Report** — Print the released version and the `git push` output. Mention that the tag is now on `origin` and any downstream release automation will pick it up from there.
+6. **Report** — In dry-run mode, print `[DRY RUN] No tag was created and nothing was pushed. Re-run without --dry-run to release <version>.` and stop. In normal mode, print the released version and the `git push` output, and mention that the tag is now on `origin` and any downstream release automation will pick it up from there.
 
 ## Notes
 
