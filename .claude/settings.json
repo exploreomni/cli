@@ -48,7 +48,7 @@
     ],
     "deny": [],
     "ask": [],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "auto"
   },
   "enabledPlugins": {
     "frontend-design@claude-code-plugins": true
