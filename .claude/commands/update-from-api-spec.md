@@ -19,9 +19,8 @@ The source of truth lives in the `exploreomni/omni` monorepo. Resolve the source
 
 1. Path passed in `$ARGUMENTS`.
 2. `$OMNI_OPENAPI_SPEC` env var.
-3. `~/src/omni/packages/bi-app/app/types/api/openapi/openapi.json` (common local checkout).
 
-If none resolve, stop and ask the user where their monorepo lives. Do NOT fetch from the network.
+If neither resolves, stop and ask the user for the path to their monorepo's `openapi.json`. Do NOT fetch from the network and do NOT guess a path.
 
 ## Steps
 
@@ -38,11 +37,13 @@ If none resolve, stop and ask the user where their monorepo lives. Do NOT fetch 
 
    If the user gave a specific endpoint or param in `$ARGUMENTS`, confirm it actually appears in the new diff. If it doesn't, stop and tell the user — the upstream change probably hasn't been merged into their monorepo checkout yet.
 
-3. **Branch** — Create a topic branch off the current default branch:
-   ```
-   git checkout -b sync-spec-<short-slug>
-   ```
-   The slug should describe the headline change (e.g. `sync-spec-fully-resolved`, `sync-spec-models-rename`). If `$ARGUMENTS` referenced an issue, use a slug derived from the issue title.
+3. **Branch** — Check the current branch first (`git branch --show-current`).
+   - If you're already on a non-default branch — including a worktree branch (e.g. `claude/...`) or any existing topic branch — stay on it. Don't branch a branch.
+   - Only when you're on the default branch (`main`), create a topic branch:
+     ```
+     git checkout -b sync-spec-<short-slug>
+     ```
+     The slug should describe the headline change (e.g. `sync-spec-fully-resolved`, `sync-spec-models-rename`). If `$ARGUMENTS` referenced an issue, derive the slug from the issue title.
 
 4. **Sync** — Run the project's sync target. It copies into both `api/openapi.json` and `cmd/omni/openapi.json` (the latter is embedded into the binary):
    ```
