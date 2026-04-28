@@ -3907,6 +3907,52 @@
           "connectionId"
         ]
       },
+      "ModelsUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Model ID"
+              },
+              "name": {
+                "type": "string",
+                "description": "Updated model name"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "description": "Updated model details"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether the operation succeeded"
+          }
+        },
+        "required": [
+          "model",
+          "success"
+        ]
+      },
+      "ModelsUpdateBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "New name for the model",
+            "example": "My Renamed Model"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "JobsGetStatusResponse": {
         "type": "object",
         "properties": {
@@ -5286,6 +5332,15 @@
           "model_id"
         ]
       },
+      "ContentFilterMode": {
+        "type": "string",
+        "enum": [
+          "ALL",
+          "WITH_ISSUES",
+          "NO_ISSUES"
+        ],
+        "description": "Filter documents by issue status. ALL (default) returns all documents with at least one query. WITH_ISSUES returns only documents with at least one query issue, dashboard filter issue, or document error. NO_ISSUES returns only documents with zero issues and no document errors."
+      },
       "ModelsContentValidatorReplaceResponse": {
         "type": "object",
         "properties": {
@@ -5335,10 +5390,16 @@
             "enum": [
               "FIELD",
               "TOPIC",
-              "VIEW",
-              "REPAIR"
+              "VIEW"
             ],
-            "description": "Type of find/replace operation. Must be FIELD, VIEW, or TOPIC (REPAIR is not supported via API)"
+            "description": "Type of find/replace operation."
+          },
+          "folder_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict replacement to documents in matching folder paths (prefix match). Documents with no folder are excluded unless \"\" is specified."
           },
           "include_personal_folders": {
             "type": "boolean",
@@ -5429,6 +5490,11 @@
           "fetchedAtMillis": {
             "type": "number",
             "description": "Timestamp when the file was fetched"
+          },
+          "fullyResolved": {
+            "type": "boolean",
+            "default": false,
+            "description": "Treat the posted YAML as fully resolved (with the extends chain expanded). Only valid with mode=combined."
           },
           "previousChecksum": {
             "type": "string",
@@ -11240,6 +11306,7 @@
     },
     "/api/v1/documents/{identifier}": {
       "get": {
+        "description": "Retrieves a document's configuration in a format compatible with PUT for round-trip editing. GET a document, modify the response, and PUT it back to update. Only dashboard documents are supported; analysis documents return 400.",
         "operationId": "documentsGet",
         "summary": "Get document",
         "tags": [
@@ -11269,11 +11336,14 @@
               }
             }
           },
+          "400": {
+            "description": "Analysis documents are not supported"
+          },
           "401": {
             "description": "Authentication required"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Insufficient permissions to view the document"
           },
           "404": {
             "description": "Document not found"
@@ -11281,6 +11351,7 @@
         }
       },
       "put": {
+        "description": "Updates a document with the specified identifier. This endpoint performs a full resource replacement — all required fields must be provided and existing query presentations are replaced entirely. Only dashboard documents are supported; analysis documents and documents without an associated dashboard return 400. For published documents, the update goes through a draft/publish workflow automatically; if a draft already exists, the request returns 409 unless `clearExistingDraft` is set to `true`.",
         "operationId": "documentsPut",
         "summary": "Replace document (full replacement)",
         "tags": [
@@ -11320,20 +11391,24 @@
             }
           },
           "400": {
-            "description": "Invalid request body"
+            "description": "Invalid request body, missing required fields, or validation error (also returned for analysis documents and documents without an associated dashboard)"
           },
           "401": {
             "description": "Authentication required"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Insufficient permissions to update the document"
           },
           "404": {
             "description": "Document not found"
+          },
+          "409": {
+            "description": "Draft already exists - set clearExistingDraft to true to discard it and proceed"
           }
         }
       },
       "patch": {
+        "description": "Updates a document's name, description, and/or identifier. This is a partial update — only provided fields are modified, and at least one of `name`, `description`, or `identifier` must be supplied. When `identifier` is changed, the previous identifier is retained in the document identifier history and continues to redirect. For published documents, the update goes through a draft/publish workflow automatically.",
         "operationId": "documentsUpdate",
         "summary": "Rename document",
         "tags": [
@@ -11373,7 +11448,7 @@
             }
           },
           "400": {
-            "description": "Invalid name or description"
+            "description": "Invalid request body or validation error (e.g. missing name/description/identifier, name too long, identifier already in use)"
           },
           "401": {
             "description": "Authentication required"
@@ -11385,7 +11460,7 @@
             "description": "Document not found"
           },
           "409": {
-            "description": "Draft already exists - set clearExistingDraft to true"
+            "description": "Draft already exists - set clearExistingDraft to true to discard it and proceed"
           }
         }
       },
@@ -13466,6 +13541,64 @@
         }
       }
     },
+    "/api/v1/models/{modelId}": {
+      "patch": {
+        "description": "Update metadata for an existing model. Currently supports renaming the model via the `name` field.",
+        "operationId": "modelsUpdate",
+        "summary": "Update model",
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Model UUID",
+              "example": "123e4567-e89b-12d3-a456-426614174000"
+            },
+            "required": true,
+            "description": "Model UUID",
+            "name": "modelId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelsUpdateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Model not found"
+          }
+        }
+      }
+    },
     "/api/v1/jobs/{jobId}/status": {
       "get": {
         "description": "Check status of a schema refresh job (initiated via POST /api/v1/models/{modelId}/refresh). Returns IN_PROGRESS, COMPLETED, or FAILED.",
@@ -14557,6 +14690,57 @@
           {
             "schema": {
               "type": "string",
+              "description": "Cursor for pagination (from previous response nextCursor)",
+              "example": "eyJpZCI6IjEyMzQ1In0"
+            },
+            "required": false,
+            "description": "Cursor for pagination (from previous response nextCursor)",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Number of results per page (1-100)",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
+            },
+            "required": false,
+            "description": "Sort direction for results",
+            "name": "sortDirection",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Field to sort results by"
+            },
+            "required": false,
+            "description": "Field to sort results by",
+            "name": "sortField",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "format": "uuid",
               "description": "Branch ID to use for branch-aware operations",
               "example": "123e4567-e89b-12d3-a456-426614174001"
@@ -14564,36 +14748,6 @@
             "required": false,
             "description": "Branch ID to use for branch-aware operations",
             "name": "branch_id",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 0,
-              "default": 0,
-              "description": "Zero-indexed page number",
-              "example": 0
-            },
-            "required": false,
-            "description": "Zero-indexed page number",
-            "name": "page",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "default": 1000,
-              "description": "Number of documents to process per page (1-1000). The number of records returned may be less than this if some dashboards do not reference dbt models.",
-              "example": 1000
-            },
-            "required": false,
-            "description": "Number of documents to process per page (1-1000). The number of records returned may be less than this if some dashboards do not reference dbt models.",
-            "name": "pageSize",
             "in": "query"
           }
         ],
@@ -15119,6 +15273,15 @@
           },
           {
             "schema": {
+              "$ref": "#/components/schemas/ContentFilterMode"
+            },
+            "required": false,
+            "description": "Filter documents by issue status. ALL (default) returns all documents with at least one query. WITH_ISSUES returns only documents with at least one query issue, dashboard filter issue, or document error. NO_ISSUES returns only documents with zero issues and no document errors.",
+            "name": "content_filter_mode",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "string",
               "minLength": 1,
               "description": "Optional value to find. Used with find_type to scope validation to a single view, field, or topic. Requires find_type to be provided."
@@ -15134,14 +15297,26 @@
               "enum": [
                 "FIELD",
                 "TOPIC",
-                "VIEW",
-                "REPAIR"
+                "VIEW"
               ],
               "description": "Optional type of find operation (VIEW, FIELD, TOPIC). Requires find to be provided. FIELD values must be scoped by view name (e.g. view_name.field_name)."
             },
             "required": false,
             "description": "Optional type of find operation (VIEW, FIELD, TOPIC). Requires find to be provided. FIELD values must be scoped by view name (e.g. view_name.field_name).",
             "name": "find_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "array",
+              "description": "Prefix-match folder paths. \"/Finance\" matches \"/Finance/Reports\". Documents with no folder are excluded unless \"\" is specified.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "required": false,
+            "description": "Prefix-match folder paths. \"/Finance\" matches \"/Finance/Reports\". Documents with no folder are excluded unless \"\" is specified.",
+            "name": "folder_paths",
             "in": "query"
           },
           {
@@ -15251,7 +15426,7 @@
             }
           },
           "400": {
-            "description": "Invalid request body or REPAIR type not supported"
+            "description": "Invalid request body"
           },
           "401": {
             "description": "Authentication required"
@@ -15322,6 +15497,24 @@
             "required": false,
             "description": "IDE mode for YAML operations",
             "name": "mode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "default": false,
+              "description": "Resolve the model extends chain so the returned YAML reflects what runs at query time. Only valid with mode=combined."
+            },
+            "required": false,
+            "description": "Resolve the model extends chain so the returned YAML reflects what runs at query time. Only valid with mode=combined.",
+            "name": "fullyResolved",
             "in": "query"
           },
           {

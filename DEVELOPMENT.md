@@ -19,13 +19,33 @@ make clean       # Remove built binary
 
 ## Updating the OpenAPI Spec
 
-The CLI auto-generates commands from the embedded OpenAPI spec. To update it:
+The CLI auto-generates commands from the embedded OpenAPI spec. The default sync fetches it from `exploreomni/omni@main` via `gh`:
 
 ```bash
+make sync-spec
+```
+
+This requires `gh auth` with read access to the monorepo. To pin to a different branch/tag/commit, set `OMNI_OPENAPI_REF`. To sync from a local checkout instead — useful when testing an unmerged spec change — set `OMNI_OPENAPI_SPEC`:
+
+```bash
+OMNI_OPENAPI_REF=my-branch make sync-spec
 OMNI_OPENAPI_SPEC=/path/to/openapi.json make sync-spec
 ```
 
-This copies the spec into both `api/openapi.json` (source of truth) and `cmd/omni/openapi.json` (embedded copy). Rebuild after syncing.
+The target copies the spec into both `api/openapi.json` (source of truth) and `cmd/omni/openapi.json` (embedded copy). Rebuild after syncing.
+
+### Claude Code: `/update-api`
+
+If you use Claude Code, the project ships a `/update-api` slash command that drives the whole spec-bump flow end to end: syncing, inspecting the diff, building, validating that the new commands and flags appear in `--help`, then committing and opening a PR. With no arguments it pulls `main` over `gh`; pass an issue reference, a ref name, or a local spec path to override:
+
+```
+/update-api #47
+/update-api --ref my-branch
+/update-api /path/to/openapi.json
+/update-api #47 add fullyResolved param
+```
+
+The skill is defined at [.claude/commands/update-api.md](.claude/commands/update-api.md) — edit it there.
 
 ## Publishing a New Version
 

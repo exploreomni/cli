@@ -16,10 +16,28 @@ clean:
 test:
 	go test ./...
 
-# Update the OpenAPI spec from an external source
+# Update the OpenAPI spec.
+#
+# By default, fetches the spec from exploreomni/omni@main via `gh api`
+# (requires `gh auth` with read access to the monorepo).
+#
+# To sync from a local checkout instead — useful when testing an unmerged
+# spec change — set OMNI_OPENAPI_SPEC to a local path:
+#   OMNI_OPENAPI_SPEC=/path/to/openapi.json make sync-spec
+#
+# To pin to a non-default branch or commit:
+#   OMNI_OPENAPI_REF=my-branch make sync-spec
+OMNI_OPENAPI_REPO ?= exploreomni/omni
+OMNI_OPENAPI_PATH ?= packages/bi-app/app/types/api/openapi/openapi.json
+OMNI_OPENAPI_REF  ?= main
+
 sync-spec:
-ifndef OMNI_OPENAPI_SPEC
-	$(error OMNI_OPENAPI_SPEC is not set — point it at the path to your openapi.json)
+ifdef OMNI_OPENAPI_SPEC
+	@echo "Syncing spec from local file: $(OMNI_OPENAPI_SPEC)"
+	cp "$(OMNI_OPENAPI_SPEC)" api/openapi.json
+else
+	@command -v gh >/dev/null 2>&1 || { echo "gh CLI is required (https://cli.github.com). Or set OMNI_OPENAPI_SPEC to a local path." >&2; exit 1; }
+	@echo "Fetching spec from $(OMNI_OPENAPI_REPO)@$(OMNI_OPENAPI_REF)"
+	gh api "repos/$(OMNI_OPENAPI_REPO)/contents/$(OMNI_OPENAPI_PATH)?ref=$(OMNI_OPENAPI_REF)" -H "Accept: application/vnd.github.raw" > api/openapi.json
 endif
-	cp $(OMNI_OPENAPI_SPEC) api/openapi.json
 	cp api/openapi.json cmd/omni/openapi.json
