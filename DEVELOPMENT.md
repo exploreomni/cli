@@ -27,6 +27,18 @@ OMNI_OPENAPI_SPEC=/path/to/openapi.json make sync-spec
 
 This copies the spec into both `api/openapi.json` (source of truth) and `cmd/omni/openapi.json` (embedded copy). Rebuild after syncing.
 
+### Claude Code: `/update-from-api-spec`
+
+If you use Claude Code, the project ships a `/update-from-api-spec` slash command that drives the whole spec-bump flow end to end: previewing the diff, syncing, building, validating that the new commands and flags appear in `--help`, then committing and opening a PR. Pass an issue reference and/or a spec path:
+
+```
+/update-from-api-spec #47
+/update-from-api-spec /path/to/openapi.json
+/update-from-api-spec #47 add fullyResolved param
+```
+
+It resolves the source spec from the argument or `$OMNI_OPENAPI_SPEC`, and asks if neither is set. The skill is defined at [.claude/commands/update-from-api-spec.md](.claude/commands/update-from-api-spec.md) — edit it there.
+
 ## Publishing a New Version
 
 Releases are fully automated via GitHub Actions and [GoReleaser](https://goreleaser.com/).
