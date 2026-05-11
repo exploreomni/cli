@@ -121,6 +121,14 @@
       "AiGenerateQueryResponse": {
         "type": "object",
         "properties": {
+          "baseView": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The base view name used for query generation when queryAllViews surfaced a non-topic view. Mutually exclusive with `topic` — exactly one is non-null when a query was generated.",
+            "example": null
+          },
           "error": {
             "type": [
               "object",
@@ -153,8 +161,11 @@
             "description": "Query execution results as a JSON object. Only present when runQuery is true (the default) and the query executed successfully. The structure contains the query result data."
           },
           "topic": {
-            "type": "string",
-            "description": "The topic name that was used for query generation.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The topic name used for query generation. Mutually exclusive with `baseView` — exactly one is non-null when a query was generated.",
             "example": "order_items"
           },
           "workbookUrl": {
@@ -995,7 +1006,7 @@
           },
           "enabled": {
             "type": "boolean",
-            "description": "Whether the token can currently authenticate. Organization tokens may be disabled by admins; personal and MCP tokens are always `true` (revocation deletes them).",
+            "description": "Whether the token can currently authenticate. A disabled token cannot authenticate but remains visible until deleted.",
             "example": true
           },
           "id": {
@@ -1043,7 +1054,7 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "description": "Set to `false` to disable the token, `true` to re-enable it. Only organization-level tokens may be disabled; personal and MCP tokens do not support this.",
+            "description": "Set to `false` to disable the token, `true` to re-enable it.",
             "example": false
           }
         },
@@ -2220,8 +2231,12 @@
                   "description": "Subtitle"
                 },
                 "topicName": {
-                  "type": "string",
-                  "description": "Topic name"
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 256,
+                  "description": "Topic name. Omit or pass null for raw-SQL tiles or any tile with no semantic topic."
                 },
                 "visConfig": {
                   "$ref": "#/components/schemas/ApiVisConfig"
@@ -2538,8 +2553,12 @@
             "description": "Subtitle"
           },
           "topicName": {
-            "type": "string",
-            "description": "Topic name"
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256,
+            "description": "Topic name. Omit or pass null for raw-SQL tiles or any tile with no semantic topic."
           },
           "visConfig": {
             "$ref": "#/components/schemas/ApiVisConfig"
@@ -8716,9 +8735,9 @@
         }
       },
       "put": {
-        "description": "Enables or disables an organization-level API token. Personal access tokens and MCP OAuth grants do not support this operation. Requires organization admin permissions.",
+        "description": "Enables or disables an API token. Requires organization admin permissions.",
         "operationId": "apiKeysUpdate",
-        "summary": "Enable or disable an organization API token",
+        "summary": "Enable or disable an API token",
         "tags": [
           "API Tokens"
         ],
@@ -8758,7 +8777,7 @@
             }
           },
           "400": {
-            "description": "Invalid body, malformed `id`, target is not an organization token, or missing/malformed `Authorization` header"
+            "description": "Invalid body, malformed `id`, or missing/malformed `Authorization` header"
           },
           "403": {
             "description": "Invalid bearer token, or caller lacks organization admin permissions"
@@ -11900,7 +11919,7 @@
       }
     },
     "/api/v1/documents/{identifier}/move": {
-      "post": {
+      "put": {
         "operationId": "documentsMove",
         "summary": "Move document",
         "tags": [
