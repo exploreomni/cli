@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/exploreomni/omni-cli/internal/auth"
@@ -24,7 +23,7 @@ const userAttributePrefix = "urn:omni:params:1.0:UserAttribute"
 // requires the value field on every operation.
 type scimPatchOp struct {
 	Op    string      `json:"op"`
-	Path  string      `json:"path"`
+	Path  string      `json:"path,omitempty"`
 	Value interface{} `json:"value"`
 }
 
@@ -113,22 +112,17 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 }
 
 // buildSetAttributesBody assembles a SCIM PatchOp body that sets Omni user
-// attributes. It emits one "replace" operation per attribute, each targeting a
-// dotted sub-attribute path, so only the named attributes are affected and the
-// user's other attributes are preserved.
-//
-// Encoding note: if a live tenant rejects the per-attribute dotted path, the
-// alternative is a single operation replacing the whole map:
-//
-//	{"op":"replace","path":"urn:omni:params:1.0:UserAttribute","value":{...}}
-//
-// That form mirrors the SCIM PUT body but replaces the entire attribute set
-// (clobbering unspecified attributes), so the per-attribute form is preferred.
+// attributes. It uses the "no path" namespaced value-object form (the Okta /
+// RFC 7644 §3.5.2 format the Omni SCIM endpoint expects): a single replace
+// operation whose value nests the attributes under the Omni attribute
+// namespace. The server merges these over the user's existing attributes, so
+// only the named attributes change; an empty --attr value sets the attribute to
+// null, clearing it.
 func buildSetAttributesBody(attrs []string, attrJSON string) ([]byte, error) {
-	ops := make([]scimPatchOp, 0, len(attrs))
+	values := map[string]interface{}{}
 	seen := map[string]bool{}
 
-	addKey := func(key string) error {
+	add := func(key string, v interface{}) error {
 		if key == "" {
 			return fmt.Errorf("empty attribute name")
 		}
@@ -136,6 +130,7 @@ func buildSetAttributesBody(attrs []string, attrJSON string) ([]byte, error) {
 			return fmt.Errorf("attribute %q specified more than once", key)
 		}
 		seen[key] = true
+		values[key] = v
 		return nil
 	}
 
@@ -144,15 +139,13 @@ func buildSetAttributesBody(attrs []string, attrJSON string) ([]byte, error) {
 		if !found {
 			return nil, fmt.Errorf("invalid --attr %q: expected key=value", a)
 		}
-		key = strings.TrimSpace(key)
-		if err := addKey(key); err != nil {
+		var v interface{} // nil → JSON null, which clears the attribute
+		if val != "" {
+			v = val
+		}
+		if err := add(strings.TrimSpace(key), v); err != nil {
 			return nil, err
 		}
-		op := scimPatchOp{Op: "replace", Path: userAttributePrefix + "." + key}
-		if val != "" {
-			op.Value = val
-		} // else leave Value nil → "value": null (clear)
-		ops = append(ops, op)
 	}
 
 	if strings.TrimSpace(attrJSON) != "" {
@@ -160,30 +153,27 @@ func buildSetAttributesBody(attrs []string, attrJSON string) ([]byte, error) {
 		if err := json.Unmarshal([]byte(attrJSON), &m); err != nil {
 			return nil, fmt.Errorf("invalid --attr-json: %w", err)
 		}
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys) // deterministic op ordering
-		for _, k := range keys {
-			if err := addKey(strings.TrimSpace(k)); err != nil {
-				return nil, err
-			}
+		for k, raw := range m {
 			var v interface{}
-			if err := json.Unmarshal(m[k], &v); err != nil {
+			if err := json.Unmarshal(raw, &v); err != nil {
 				return nil, fmt.Errorf("invalid --attr-json value for %q: %w", k, err)
 			}
-			ops = append(ops, scimPatchOp{Op: "replace", Path: userAttributePrefix + "." + k, Value: v})
+			if err := add(strings.TrimSpace(k), v); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	if len(ops) == 0 {
+	if len(values) == 0 {
 		return nil, fmt.Errorf("provide at least one --attr or --attr-json")
 	}
 
 	return json.Marshal(scimPatchBody{
-		Schemas:    []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
-		Operations: ops,
+		Schemas: []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
+		Operations: []scimPatchOp{{
+			Op:    "replace",
+			Value: map[string]interface{}{userAttributePrefix: values},
+		}},
 	})
 }
 

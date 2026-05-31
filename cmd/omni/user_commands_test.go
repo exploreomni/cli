@@ -31,72 +31,78 @@ func parseBody(t *testing.T, b []byte) parsedPatchBody {
 	return body
 }
 
-// TestBuildSetAttributesBody_StringAttrs verifies one replace op per --attr
-// with the correct dotted path, string value, and PatchOp schema.
+// patchedAttrs returns the namespaced attribute map from the single replace op,
+// i.e. value["urn:omni:params:1.0:UserAttribute"].
+func patchedAttrs(t *testing.T, b []byte) map[string]interface{} {
+	t.Helper()
+	body := parseBody(t, b)
+	if len(body.Schemas) != 1 || body.Schemas[0] != "urn:ietf:params:scim:api:messages:2.0:PatchOp" {
+		t.Errorf("schemas = %v, want PatchOp", body.Schemas)
+	}
+	if len(body.Operations) != 1 {
+		t.Fatalf("ops = %d, want 1 (no-path object form)", len(body.Operations))
+	}
+	op := body.Operations[0]
+	if op.Op != "replace" || op.Path != "" {
+		t.Errorf("op = {op:%q path:%q}, want replace with no path", op.Op, op.Path)
+	}
+	val, ok := op.Value.(map[string]interface{})
+	if !ok {
+		t.Fatalf("value is %T, want object", op.Value)
+	}
+	attrs, ok := val["urn:omni:params:1.0:UserAttribute"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("value missing urn:omni:params:1.0:UserAttribute object: %v", val)
+	}
+	return attrs
+}
+
+// TestBuildSetAttributesBody_StringAttrs verifies attributes are nested under
+// the Omni namespace in a single no-path replace op.
 func TestBuildSetAttributesBody_StringAttrs(t *testing.T) {
 	b, err := buildSetAttributesBody([]string{"region=us-east", "team=growth"}, "")
 	if err != nil {
 		t.Fatalf("buildSetAttributesBody: %v", err)
 	}
-	body := parseBody(t, b)
-
-	if len(body.Schemas) != 1 || body.Schemas[0] != "urn:ietf:params:scim:api:messages:2.0:PatchOp" {
-		t.Errorf("schemas = %v, want PatchOp", body.Schemas)
+	attrs := patchedAttrs(t, b)
+	if attrs["region"] != "us-east" {
+		t.Errorf("region = %v, want us-east", attrs["region"])
 	}
-	if len(body.Operations) != 2 {
-		t.Fatalf("ops = %d, want 2", len(body.Operations))
-	}
-	// order preserved from --attr ordering
-	if got := body.Operations[0]; got.Op != "replace" ||
-		got.Path != "urn:omni:params:1.0:UserAttribute.region" || got.Value != "us-east" {
-		t.Errorf("op[0] = %+v, want replace region=us-east", got)
-	}
-	if got := body.Operations[1]; got.Path != "urn:omni:params:1.0:UserAttribute.team" || got.Value != "growth" {
-		t.Errorf("op[1] = %+v, want replace team=growth", got)
+	if attrs["team"] != "growth" {
+		t.Errorf("team = %v, want growth", attrs["team"])
 	}
 }
 
-// TestBuildSetAttributesBody_ClearAttr verifies an empty value clears the
-// attribute via a replace op whose value is explicitly null (not omitted).
+// TestBuildSetAttributesBody_ClearAttr verifies an empty value sets the
+// attribute to an explicit null (present in the payload, not omitted).
 func TestBuildSetAttributesBody_ClearAttr(t *testing.T) {
 	b, err := buildSetAttributesBody([]string{"region="}, "")
 	if err != nil {
 		t.Fatalf("buildSetAttributesBody: %v", err)
 	}
-	body := parseBody(t, b)
-	if len(body.Operations) != 1 {
-		t.Fatalf("ops = %d, want 1", len(body.Operations))
+	attrs := patchedAttrs(t, b)
+	if v, ok := attrs["region"]; !ok || v != nil {
+		t.Errorf("region = %v (present=%v), want explicit null", v, ok)
 	}
-	if body.Operations[0].Value != nil {
-		t.Errorf("value = %v, want nil (null)", body.Operations[0].Value)
-	}
-	// the value key must be present and null, not omitted
-	if !strings.Contains(string(b), `"value":null`) {
+	if !strings.Contains(string(b), `"region":null`) {
 		t.Errorf("body should contain explicit null value, got %s", b)
 	}
 }
 
 // TestBuildSetAttributesBody_AttrJSON verifies --attr-json contributes typed
-// (numeric/array) values in deterministic (sorted-key) order.
+// (numeric/array) values.
 func TestBuildSetAttributesBody_AttrJSON(t *testing.T) {
 	b, err := buildSetAttributesBody(nil, `{"regions":["us","eu"],"level":3}`)
 	if err != nil {
 		t.Fatalf("buildSetAttributesBody: %v", err)
 	}
-	body := parseBody(t, b)
-	if len(body.Operations) != 2 {
-		t.Fatalf("ops = %d, want 2", len(body.Operations))
+	attrs := patchedAttrs(t, b)
+	if v, ok := attrs["level"].(float64); !ok || v != 3 {
+		t.Errorf("level = %v (%T), want number 3", attrs["level"], attrs["level"])
 	}
-	// sorted: "level" before "regions"
-	if body.Operations[0].Path != "urn:omni:params:1.0:UserAttribute.level" {
-		t.Errorf("op[0].path = %q, want level", body.Operations[0].Path)
-	}
-	if v, ok := body.Operations[0].Value.(float64); !ok || v != 3 {
-		t.Errorf("level value = %v (%T), want number 3", body.Operations[0].Value, body.Operations[0].Value)
-	}
-	arr, ok := body.Operations[1].Value.([]interface{})
+	arr, ok := attrs["regions"].([]interface{})
 	if !ok || len(arr) != 2 || arr[0] != "us" || arr[1] != "eu" {
-		t.Errorf("regions value = %v, want [us eu]", body.Operations[1].Value)
+		t.Errorf("regions = %v, want [us eu]", attrs["regions"])
 	}
 }
 
@@ -147,9 +153,8 @@ func TestSetUserAttributesCmd_RequestShape(t *testing.T) {
 	if captured.Path != "/api/scim/v2/Users/abc%2Fdef" {
 		t.Errorf("path = %q, want id URL-escaped", captured.Path)
 	}
-	body := parseBody(t, captured.Body)
-	if len(body.Operations) != 1 || body.Operations[0].Value != "us-east" {
-		t.Errorf("operations = %+v, want single region=us-east", body.Operations)
+	if attrs := patchedAttrs(t, captured.Body); attrs["region"] != "us-east" {
+		t.Errorf("region = %v, want us-east", attrs["region"])
 	}
 }
 
