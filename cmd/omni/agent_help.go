@@ -57,7 +57,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   uploads       Upload and manage CSV files
   unstable      Unstable/preview commands (document import/export)
   user-attributes  User attribute definitions
-  users         User and group role management
+  users         User/group role management, set user attribute values
   config        CLI configuration profiles
 
 ## Common Flags
@@ -69,6 +69,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 
 ## Tips
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
+- Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
 - Query parameters are flags: omni models list --pagesize 10
 - Run "omni <group> --help" to see all commands in a group.
