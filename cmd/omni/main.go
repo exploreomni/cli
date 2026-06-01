@@ -78,6 +78,7 @@ func main() {
 
 	// Hand-written commands that attach to generated command groups
 	addBranchCommands(root, executeAPICall)
+	addUserCommands(root, executeAPICall)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
