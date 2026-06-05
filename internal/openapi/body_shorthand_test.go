@@ -534,6 +534,104 @@ func TestShorthand_ModelsGitSync_FlagsOnly(t *testing.T) {
 	}
 }
 
+func TestShorthand_DocumentsV2Create(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2Create",
+		Method:      "POST",
+		Path:        "/api/v2/documents",
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SetArgs([]string{"770e8400-e29b-41d4-a716-446655440002", "Q3 Revenue", "--folder-id", "f-1", "--identifier", "q3-rev"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(captured.Body, &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["modelId"] != "770e8400-e29b-41d4-a716-446655440002" {
+		t.Errorf("modelId = %v, want the positional model ID", body["modelId"])
+	}
+	if body["name"] != "Q3 Revenue" {
+		t.Errorf("name = %v, want 'Q3 Revenue'", body["name"])
+	}
+	if body["folderId"] != "f-1" {
+		t.Errorf("folderId = %v, want f-1", body["folderId"])
+	}
+	if body["identifier"] != "q3-rev" {
+		t.Errorf("identifier = %v, want q3-rev", body["identifier"])
+	}
+}
+
+func TestShorthand_DocumentsV2PatchDraft(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2PatchDraft",
+		Method:      "PATCH",
+		Path:        "/api/v2/documents/{identifier}/draft",
+		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SetArgs([]string{"abc123", "--name", "WIP", "--branch-id", "b-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var body map[string]interface{}
+	json.Unmarshal(captured.Body, &body)
+	if body["name"] != "WIP" {
+		t.Errorf("name = %v, want WIP", body["name"])
+	}
+	if body["branchId"] != "b-1" {
+		t.Errorf("branchId = %v, want b-1", body["branchId"])
+	}
+}
+
+func TestShorthand_DocumentsV2PatchDraftByIdentifier(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2PatchDraftByIdentifier",
+		Method:      "PATCH",
+		Path:        "/api/v2/documents/{identifier}/draft/{draftIdentifier}",
+		PathParams:  []paramInfo{{Name: "identifier", In: "path"}, {Name: "draftIdentifier", In: "path"}},
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SetArgs([]string{"abc123", "draft456", "--name", "Edited"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(captured.Path, "abc123") || !strings.Contains(captured.Path, "draft456") {
+		t.Errorf("path = %q, expected to contain both identifiers", captured.Path)
+	}
+
+	var body map[string]interface{}
+	json.Unmarshal(captured.Body, &body)
+	if body["name"] != "Edited" {
+		t.Errorf("name = %v, want Edited", body["name"])
+	}
+	if _, exists := body["draftIdentifier"]; exists {
+		t.Error("path param draftIdentifier should not appear in body")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Fallback / alias tests
 //
@@ -722,8 +820,8 @@ func TestShorthand_RegistryNotEmpty(t *testing.T) {
 	if len(bodyShorthands) == 0 {
 		t.Fatal("bodyShorthands registry is empty")
 	}
-	if len(bodyShorthands) != 16 {
-		t.Errorf("expected 16 shorthand entries, got %d", len(bodyShorthands))
+	if len(bodyShorthands) != 19 {
+		t.Errorf("expected 19 shorthand entries, got %d", len(bodyShorthands))
 	}
 }
 

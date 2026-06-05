@@ -38,11 +38,29 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ### Download a dashboard
   omni dashboards download <dashboard-id>
 
+### Read or edit a document (v2)
+  # Read live state. The response is a valid draft PATCH body (round-trip design).
+  omni documents v2-get <identifier> --compact
+
+  # Edit metadata with flags (no JSON needed), then publish the draft:
+  omni documents v2-patch-draft <identifier> --name "Q3 Revenue" --summary "rename"
+  omni documents v2-publish-draft <identifier>
+
+  # Edit content by round-tripping the full state through a file:
+  omni documents v2-get <identifier> > doc.json
+  # ...edit doc.json (containers, controls, queryPresentations, settings)...
+  omni documents v2-patch-draft <identifier> --body - < doc.json
+  omni documents v2-publish-draft <identifier>
+
+  # Create a brand-new document (published immediately):
+  omni documents v2-create <model-id> "My Dashboard"
+
 ### Search Omni documentation
   omni ai search-omni-docs --body '{"query":"how do I..."}'
 
 ## Command Groups
   ai            AI-powered query generation, jobs, doc search
+  ai-eval       AI eval prompt set management
   connections   Manage database connections
   content       List content across the org
   dashboards    Download dashboards, manage filters
