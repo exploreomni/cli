@@ -58,10 +58,10 @@ Prompts interactively for any value not supplied via flags. With --name,
   omni config init
 
   # Non-interactive OAuth (opens browser for login)
-  omni config init --name prod --endpoint https://myorg.omni.co --auth oauth
+  omni config init --name prod --endpoint https://myorg.omniapp.co --auth oauth
 
   # Non-interactive API key
-  omni config init --name prod --endpoint https://myorg.omni.co --api-key "$OMNI_API_TOKEN"`,
+  omni config init --name prod --endpoint https://myorg.omniapp.co --api-key "$OMNI_API_TOKEN"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reader := bufio.NewReader(os.Stdin)
 
@@ -75,7 +75,7 @@ Prompts interactively for any value not supplied via flags. With --name,
 			}
 
 			if !cmd.Flags().Changed("endpoint") {
-				fmt.Print("API endpoint (e.g., https://myorg.omni.co): ")
+				fmt.Print("API endpoint (e.g., https://myorg.omniapp.co): ")
 				endpoint, _ = reader.ReadString('\n')
 			}
 			endpoint = strings.TrimSpace(endpoint)
@@ -153,7 +153,7 @@ Prompts interactively for any value not supplied via flags. With --name,
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "profile name (skips prompt)")
-	cmd.Flags().StringVar(&endpoint, "endpoint", "", "API endpoint, e.g. https://myorg.omni.co (skips prompt)")
+	cmd.Flags().StringVar(&endpoint, "endpoint", "", "API endpoint, e.g. https://myorg.omniapp.co (skips prompt)")
 	cmd.Flags().StringVar(&authMethod, "auth", "", `authentication method: "api-key" or "oauth" (skips prompt)`)
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key (skips prompt; implies --auth api-key)")
 
