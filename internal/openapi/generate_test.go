@@ -228,6 +228,54 @@ func TestGenerateCommandsFromSpec(t *testing.T) {
 	}
 }
 
+// Some endpoints declare path params in the spec's parameters array in a
+// different order than they appear in the URL (e.g. the v2 document draft
+// routes list draftIdentifier before identifier). Positional args must follow
+// the URL shape, so a generated command's arg order matches the path template
+// regardless of declaration order.
+func TestGenerateCommands_PathParamsFollowPathOrder(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/things/{outerId}/items/{innerId}": {
+				"get": {
+					"operationId": "testGetItem",
+					"tags": ["test"],
+					"parameters": [
+						{"name": "innerId", "in": "path", "required": true, "schema": {"type": "string"}},
+						{"name": "outerId", "in": "path", "required": true, "schema": {"type": "string"}}
+					],
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+	cmds, err := GenerateCommands([]byte(spec), exec)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	if len(cmds) != 1 || len(cmds[0].Commands()) != 1 {
+		t.Fatalf("expected 1 tag group with 1 subcommand, got %v", cmds)
+	}
+
+	sub := cmds[0].Commands()[0]
+	if sub.Use != "get-item <outerid> <innerid>" {
+		t.Errorf("Use = %q, want %q", sub.Use, "get-item <outerid> <innerid>")
+	}
+
+	// Positional args in path order must substitute into the matching slots.
+	if err := sub.RunE(sub, []string{"outer-val", "inner-val"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if captured.Path != "/api/v1/things/outer-val/items/inner-val" {
+		t.Errorf("path = %q, want %q", captured.Path, "/api/v1/things/outer-val/items/inner-val")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Command behavior tests
 //

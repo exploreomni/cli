@@ -147,6 +147,13 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 			}
 		}
 
+		// Positional args follow the URL shape, not the spec's parameters
+		// array — some endpoints declare path params out of path order.
+		sort.SliceStable(info.PathParams, func(i, j int) bool {
+			return strings.Index(pathStr, "{"+info.PathParams[i].Name+"}") <
+				strings.Index(pathStr, "{"+info.PathParams[j].Name+"}")
+		})
+
 		// Check for request body
 		if op.RequestBody != nil {
 			info.HasBody = true
