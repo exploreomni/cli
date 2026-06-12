@@ -277,8 +277,19 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 			rawBody = jsonBodyFlag
 		}
 
-		// If --body/--json-body is provided, use existing behavior
+		// If --body/--json-body is provided, use existing behavior — but
+		// reject explicitly-set shorthand flags rather than silently
+		// dropping them from the request.
 		if rawBody != "" {
+			var conflicting []string
+			for _, f := range sh.Flags {
+				if cmd.Flags().Changed(f.FlagName) {
+					conflicting = append(conflicting, "--"+f.FlagName)
+				}
+			}
+			if len(conflicting) > 0 {
+				return fmt.Errorf("%s cannot be combined with --body; include the field(s) in the JSON body instead", strings.Join(conflicting, ", "))
+			}
 			return originalRunE(cmd, args)
 		}
 

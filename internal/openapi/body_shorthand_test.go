@@ -712,6 +712,60 @@ func TestShorthand_BothBodyFlagsError(t *testing.T) {
 	}
 }
 
+// Combining a promoted shorthand flag with --body is an error: the raw body
+// is sent verbatim, so a silently-dropped flag (e.g. --branch-id) would
+// produce a request the user didn't intend.
+func TestShorthand_BodyWithShorthandFlagErrors(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2PatchDraft",
+		Method:      "PATCH",
+		Path:        "/api/v2/documents/{identifier}/draft",
+		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"doc-123", "--branch-id", "b-1", "--body", `{"name":"x"}`})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --branch-id is combined with --body")
+	}
+	if !strings.Contains(err.Error(), "--branch-id") {
+		t.Errorf("error = %q, want it to name --branch-id", err.Error())
+	}
+}
+
+// The conflict check also covers the hidden --json-body alias.
+func TestShorthand_JsonBodyWithShorthandFlagErrors(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2PatchDraft",
+		Method:      "PATCH",
+		Path:        "/api/v2/documents/{identifier}/draft",
+		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"doc-123", "--summary", "s", "--json-body", `{"name":"x"}`})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --summary is combined with --json-body")
+	}
+	if !strings.Contains(err.Error(), "--summary") {
+		t.Errorf("error = %q, want it to name --summary", err.Error())
+	}
+}
+
 // Verify that --body still works for operations with a shorthand when
 // the user provides path params + --body but no shorthand positional arg.
 func TestShorthand_BodyWithPathParams(t *testing.T) {
