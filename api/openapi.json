@@ -16015,9 +16015,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -16119,9 +16116,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -16265,9 +16259,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -16343,9 +16334,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -16424,9 +16412,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -16543,9 +16528,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -16617,9 +16599,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -16710,9 +16689,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -16741,9 +16717,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -16815,9 +16788,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -16938,9 +16908,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -16999,9 +16966,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -17055,9 +17019,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -17158,9 +17119,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -17202,7 +17160,7 @@
                 ]
               }
             ],
-            "description": "Filter or interactive control config. Discriminated by `type`: filter types (string, date, number, etc.) or control types (FIELD_SELECTION, PERIOD_OVER_PERIOD, etc.)."
+            "description": "Filter or interactive control config. Discriminated by `type`: filter types (string, date, number, etc.) or control types (FIELD_SELECTION, PERIOD_OVER_PERIOD, etc.). Visibility is determined by placement in the filter-bar container."
           },
           "map": {
             "type": "object",
@@ -17277,7 +17235,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/QueryPresentationPatchExternal"
             },
-            "description": "Query presentations keyed by tab ID. Shallow-merged by key — omitted keys are untouched; set to `null` to delete. Capped at 48 entries per patch."
+            "description": "Query presentations keyed by tab ID. Shallow-merged by key — omitted keys are untouched; set to `null` to delete. Capped at 48 entries per patch. When the request carries no `containers` and the document has a dashboard layout, dashboard-eligible tiles added at new keys are auto-placed on the dashboard's first page (non-renderable types such as CSV / dataset / query-view / dbt tabs are stored but not placed), and containers created by auto-placement are removed when their tile is deleted — containers placed via an explicit `containers` write are left in the layout. When `containers` is present it fully defines the layout; on a workbook-only document (no layout yet) tiles are stored without placement."
           },
           "order": {
             "type": "array",
@@ -20156,9 +20114,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -20260,9 +20215,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -20406,9 +20358,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -20484,9 +20433,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -20565,9 +20511,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -20684,9 +20627,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -20758,9 +20698,6 @@
                         ]
                       }
                     ]
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "label": {
                     "type": "string"
@@ -20851,9 +20788,6 @@
                       }
                     ]
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "label": {
                     "type": "string"
                   },
@@ -20882,9 +20816,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -20956,9 +20887,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -21079,9 +21007,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -21140,9 +21065,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -21196,9 +21118,6 @@
                 "properties": {
                   "description": {
                     "type": "string"
-                  },
-                  "hidden": {
-                    "type": "boolean"
                   },
                   "id": {
                     "type": "string"
@@ -21299,9 +21218,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "hidden": {
-                    "type": "boolean"
-                  },
                   "id": {
                     "type": "string"
                   },
@@ -21343,7 +21259,7 @@
                 ]
               }
             ],
-            "description": "Filter or interactive control config. Discriminated by `type`: filter types (string, date, number, etc.) or control types (FIELD_SELECTION, PERIOD_OVER_PERIOD, etc.)."
+            "description": "Filter or interactive control config. Discriminated by `type`: filter types (string, date, number, etc.) or control types (FIELD_SELECTION, PERIOD_OVER_PERIOD, etc.). Visibility is determined by placement in the filter-bar container."
           },
           "map": {
             "type": "object",
@@ -24194,7 +24110,7 @@
                 "$ref": "#/components/schemas/Containers"
               },
               {
-                "description": "Container layout. When present, fully replaces the existing layout."
+                "description": "Container layout. When present, fully replaces the existing layout and disables automatic tile placement for the request."
               }
             ]
           },
@@ -24816,6 +24732,524 @@
         },
         "required": [
           "prompt_set"
+        ]
+      },
+      "EvalRunsListResponse": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvalRunListItem"
+            },
+            "description": "Runs for the prompt set, newest first, filtered to those whose model the caller can access."
+          }
+        },
+        "required": [
+          "runs"
+        ]
+      },
+      "EvalRunListItem": {
+        "type": "object",
+        "properties": {
+          "branch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional branch ID the run was executed against. Null when run against the main shared model.",
+            "example": null
+          },
+          "branch_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name for the branch, if `branch_id` is set.",
+            "example": null
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp when the run reached a terminal state.",
+            "example": null
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp when the run was created.",
+            "example": "2025-01-15T10:00:00.000Z"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human-readable description for the run.",
+            "example": null
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the run.",
+            "example": "660e8400-e29b-41d4-a716-446655440001"
+          },
+          "is_archived": {
+            "type": "boolean",
+            "description": "Whether the run has been archived.",
+            "example": false
+          },
+          "model_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The shared model this run was executed against.",
+            "example": "880e8400-e29b-41d4-a716-446655440003"
+          },
+          "prompt_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The prompt set this run was created from.",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "run_number": {
+            "type": "integer",
+            "description": "Sequential, per-prompt-set run number.",
+            "example": 3
+          },
+          "stats": {
+            "$ref": "#/components/schemas/EvalRunStats"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RUNNING",
+              "COMPLETE",
+              "CANCELLED"
+            ],
+            "description": "Run-level lifecycle. Flips to a terminal state (COMPLETE or CANCELLED) exactly once.",
+            "example": "RUNNING"
+          }
+        },
+        "required": [
+          "branch_id",
+          "branch_name",
+          "completed_at",
+          "created_at",
+          "description",
+          "id",
+          "is_archived",
+          "model_id",
+          "prompt_set_id",
+          "run_number",
+          "stats",
+          "status"
+        ]
+      },
+      "EvalRunStats": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "integer",
+            "description": "Number of per-prompt jobs that have reached a terminal state (COMPLETE, FAILED, or CANCELLED).",
+            "example": 8
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total number of per-prompt jobs in the run.",
+            "example": 12
+          }
+        },
+        "required": [
+          "terminal",
+          "total"
+        ]
+      },
+      "EvalRunsCreateResponse": {
+        "type": "object",
+        "properties": {
+          "job_count": {
+            "type": "integer",
+            "description": "Number of per-prompt agentic jobs created for this run (one per prompt that fanned out successfully). Enqueue onto the work queue happens after creation and is best-effort, so this count reflects jobs created, not necessarily those successfully enqueued.",
+            "example": 12
+          },
+          "run": {
+            "$ref": "#/components/schemas/EvalRunDetail"
+          }
+        },
+        "required": [
+          "job_count",
+          "run"
+        ]
+      },
+      "EvalRunDetail": {
+        "type": "object",
+        "properties": {
+          "branch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional branch ID the run was executed against. Null when run against the main shared model.",
+            "example": null
+          },
+          "branch_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name for the branch, if `branch_id` is set.",
+            "example": null
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp when the run reached a terminal state.",
+            "example": null
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 8601 timestamp when the run was created.",
+            "example": "2025-01-15T10:00:00.000Z"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional human-readable description for the run.",
+            "example": null
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the run.",
+            "example": "660e8400-e29b-41d4-a716-446655440001"
+          },
+          "is_archived": {
+            "type": "boolean",
+            "description": "Whether the run has been archived.",
+            "example": false
+          },
+          "model_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The shared model this run was executed against.",
+            "example": "880e8400-e29b-41d4-a716-446655440003"
+          },
+          "prompt_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The prompt set this run was created from.",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvalRunResult"
+            },
+            "description": "Per-prompt results for this run, ordered by their creation order in the prompt set."
+          },
+          "run_number": {
+            "type": "integer",
+            "description": "Sequential, per-prompt-set run number.",
+            "example": 3
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RUNNING",
+              "COMPLETE",
+              "CANCELLED"
+            ],
+            "description": "Run-level lifecycle. Flips to a terminal state (COMPLETE or CANCELLED) exactly once.",
+            "example": "RUNNING"
+          }
+        },
+        "required": [
+          "branch_id",
+          "branch_name",
+          "completed_at",
+          "created_at",
+          "description",
+          "id",
+          "is_archived",
+          "model_id",
+          "prompt_set_id",
+          "results",
+          "run_number",
+          "status"
+        ],
+        "description": "The newly created run with its initial results."
+      },
+      "EvalRunResult": {
+        "type": "object",
+        "properties": {
+          "agentic_job": {
+            "$ref": "#/components/schemas/EvalRunResultAgenticJob"
+          },
+          "cost": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Total LLM cost (USD) for this prompt, if available.",
+            "example": 0.0021
+          },
+          "error_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure reason string for prompts whose underlying job failed.",
+            "example": null
+          },
+          "expectation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The prompt's expectation as of run creation (snapshotted, so later prompt edits don't change past runs), or null when none was set. The analysis judge scores the analysis against it.",
+            "example": "The top product by revenue should be Aniseed Syrup."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the run result row.",
+            "example": "aa0e8400-e29b-41d4-a716-446655440005"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt text that was evaluated.",
+            "example": "What are the top 5 products by revenue?"
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Numeric judge score for this prompt result, if scoring ran.",
+            "example": 0.9
+          },
+          "scoring_cost": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Total LLM cost (USD) for scoring this prompt result.",
+            "example": 0.0004
+          },
+          "timing_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Wall-clock duration of the underlying job in milliseconds.",
+            "example": 4321
+          }
+        },
+        "required": [
+          "agentic_job",
+          "cost",
+          "error_reason",
+          "expectation",
+          "id",
+          "prompt",
+          "score",
+          "scoring_cost",
+          "timing_ms"
+        ]
+      },
+      "EvalRunResultAgenticJob": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Conversation the agentic job belongs to.",
+            "example": "770e8400-e29b-41d4-a716-446655440002"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Agentic job identifier.",
+            "example": "990e8400-e29b-41d4-a716-446655440004"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "CANCELLED",
+              "COMPLETE",
+              "DELIVERING",
+              "EXECUTING",
+              "FAILED",
+              "QUEUED"
+            ],
+            "description": "Current state of the agentic job that ran this prompt.",
+            "example": "COMPLETE"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "id",
+          "state"
+        ]
+      },
+      "EvalApiError429": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Human-readable error message describing what went wrong.",
+            "example": "Too many active runs; wait for an in-flight run to finish"
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code of the error.",
+            "example": 429
+          }
+        },
+        "required": [
+          "detail",
+          "status"
+        ]
+      },
+      "EvalApiError503": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Human-readable error message describing what went wrong.",
+            "example": "AI eval is paused for this organization"
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code of the error.",
+            "example": 503
+          }
+        },
+        "required": [
+          "detail",
+          "status"
+        ]
+      },
+      "EvalRunsCreateBody": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1024,
+            "description": "Optional human-readable description for the run. Pass `null` to clear (or omit). Max 1024 characters.",
+            "example": "Re-running after switching to gpt-4o for query generation"
+          },
+          "prompt_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The prompt set to execute.",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "run_config": {
+            "type": "object",
+            "properties": {
+              "branch_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Optional branch ID to run against. Must be a branch of the prompt set's model.",
+                "example": "440e8400-e29b-41d4-a716-446655440006"
+              }
+            },
+            "description": "Per-run configuration. Optional — omit if no overrides."
+          }
+        },
+        "required": [
+          "prompt_set_id"
+        ]
+      },
+      "EvalRunsGetResponse": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/EvalRunDetail"
+          }
+        },
+        "required": [
+          "run"
+        ]
+      },
+      "EvalRunsDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "is_archived": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Always `true` on success — the run has been archived."
+          }
+        },
+        "required": [
+          "is_archived"
+        ]
+      },
+      "EvalRunsCancelResponse": {
+        "type": "object",
+        "properties": {
+          "cancelled": {
+            "type": "integer",
+            "description": "Number of per-prompt agentic jobs that were cancelled by this request.",
+            "example": 4
+          },
+          "run": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvalRunDetail"
+              },
+              {
+                "description": "The cancelled run. `status: CANCELLED` and `is_archived: true` after this call."
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total number of per-prompt jobs in the run.",
+            "example": 12
+          }
+        },
+        "required": [
+          "cancelled",
+          "run",
+          "total"
+        ]
+      },
+      "EvalRunsUnarchiveResponse": {
+        "type": "object",
+        "properties": {
+          "is_archived": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Always `false` on success — the run has been unarchived."
+          }
+        },
+        "required": [
+          "is_archived"
         ]
       },
       "FoldersListResponse": {
@@ -34096,7 +34530,8 @@
         }
       },
       "put": {
-        "description": "Updates a document with the specified identifier. This endpoint performs a full resource replacement — all required fields must be provided and existing query presentations are replaced entirely. Only dashboard documents are supported; analysis documents and documents without an associated dashboard return 400. For published documents, the update goes through a draft/publish workflow automatically; if a draft already exists, the request returns 409 unless `clearExistingDraft` is set to `true`.",
+        "deprecated": true,
+        "description": "**Deprecated** — use `PATCH /api/v2/documents/{identifier}/draft` (and the related `/draft` routes). Removal scheduled per the `Sunset` response header.\n\nUpdates a document with the specified identifier. This endpoint performs a full resource replacement — all required fields must be provided and existing query presentations are replaced entirely. Only dashboard documents are supported; analysis documents and documents without an associated dashboard return 400. For published documents, the update goes through a draft/publish workflow automatically; if a draft already exists, the request returns 409 unless `clearExistingDraft` is set to `true`.",
         "operationId": "documentsPut",
         "summary": "Replace document (full replacement)",
         "tags": [
@@ -34153,7 +34588,8 @@
         }
       },
       "patch": {
-        "description": "Updates a document's name, description, and/or identifier. This is a partial update — only provided fields are modified, and at least one of `name`, `description`, or `identifier` must be supplied. When `identifier` is changed, the previous identifier is retained in the document identifier history and continues to redirect. For published documents, the update goes through a draft/publish workflow automatically.",
+        "deprecated": true,
+        "description": "**Deprecated** — use `PATCH /api/v2/documents/{identifier}/draft` (and the related `/draft` routes). Removal scheduled per the `Sunset` response header.\n\nUpdates a document's name, description, and/or identifier. This is a partial update — only provided fields are modified, and at least one of `name`, `description`, or `identifier` must be supplied. When `identifier` is changed, the previous identifier is retained in the document identifier history and continues to redirect. For published documents, the update goes through a draft/publish workflow automatically.",
         "operationId": "documentsUpdate",
         "summary": "Rename document",
         "tags": [
@@ -35383,7 +35819,7 @@
     },
     "/api/v2/documents": {
       "post": {
-        "description": "Create a brand-new document and publish it live. Accepts creation metadata (`modelId`, `name`, optional `identifier` / `description` / `folderId`) plus the same content slice as the PATCH body — `queryPresentations`, `controls`, `settings`, `containers`. The server mints internal tile identifiers, so callers omit `miniUuid`. Tiles in `queryPresentations` are merged by key over the single empty seed tile at key `\"1\"`; write to `\"1\"` (or send it as `null`) to replace the seed.\n\nThe new document is published live before the response returns. As a first publish of brand-new content it is not subject to the org’s `requirePullRequestToPublish` policy (which gates edits to existing content).",
+        "description": "Create a brand-new document and publish it live. Accepts creation metadata (`modelId`, `name`, optional `identifier` / `description` / `folderId`) plus the same content slice as the PATCH body — `queryPresentations`, `controls`, `settings`, `containers`. The server mints internal tile identifiers, so callers omit `miniUuid`. Tiles in `queryPresentations` are merged by key over the single empty seed tile at key `\"1\"`; write to `\"1\"` (or send it as `null`) to replace the seed.\n\nWhen `containers` is omitted, every dashboard-eligible tile is auto-placed in a default layout. When `containers` is present, it fully defines the layout — tiles it does not reference are stored but not rendered.\n\nThe new document is published live before the response returns. As a first publish of brand-new content it is not subject to the org’s `requirePullRequestToPublish` policy (which gates edits to existing content).",
         "operationId": "documentsV2Create",
         "summary": "Create document",
         "tags": [
@@ -36236,6 +36672,489 @@
           },
           "404": {
             "description": "Prompt set not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/eval/runs": {
+      "get": {
+        "description": "List runs for a prompt set, newest first, filtered to runs whose model the caller can access. The `prompt_set_id` query parameter is required.",
+        "operationId": "aiEvalRunsList",
+        "summary": "List eval runs",
+        "tags": [
+          "AI Eval"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "When `true`, returns archived runs instead of active ones. Defaults to `false`.",
+              "example": "false"
+            },
+            "required": false,
+            "description": "When `true`, returns archived runs instead of active ones. Defaults to `false`.",
+            "name": "archived",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Required — the prompt set whose runs should be listed.",
+              "example": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "required": true,
+            "description": "Required — the prompt set whose runs should be listed.",
+            "name": "prompt_set_id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of runs for the prompt set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid `prompt_set_id`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Prompt set not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Create and start a new run against an existing prompt set. The run enqueues one agentic job per prompt and begins executing immediately. Returns the newly created run with its initial per-prompt result rows.",
+        "operationId": "aiEvalRunsCreate",
+        "summary": "Start an eval run",
+        "tags": [
+          "AI Eval"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalRunsCreateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Run created and jobs enqueued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions. The caller must have at least the Querier role on the prompt set's model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The prompt set was not found, or `run_config.branch_id` does not match an existing branch in the organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`run_config.branch_id` does not belong to the prompt set's model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError422"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-user active-run cap reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Run created and jobs enqueued, but it could not be re-read for the response. The run exists — list runs for the prompt set to find it rather than retrying, since a retry starts a duplicate run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI eval is paused for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError503"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/eval/runs/{runId}": {
+      "get": {
+        "description": "Get an eval run with every per-prompt result row, including the underlying agentic job state and any scoring data.",
+        "operationId": "aiEvalRunsGet",
+        "summary": "Get an eval run",
+        "tags": [
+          "AI Eval"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The unique identifier of the eval run.",
+              "example": "660e8400-e29b-41d4-a716-446655440001"
+            },
+            "required": true,
+            "description": "The unique identifier of the eval run.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsGetResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "description": "Archive (soft-delete) an eval run. Any non-terminal per-prompt agentic jobs are cancelled as part of the archive (best-effort), and a still-RUNNING run is flipped to CANCELLED before archival. The call is idempotent; archiving an already-terminal or already-archived run is a no-op.",
+        "operationId": "aiEvalRunsArchive",
+        "summary": "Archive an eval run",
+        "tags": [
+          "AI Eval"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The unique identifier of the eval run.",
+              "example": "660e8400-e29b-41d4-a716-446655440001"
+            },
+            "required": true,
+            "description": "The unique identifier of the eval run.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run archived successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsDeleteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A still-running run may already be flipped to CANCELLED and archived even though the rest of the cascade failed — safe to retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError500"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/eval/runs/{runId}/cancel": {
+      "post": {
+        "description": "Cancel an in-flight eval run. Any non-terminal per-prompt jobs are cancelled and the run is archived — the response returns the updated run inline (`status: CANCELLED`, `is_archived: true`); use `/unarchive` to surface it in the default `archived=false` list again.",
+        "operationId": "aiEvalRunsCancel",
+        "summary": "Cancel an eval run",
+        "tags": [
+          "AI Eval"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The unique identifier of the eval run.",
+              "example": "660e8400-e29b-41d4-a716-446655440001"
+            },
+            "required": true,
+            "description": "The unique identifier of the eval run.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation processed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsCancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError404"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The run was cancelled and archived, but could not be re-read for the response — safe to retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError500"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/eval/runs/{runId}/unarchive": {
+      "post": {
+        "description": "Restore an archived eval run.",
+        "operationId": "aiEvalRunsUnarchive",
+        "summary": "Restore an archived eval run",
+        "tags": [
+          "AI Eval"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The unique identifier of the eval run.",
+              "example": "660e8400-e29b-41d4-a716-446655440001"
+            },
+            "required": true,
+            "description": "The unique identifier of the eval run.",
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run restored successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalRunsUnarchiveResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
             "content": {
               "application/json": {
                 "schema": {
