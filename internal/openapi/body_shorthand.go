@@ -202,6 +202,44 @@ var bodyShorthands = map[string]*BodyShorthand{
 		ExampleShort: `omni models git-sync <model-id> --commit-message "Update schema"`,
 		ExampleJSON:  `omni models git-sync <model-id> --body '{"commitMessage":"Update schema"}'`,
 	},
+
+	// v2 documents. Metadata fields are promoted to flags; the heavy nested
+	// content (containers / controls / queryPresentations / settings) stays
+	// on --body/stdin. Because a v2-get response is a valid draft PATCH body,
+	// content round-trips cleanly: v2-get <id> > doc.json, edit, then
+	// v2-patch-draft <id> --body - < doc.json and v2-publish-draft <id>.
+	"documentsV2Create": {
+		Args: []ArgMapping{
+			{Name: "model-id", FieldPath: "modelId", Description: "UUID of the model the document is built on", Transform: "string"},
+			{Name: "name", FieldPath: "name", Description: "name for the new document", Transform: "string"},
+		},
+		Flags: []FlagMapping{
+			{FlagName: "identifier", FieldPath: "identifier", Description: "identifier for the new document (server-minted if omitted)"},
+			{FlagName: "description", FieldPath: "description", Description: "document description"},
+			{FlagName: "folder-id", FieldPath: "folderId", Description: "destination folder ID (omit for the root folder)"},
+		},
+		ExampleShort: `omni documents v2-create 770e8400-e29b-41d4-a716-446655440002 "Q3 Revenue"`,
+		ExampleJSON:  `omni documents v2-create --body '{"modelId":"770e8400-...","name":"Q3 Revenue"}'`,
+	},
+	"documentsV2PatchDraft": {
+		Flags: []FlagMapping{
+			{FlagName: "name", FieldPath: "name", Description: "document name"},
+			{FlagName: "description", FieldPath: "description", Description: "document description"},
+			{FlagName: "summary", FieldPath: "summary", Description: "what this patch changes; written to the history audit trail"},
+			{FlagName: "branch-id", FieldPath: "branchId", Description: "branch the new draft is created on (omit for the main workspace)"},
+		},
+		ExampleShort: `omni documents v2-patch-draft <identifier> --name "WIP title"`,
+		ExampleJSON:  `omni documents v2-patch-draft <identifier> --body '{"name":"WIP title"}'`,
+	},
+	"documentsV2PatchDraftByIdentifier": {
+		Flags: []FlagMapping{
+			{FlagName: "name", FieldPath: "name", Description: "document name"},
+			{FlagName: "description", FieldPath: "description", Description: "document description"},
+			{FlagName: "summary", FieldPath: "summary", Description: "what this patch changes; written to the history audit trail"},
+		},
+		ExampleShort: `omni documents v2-patch-draft-by-identifier <identifier> <draft-identifier> --name "Edited"`,
+		ExampleJSON:  `omni documents v2-patch-draft-by-identifier <identifier> <draft-identifier> --body '{"name":"Edited"}'`,
+	},
 }
 
 // GetBodyShorthand returns the shorthand for an operation, or nil if none exists.
@@ -239,8 +277,19 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 			rawBody = jsonBodyFlag
 		}
 
-		// If --body/--json-body is provided, use existing behavior
+		// If --body/--json-body is provided, use existing behavior — but
+		// reject explicitly-set shorthand flags rather than silently
+		// dropping them from the request.
 		if rawBody != "" {
+			var conflicting []string
+			for _, f := range sh.Flags {
+				if cmd.Flags().Changed(f.FlagName) {
+					conflicting = append(conflicting, "--"+f.FlagName)
+				}
+			}
+			if len(conflicting) > 0 {
+				return fmt.Errorf("%s cannot be combined with --body; include the field(s) in the JSON body instead", strings.Join(conflicting, ", "))
+			}
 			return originalRunE(cmd, args)
 		}
 
@@ -323,16 +372,14 @@ func assembleBody(sh *BodyShorthand, args []string, pathParamCount int, cmd *cob
 	}
 
 	for _, fm := range sh.Flags {
+		val, _ := cmd.Flags().GetString(fm.FlagName)
+		if val == "" {
+			continue
+		}
 		if fm.IsBool {
-			val, _ := cmd.Flags().GetString(fm.FlagName)
-			if val != "" {
-				body[fm.FieldPath] = (val == "true")
-			}
+			body[fm.FieldPath] = (val == "true")
 		} else {
-			val, _ := cmd.Flags().GetString(fm.FlagName)
-			if val != "" {
-				body[fm.FieldPath] = val
-			}
+			body[fm.FieldPath] = val
 		}
 	}
 
