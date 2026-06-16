@@ -40,29 +40,64 @@ func addConfigCommands(root *cobra.Command) {
 }
 
 func configInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		name       string
+		endpoint   string
+		authMethod string
+		apiKey     string
+	)
+
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a new configuration profile",
+		Long: `Create a new configuration profile.
+
+Prompts interactively for any value not supplied via flags. With --name,
+--endpoint, and --auth all set, no prompts are shown.`,
+		Example: `  # Interactive setup
+  omni config init
+
+  # Non-interactive OAuth (opens browser for login)
+  omni config init --name prod --endpoint https://myorg.omniapp.co --auth oauth
+
+  # Non-interactive API key
+  omni config init --name prod --endpoint https://myorg.omniapp.co --api-key "$OMNI_API_TOKEN"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reader := bufio.NewReader(os.Stdin)
 
-			fmt.Print("Profile name: ")
-			name, _ := reader.ReadString('\n')
+			if !cmd.Flags().Changed("name") {
+				fmt.Print("Profile name: ")
+				name, _ = reader.ReadString('\n')
+			}
 			name = strings.TrimSpace(name)
 			if name == "" {
 				name = "default"
 			}
 
-			fmt.Print("API endpoint (e.g., https://myorg.omni.co): ")
-			endpoint, _ := reader.ReadString('\n')
+			if !cmd.Flags().Changed("endpoint") {
+				fmt.Print("API endpoint (e.g., https://myorg.omniapp.co): ")
+				endpoint, _ = reader.ReadString('\n')
+			}
 			endpoint = strings.TrimSpace(endpoint)
 
-			fmt.Println("Authentication method:")
-			fmt.Println("  1) API key")
-			fmt.Println("  2) OAuth (browser login)")
-			fmt.Print("Choose [1/2]: ")
-			choice, _ := reader.ReadString('\n')
-			choice = strings.TrimSpace(strings.ToLower(choice))
+			choice := strings.TrimSpace(strings.ToLower(authMethod))
+			switch {
+			case choice == "" && apiKey != "":
+				choice = "api-key"
+			case choice == "":
+				fmt.Println("Authentication method:")
+				fmt.Println("  1) API key")
+				fmt.Println("  2) OAuth (browser login)")
+				fmt.Print("Choose [1/2]: ")
+				choice, _ = reader.ReadString('\n')
+				choice = strings.TrimSpace(strings.ToLower(choice))
+			case choice != "oauth" && choice != "api-key":
+				return fmt.Errorf("invalid --auth %q — must be %q or %q", authMethod, "api-key", "oauth")
+			}
+
+			if choice == "oauth" && apiKey != "" {
+				return fmt.Errorf("--api-key cannot be combined with --auth oauth")
+			}
 
 			cfg, err := config.Load()
 			if err != nil {
@@ -87,13 +122,15 @@ func configInitCmd() *cobra.Command {
 				cfg.Profiles[name] = p
 
 			default: // "1", "a", "api-key", or empty
-				fmt.Print("API key: ")
-				apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Println()
-				if err != nil {
-					return fmt.Errorf("reading API key: %w", err)
+				if apiKey == "" {
+					fmt.Print("API key: ")
+					apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+					fmt.Println()
+					if err != nil {
+						return fmt.Errorf("reading API key: %w", err)
+					}
+					apiKey = strings.TrimSpace(string(apiKeyBytes))
 				}
-				apiKey := strings.TrimSpace(string(apiKeyBytes))
 
 				cfg.Profiles[name] = config.Profile{
 					APIEndpoint: endpoint,
@@ -114,6 +151,13 @@ func configInitCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&name, "name", "", "profile name (skips prompt)")
+	cmd.Flags().StringVar(&endpoint, "endpoint", "", "API endpoint, e.g. https://myorg.omniapp.co (skips prompt)")
+	cmd.Flags().StringVar(&authMethod, "auth", "", `authentication method: "api-key" or "oauth" (skips prompt)`)
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key (skips prompt; implies --auth api-key)")
+
+	return cmd
 }
 
 func configShowCmd() *cobra.Command {

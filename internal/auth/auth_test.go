@@ -150,8 +150,8 @@ func TestDo_NilBody(t *testing.T) {
 }
 
 // If the user's config has a trailing slash on the base URL (like
-// "https://myorg.omni.co/"), we shouldn't end up with a double slash
-// in the final URL ("https://myorg.omni.co//api/v1/models").
+// "https://myorg.omniapp.co/"), we shouldn't end up with a double slash
+// in the final URL ("https://myorg.omniapp.co//api/v1/models").
 func TestDo_BaseURLTrailingSlash(t *testing.T) {
 	var gotPath string
 
