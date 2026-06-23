@@ -390,3 +390,237 @@ func TestConfigShow_NoConfig(t *testing.T) {
 		t.Errorf("error = %q, want it to suggest `config init`", err.Error())
 	}
 }
+
+// --- config use (the #45 quoting UX) ---
+
+// The reported failure: `omni config use Playground Org-scoped` (unquoted) was
+// split by the shell into two args. Instead of cobra's opaque
+// "accepts 1 arg(s), received 2", we now hint at quoting and echo the likely
+// intended name so the user can copy-paste the fix.
+func TestConfigUse_MultiArgHint(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:  1,
+		Profiles: map[string]config.Profile{"Playground Org-scoped": {APIEndpoint: "https://x.omniapp.co"}},
+	})
+
+	cmd := configUseCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"Playground", "Org-scoped"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an args error for unquoted multi-word name, got nil")
+	}
+	if !strings.Contains(err.Error(), "quote it") {
+		t.Errorf("error = %q, want a quoting hint", err.Error())
+	}
+	// The hint echoes the reconstructed name, quoted, so it's directly usable.
+	if !strings.Contains(err.Error(), `"Playground Org-scoped"`) {
+		t.Errorf("error = %q, want it to show the quoted name", err.Error())
+	}
+}
+
+// The counterpart: a correctly quoted spaced name arrives as one arg and
+// switches profiles. Confirms we didn't break the legitimate path.
+func TestConfigUse_QuotedSpacedNameWorks(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:  1,
+		Profiles: map[string]config.Profile{"Playground Org-scoped": {APIEndpoint: "https://x.omniapp.co"}},
+	})
+
+	cmd := configUseCmd()
+	cmd.SetArgs([]string{"Playground Org-scoped"})
+	out := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+	if !strings.Contains(out, `Switched to profile "Playground Org-scoped"`) {
+		t.Errorf("stdout = %q, want it to switch to the spaced profile", out)
+	}
+
+	cfg, _ := config.Load()
+	if cfg.DefaultProfile != "Playground Org-scoped" {
+		t.Errorf("DefaultProfile = %q, want the spaced name", cfg.DefaultProfile)
+	}
+}
+
+// --- config list ---
+
+func TestConfigList_MarksDefault(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles: map[string]config.Profile{
+			"prod":    {APIEndpoint: "https://prod.omniapp.co", AuthMethod: "oauth"},
+			"staging": {APIEndpoint: "https://staging.omniapp.co", AuthMethod: "api-key"},
+		},
+	})
+
+	cmd := configListCmd()
+	out := captureStdout(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "* prod") {
+		t.Errorf("expected default profile to be marked with *, got:\n%s", out)
+	}
+	if !strings.Contains(out, "  staging") {
+		t.Errorf("expected non-default profile to be unmarked, got:\n%s", out)
+	}
+}
+
+// --- config rename ---
+
+// The motivating bug (#45): a profile saved with spaces is unusable. Rename
+// must let the user fix it without sudo-editing the config file.
+func TestConfigRename_FixesLegacySpacedName(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "Playground Org-scoped",
+		Profiles: map[string]config.Profile{
+			"Playground Org-scoped": {
+				APIEndpoint: "https://playground.omniapp.co",
+				AuthMethod:  "api-key",
+				APIKey:      "secret",
+			},
+		},
+	})
+
+	cmd := configRenameCmd()
+	out := captureStdout(t, func() {
+		if err := cmd.RunE(cmd, []string{"Playground Org-scoped", "playground"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, "Renamed") {
+		t.Errorf("stdout = %q, want it to confirm rename", out)
+	}
+
+	cfg, _ := config.Load()
+	if _, exists := cfg.Profiles["Playground Org-scoped"]; exists {
+		t.Error("old profile name still present after rename")
+	}
+	p, ok := cfg.Profiles["playground"]
+	if !ok {
+		t.Fatal("new profile name missing after rename")
+	}
+	if p.APIKey != "secret" {
+		t.Errorf("profile contents lost in rename: %+v", p)
+	}
+	if cfg.DefaultProfile != "playground" {
+		t.Errorf("DefaultProfile = %q, want %q (default should follow the rename)", cfg.DefaultProfile, "playground")
+	}
+}
+
+// Spaced names are allowed — the user just has to quote them when passing them
+// as args. Renaming TO a spaced name must succeed (and works with rename's two
+// positional args, which are unambiguous unlike a single-name command).
+func TestConfigRename_AllowsSpacedName(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:  1,
+		Profiles: map[string]config.Profile{"prod": {APIEndpoint: "https://x.omniapp.co"}},
+	})
+
+	cmd := configRenameCmd()
+	if err := cmd.RunE(cmd, []string{"prod", "Prod (US)"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	cfg, _ := config.Load()
+	if _, ok := cfg.Profiles["Prod (US)"]; !ok {
+		t.Errorf("spaced profile name not created; profiles: %v", cfg.Profiles)
+	}
+}
+
+func TestConfigRename_RefusesToOverwrite(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version: 1,
+		Profiles: map[string]config.Profile{
+			"prod":    {APIEndpoint: "https://prod.omniapp.co"},
+			"staging": {APIEndpoint: "https://staging.omniapp.co"},
+		},
+	})
+
+	cmd := configRenameCmd()
+	err := cmd.RunE(cmd, []string{"prod", "staging"})
+	if err == nil {
+		t.Fatal("expected error when renaming over an existing profile, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, want it to mention name conflict", err.Error())
+	}
+}
+
+func TestConfigRename_UnknownProfile(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:  1,
+		Profiles: map[string]config.Profile{"prod": {APIEndpoint: "https://prod.omniapp.co"}},
+	})
+
+	cmd := configRenameCmd()
+	err := cmd.RunE(cmd, []string{"nope", "newname"})
+	if err == nil {
+		t.Fatal("expected error for unknown profile, got nil")
+	}
+	if !strings.Contains(err.Error(), `"nope" not found`) {
+		t.Errorf("error = %q, want it to mention the missing profile", err.Error())
+	}
+}
+
+// --- config delete ---
+
+func TestConfigDelete_RemovesProfileWithYesFlag(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles: map[string]config.Profile{
+			"prod":    {APIEndpoint: "https://prod.omniapp.co"},
+			"staging": {APIEndpoint: "https://staging.omniapp.co"},
+		},
+	})
+
+	cmd := configDeleteCmd()
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatalf("setting --yes flag: %v", err)
+	}
+	out := captureStdout(t, func() {
+		if err := cmd.RunE(cmd, []string{"prod"}); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(out, `Deleted profile "prod"`) {
+		t.Errorf("stdout = %q, want it to confirm deletion", out)
+	}
+
+	cfg, _ := config.Load()
+	if _, exists := cfg.Profiles["prod"]; exists {
+		t.Error("prod profile still present after delete")
+	}
+	if _, exists := cfg.Profiles["staging"]; !exists {
+		t.Error("staging profile incorrectly deleted")
+	}
+	if cfg.DefaultProfile != "" {
+		t.Errorf("DefaultProfile = %q, want empty (deleted profile was the default)", cfg.DefaultProfile)
+	}
+}
+
+func TestConfigDelete_UnknownProfile(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:  1,
+		Profiles: map[string]config.Profile{"prod": {APIEndpoint: "https://prod.omniapp.co"}},
+	})
+
+	cmd := configDeleteCmd()
+	if err := cmd.Flags().Set("yes", "true"); err != nil {
+		t.Fatalf("setting --yes flag: %v", err)
+	}
+	err := cmd.RunE(cmd, []string{"nope"})
+	if err == nil {
+		t.Fatal("expected error for unknown profile, got nil")
+	}
+	if !strings.Contains(err.Error(), `"nope" not found`) {
+		t.Errorf("error = %q, want it to mention the missing profile", err.Error())
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,7 +32,10 @@ func addConfigCommands(root *cobra.Command) {
 
 	configCmd.AddCommand(configInitCmd())
 	configCmd.AddCommand(configShowCmd())
+	configCmd.AddCommand(configListCmd())
 	configCmd.AddCommand(configUseCmd())
+	configCmd.AddCommand(configRenameCmd())
+	configCmd.AddCommand(configDeleteCmd())
 	configCmd.AddCommand(configLoginCmd())
 	configCmd.AddCommand(configLogoutCmd())
 	configCmd.AddCommand(configSetFormatCmd())
@@ -227,7 +231,8 @@ func configUseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "use <profile>",
 		Short: "Switch the default profile",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Switch the default profile.\n\nIf the profile name contains spaces, quote it: `omni config use \"My Profile\"`. Run `omni config list` to see profile names.",
+		Args:  profileNameArgs(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -236,11 +241,7 @@ func configUseCmd() *cobra.Command {
 
 			name := args[0]
 			if _, ok := cfg.Profiles[name]; !ok {
-				available := make([]string, 0, len(cfg.Profiles))
-				for k := range cfg.Profiles {
-					available = append(available, k)
-				}
-				return fmt.Errorf("profile %q not found. Available: %s", name, strings.Join(available, ", "))
+				return fmt.Errorf("profile %q not found. Available: %s", name, formatProfileList(cfg))
 			}
 
 			cfg.DefaultProfile = name
@@ -254,11 +255,152 @@ func configUseCmd() *cobra.Command {
 	}
 }
 
+// profileNameArgs validates the profile-name positional argument, accepting
+// between min and max args. A profile name is a single token, so when the shell
+// hands us more than max args it almost always means the user typed a name with
+// spaces without quoting it (the reported failure mode in #45). Rather than
+// cobra's opaque "accepts 1 arg(s), received 2", we reconstruct the likely
+// intended name and show how to quote it.
+func profileNameArgs(min, max int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > max {
+			return fmt.Errorf("got %d arguments — a profile name is a single value; if it contains spaces, quote it: %s %q",
+				len(args), cmd.CommandPath(), strings.Join(args, " "))
+		}
+		if len(args) < min {
+			return fmt.Errorf("%s requires a profile name", cmd.CommandPath())
+		}
+		return nil
+	}
+}
+
+// formatProfileList returns a comma-separated list of profile names, quoted so
+// that names containing spaces are visually distinguishable.
+func formatProfileList(cfg *config.Config) string {
+	names := make([]string, 0, len(cfg.Profiles))
+	for k := range cfg.Profiles {
+		names = append(names, fmt.Sprintf("%q", k))
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+func configListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List configured profiles",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("no config found — run `omni config init`")
+			}
+			if len(cfg.Profiles) == 0 {
+				fmt.Println("(no profiles)")
+				return nil
+			}
+			names := make([]string, 0, len(cfg.Profiles))
+			for k := range cfg.Profiles {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, n := range names {
+				marker := "  "
+				if n == cfg.DefaultProfile {
+					marker = "* "
+				}
+				p := cfg.Profiles[n]
+				fmt.Printf("%s%s\t%s\t%s\n", marker, n, p.AuthMethod, p.APIEndpoint)
+			}
+			return nil
+		},
+	}
+}
+
+func configRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <old> <new>",
+		Short: "Rename a profile",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			oldName, newName := args[0], args[1]
+
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("no config found — run `omni config init`")
+			}
+			p, ok := cfg.Profiles[oldName]
+			if !ok {
+				return fmt.Errorf("profile %q not found. Available: %s", oldName, formatProfileList(cfg))
+			}
+			if oldName == newName {
+				return nil
+			}
+			if _, exists := cfg.Profiles[newName]; exists {
+				return fmt.Errorf("profile %q already exists", newName)
+			}
+
+			delete(cfg.Profiles, oldName)
+			cfg.Profiles[newName] = p
+			if cfg.DefaultProfile == oldName {
+				cfg.DefaultProfile = newName
+			}
+			if err := config.Save(cfg); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
+			fmt.Printf("Renamed profile %q to %q\n", oldName, newName)
+			return nil
+		},
+	}
+}
+
+func configDeleteCmd() *cobra.Command {
+	var assumeYes bool
+	cmd := &cobra.Command{
+		Use:   "delete <profile>",
+		Short: "Delete a profile",
+		Args:  profileNameArgs(1, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("no config found — run `omni config init`")
+			}
+			if _, ok := cfg.Profiles[name]; !ok {
+				return fmt.Errorf("profile %q not found. Available: %s", name, formatProfileList(cfg))
+			}
+
+			if !assumeYes {
+				fmt.Printf("Delete profile %q? This cannot be undone. [y/N]: ", name)
+				reader := bufio.NewReader(os.Stdin)
+				answer, _ := reader.ReadString('\n')
+				answer = strings.ToLower(strings.TrimSpace(answer))
+				if answer != "y" && answer != "yes" {
+					fmt.Println("Aborted.")
+					return nil
+				}
+			}
+
+			delete(cfg.Profiles, name)
+			if cfg.DefaultProfile == name {
+				cfg.DefaultProfile = ""
+			}
+			if err := config.Save(cfg); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
+			fmt.Printf("Deleted profile %q\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "Skip confirmation prompt")
+	return cmd
+}
+
 func configLoginCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login [profile]",
 		Short: "Log in via OAuth browser flow",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -306,7 +448,7 @@ func configLogoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout [profile]",
 		Short: "Clear OAuth tokens from a profile",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
