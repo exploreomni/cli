@@ -172,6 +172,12 @@ func simplifySchema(proxy *base.SchemaProxy, depth int, seen map[string]bool) in
 	if sch.Items != nil && sch.Items.IsA() {
 		out["items"] = simplifySchema(sch.Items.A, depth+1, childSeen)
 	}
+	// Map types carry their value shape in additionalProperties (a $ref or
+	// inline schema) rather than properties — e.g. queryPresentations.data,
+	// keyed by tab ID. Expand it so the value schema isn't dropped.
+	if sch.AdditionalProperties != nil && sch.AdditionalProperties.IsA() {
+		out["additionalProperties"] = simplifySchema(sch.AdditionalProperties.A, depth+1, childSeen)
+	}
 	if len(sch.OneOf) > 0 {
 		out["oneOf"] = simplifyList(sch.OneOf, depth+1, childSeen)
 	}
@@ -248,6 +254,11 @@ func synthExample(proxy *base.SchemaProxy, name string, depth int, seen map[stri
 			} else {
 				obj[fieldName] = placeholder(fieldName, "string")
 			}
+		}
+		// Pure map type (additionalProperties, no fixed properties) — show one
+		// representative entry so the agent sees the value shape.
+		if len(props) == 0 && sch.AdditionalProperties != nil && sch.AdditionalProperties.IsA() {
+			obj["<key>"] = synthExample(sch.AdditionalProperties.A, "", depth+1, childSeen)
 		}
 		return obj
 	}

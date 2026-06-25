@@ -178,6 +178,130 @@ func TestSchema_RecursiveRefIsGuarded(t *testing.T) {
 	}
 }
 
+// mapTestSpec exercises a map-typed (additionalProperties) field — the shape of
+// documents v2-create's queryPresentations.data, which keys tile objects by tab
+// ID. The value schema lives in additionalProperties, not properties.
+const mapTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/docs": {
+      "post": {
+        "operationId": "docsCreate",
+        "tags": ["docs"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateDoc"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Tile": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "example": "Revenue"},
+          "prefersChart": {"type": "boolean"}
+        }
+      },
+      "CreateDoc": {
+        "type": "object",
+        "required": ["presentations"],
+        "properties": {
+          "presentations": {
+            "type": "object",
+            "description": "Tiles keyed by tab ID.",
+            "additionalProperties": {"$ref": "#/components/schemas/Tile"}
+          }
+        }
+      }
+    }
+  }
+}`
+
+func runMapSchema(t *testing.T) bodySchemaDoc {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(mapTestSpec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(cmds))
+	}
+	group := cmds[0]
+	var buf bytes.Buffer
+	group.SetOut(&buf)
+	group.SetErr(&buf)
+	group.SetArgs([]string{"create", "--schema"})
+	if err := group.Execute(); err != nil {
+		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
+	}
+	var doc bodySchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc
+}
+
+// A map-typed field must expand its value schema from additionalProperties
+// rather than dropping it (the queryPresentations.data gap).
+func TestSchema_MapExpandsAdditionalProperties(t *testing.T) {
+	doc := runMapSchema(t)
+	body, ok := doc.Body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is not an object: %T", doc.Body)
+	}
+	props, ok := body["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("body.properties missing")
+	}
+	pres, ok := props["presentations"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("presentations property missing or not an object")
+	}
+	addl, ok := pres["additionalProperties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("presentations.additionalProperties missing — map value schema was dropped")
+	}
+	tileProps, ok := addl["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("additionalProperties.properties missing — Tile $ref not expanded")
+	}
+	for _, key := range []string{"name", "prefersChart"} {
+		if _, ok := tileProps[key]; !ok {
+			t.Errorf("expanded tile schema missing %q", key)
+		}
+	}
+}
+
+// The synthesized example must render one representative map entry so the value
+// shape is copy-pasteable, not an empty object.
+func TestSchema_MapExampleShowsRepresentativeEntry(t *testing.T) {
+	doc := runMapSchema(t)
+	ex, ok := doc.Example.(map[string]interface{})
+	if !ok {
+		t.Fatalf("example is not an object: %T", doc.Example)
+	}
+	pres, ok := ex["presentations"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("example.presentations missing or not an object: %v", ex)
+	}
+	entry, ok := pres["<key>"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected a <key> sample entry in the map example, got %v", pres)
+	}
+	if entry["name"] != "Revenue" {
+		t.Errorf("sample tile name = %v, want Revenue (field example)", entry["name"])
+	}
+}
+
 // Without --schema, the command must still enforce normal behavior (here, that
 // the body flag path is taken and the executor is invoked).
 func TestSchema_FlagDoesNotAffectNormalRun(t *testing.T) {
