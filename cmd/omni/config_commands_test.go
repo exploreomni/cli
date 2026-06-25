@@ -82,47 +82,12 @@ func TestApplyOAuthToken_CopiesAllFields(t *testing.T) {
 }
 
 // --- config init (non-interactive flags) ---
-
-// With --name, --endpoint, and --api-key all supplied, init must not prompt
-// for anything and should write the profile straight to disk.
-func TestConfigInit_NonInteractiveAPIKey(t *testing.T) {
-	withConfig(t, nil)
-
-	cmd := configInitCmd()
-	cmd.SetArgs([]string{
-		"--name", "prod",
-		"--endpoint", "https://myorg.omniapp.co",
-		"--api-key", "sk-test-1234",
-	})
-	out := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-	})
-	if strings.Contains(out, "Profile name:") || strings.Contains(out, "Choose [1/2]:") {
-		t.Errorf("expected no interactive prompts, got:\n%s", out)
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	p := cfg.Profiles["prod"]
-	if p.APIEndpoint != "https://myorg.omniapp.co" {
-		t.Errorf("APIEndpoint = %q", p.APIEndpoint)
-	}
-	// --api-key alone implies --auth api-key.
-	if p.AuthMethod != "api-key" {
-		t.Errorf("AuthMethod = %q, want %q", p.AuthMethod, "api-key")
-	}
-	if p.APIKey != "sk-test-1234" {
-		t.Errorf("APIKey = %q", p.APIKey)
-	}
-	// First profile becomes the default.
-	if cfg.DefaultProfile != "prod" {
-		t.Errorf("DefaultProfile = %q, want %q", cfg.DefaultProfile, "prod")
-	}
-}
+//
+// Note: there is deliberately no --api-key flag. Accepting a secret on the
+// command line leaks it into shell history and process listings (and from
+// there into anything that scrapes those, including agentic tooling). The key
+// is always read from a hidden prompt instead; only the non-secret --name,
+// --endpoint, and --auth values can be supplied non-interactively.
 
 // --auth oauth must validate the endpoint BEFORE launching the browser flow,
 // so a bad endpoint fails fast instead of opening a browser against it.
@@ -164,27 +129,6 @@ func TestConfigInit_InvalidAuthFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `invalid --auth "magic"`) {
 		t.Errorf("error = %q, want it to name the invalid value", err.Error())
-	}
-}
-
-func TestConfigInit_APIKeyConflictsWithOAuth(t *testing.T) {
-	withConfig(t, nil)
-
-	cmd := configInitCmd()
-	cmd.SilenceUsage = true
-	cmd.SilenceErrors = true
-	cmd.SetArgs([]string{
-		"--name", "prod",
-		"--endpoint", "https://myorg.omniapp.co",
-		"--auth", "oauth",
-		"--api-key", "sk-test-1234",
-	})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected conflict error, got nil")
-	}
-	if !strings.Contains(err.Error(), "--api-key cannot be combined") {
-		t.Errorf("error = %q, want api-key/oauth conflict message", err.Error())
 	}
 }
 

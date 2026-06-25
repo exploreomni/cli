@@ -48,7 +48,6 @@ func configInitCmd() *cobra.Command {
 		name       string
 		endpoint   string
 		authMethod string
-		apiKey     string
 	)
 
 	cmd := &cobra.Command{
@@ -57,15 +56,17 @@ func configInitCmd() *cobra.Command {
 		Long: `Create a new configuration profile.
 
 Prompts interactively for any value not supplied via flags. With --name,
---endpoint, and --auth all set, no prompts are shown.`,
+--endpoint, and --auth oauth set, OAuth setup runs with no prompts. For
+api-key auth the key is always read from a hidden prompt — it is never
+accepted as a flag, so it can't leak into shell history.`,
 		Example: `  # Interactive setup
   omni config init
 
   # Non-interactive OAuth (opens browser for login)
   omni config init --name prod --endpoint https://myorg.omniapp.co --auth oauth
 
-  # Non-interactive API key
-  omni config init --name prod --endpoint https://myorg.omniapp.co --api-key "$OMNI_API_TOKEN"`,
+  # API key (prompts securely for the key)
+  omni config init --name prod --endpoint https://myorg.omniapp.co --auth api-key`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reader := bufio.NewReader(os.Stdin)
 
@@ -86,8 +87,6 @@ Prompts interactively for any value not supplied via flags. With --name,
 
 			choice := strings.TrimSpace(strings.ToLower(authMethod))
 			switch {
-			case choice == "" && apiKey != "":
-				choice = "api-key"
 			case choice == "":
 				fmt.Println("Authentication method:")
 				fmt.Println("  1) API key")
@@ -97,10 +96,6 @@ Prompts interactively for any value not supplied via flags. With --name,
 				choice = strings.TrimSpace(strings.ToLower(choice))
 			case choice != "oauth" && choice != "api-key":
 				return fmt.Errorf("invalid --auth %q — must be %q or %q", authMethod, "api-key", "oauth")
-			}
-
-			if choice == "oauth" && apiKey != "" {
-				return fmt.Errorf("--api-key cannot be combined with --auth oauth")
 			}
 
 			cfg, err := config.Load()
@@ -126,15 +121,15 @@ Prompts interactively for any value not supplied via flags. With --name,
 				cfg.Profiles[name] = p
 
 			default: // "1", "a", "api-key", or empty
-				if apiKey == "" {
-					fmt.Print("API key: ")
-					apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-					fmt.Println()
-					if err != nil {
-						return fmt.Errorf("reading API key: %w", err)
-					}
-					apiKey = strings.TrimSpace(string(apiKeyBytes))
+				// The key is always read from a hidden prompt rather than a
+				// flag, so it never lands in shell history or process listings.
+				fmt.Print("API key: ")
+				apiKeyBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err != nil {
+					return fmt.Errorf("reading API key: %w", err)
 				}
+				apiKey := strings.TrimSpace(string(apiKeyBytes))
 
 				cfg.Profiles[name] = config.Profile{
 					APIEndpoint: endpoint,
@@ -158,8 +153,7 @@ Prompts interactively for any value not supplied via flags. With --name,
 
 	cmd.Flags().StringVar(&name, "name", "", "profile name (skips prompt)")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "API endpoint, e.g. https://myorg.omniapp.co (skips prompt)")
-	cmd.Flags().StringVar(&authMethod, "auth", "", `authentication method: "api-key" or "oauth" (skips prompt)`)
-	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key (skips prompt; implies --auth api-key)")
+	cmd.Flags().StringVar(&authMethod, "auth", "", `authentication method: "api-key" or "oauth" (skips prompt). The API key itself is always read from a hidden prompt, never a flag.`)
 
 	return cmd
 }
