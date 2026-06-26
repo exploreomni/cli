@@ -302,6 +302,110 @@ func TestSchema_MapExampleShowsRepresentativeEntry(t *testing.T) {
 	}
 }
 
+// runSchemaWith runs "create --schema" plus extra flags against a spec. On
+// success it returns the parsed doc; on failure it returns the execution error
+// (usage/errors silenced so the error carries only the message under test).
+func runSchemaWith(t *testing.T, spec string, extra ...string) (bodySchemaDoc, error) {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(spec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	var buf bytes.Buffer
+	group.SetOut(&buf)
+	group.SetErr(&buf)
+	group.SetArgs(append([]string{"create", "--schema"}, extra...))
+	if execErr := group.Execute(); execErr != nil {
+		return bodySchemaDoc{}, execErr
+	}
+	var doc bodySchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc, nil
+}
+
+// --field drills to a nested property; the $ref ("child" → Node) is resolved
+// and expanded so the drilled body is the Node object, not the whole widget.
+func TestSchema_FieldDrillsNestedProperty(t *testing.T) {
+	doc, err := runSchemaWith(t, schemaTestSpec, "--field", "child")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Field != "child" {
+		t.Errorf("field = %q, want child", doc.Field)
+	}
+	body, ok := doc.Body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is not an object: %T", doc.Body)
+	}
+	props, ok := body["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("drilled body.properties missing")
+	}
+	if _, ok := props["label"]; !ok {
+		t.Errorf("expected Node.label in drilled body, got %v", props)
+	}
+}
+
+// A dotted path transparently descends through a map (additionalProperties):
+// "presentations.prefersChart" reaches the Tile's boolean leaf without the
+// caller naming the map's value layer.
+func TestSchema_FieldAutoDescendsMap(t *testing.T) {
+	doc, err := runSchemaWith(t, mapTestSpec, "--field", "presentations.prefersChart")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body, ok := doc.Body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is not an object: %T", doc.Body)
+	}
+	if body["type"] != "boolean" {
+		t.Errorf("drilled leaf type = %v, want boolean", body["type"])
+	}
+}
+
+// An unknown field errors and lists the fields available at that level — which,
+// after descending through the map, are the Tile's fields.
+func TestSchema_FieldNotFoundListsAvailable(t *testing.T) {
+	_, err := runSchemaWith(t, mapTestSpec, "--field", "presentations.bogus")
+	if err == nil {
+		t.Fatal("expected an error for an unknown field")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `no field "bogus"`) {
+		t.Errorf("error = %q, want it to name the missing field", msg)
+	}
+	for _, want := range []string{"name", "prefersChart"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to list available field %q", msg, want)
+		}
+	}
+}
+
+// --depth bounds expansion: at depth 0 the top-level object lists its
+// properties but nested objects are truncated with the depth note.
+func TestSchema_DepthLimitsExpansion(t *testing.T) {
+	doc, err := runSchemaWith(t, schemaTestSpec, "--depth", "0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := json.Marshal(doc.Body)
+	if !strings.Contains(string(raw), "max depth reached") {
+		t.Errorf("expected a depth-truncation note at --depth 0: %s", raw)
+	}
+	// The deep default must still fully expand (no truncation note).
+	full, _ := runSchemaWith(t, schemaTestSpec)
+	rawFull, _ := json.Marshal(full.Body)
+	if strings.Contains(string(rawFull), "max depth reached") {
+		t.Errorf("default depth should not truncate this small schema: %s", rawFull)
+	}
+}
+
 // Without --schema, the command must still enforce normal behavior (here, that
 // the body flag path is taken and the executor is invoked).
 func TestSchema_FlagDoesNotAffectNormalRun(t *testing.T) {

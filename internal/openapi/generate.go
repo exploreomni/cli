@@ -276,6 +276,15 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// or network call. This lets `omni <cmd> --schema` work with no args/token.
 	if op.HasBody {
 		cmd.Flags().Bool("schema", false, "print the request body's JSON schema and a filled-in example, then exit (no API call)")
+		// --field / --depth refine the --schema output for deeply nested bodies.
+		// Guarded so a future query/path param of the same name can't panic the
+		// flag registration.
+		if cmd.Flags().Lookup("field") == nil {
+			cmd.Flags().String("field", "", "with --schema: drill into a dotted field path (e.g. queryPresentations.data.query); auto-descends arrays and maps")
+		}
+		if cmd.Flags().Lookup("depth") == nil {
+			cmd.Flags().Int("depth", maxSchemaDepth, "with --schema: max nesting depth to expand; lower for a compact overview")
+		}
 
 		innerArgs := cmd.Args
 		cmd.Args = func(c *cobra.Command, args []string) error {
@@ -288,6 +297,9 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		innerRun := cmd.RunE
 		cmd.RunE = func(c *cobra.Command, args []string) error {
 			if schemaRequested(c) {
+				// A schema error (e.g. a bad --field path) should print just the
+				// helpful message, not the full usage block.
+				c.SilenceUsage = true
 				return emitBodySchema(c, op)
 			}
 			return innerRun(c, args)

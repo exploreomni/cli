@@ -86,6 +86,14 @@ instead of guessing the JSON for --body.
   omni query run --schema
   omni connections create --schema --compact
 
+Deeply nested bodies (e.g. documents v2-create) can be large. Narrow the
+output with --depth N for a shallow overview, then --field PATH to drill into
+one part. PATH is dotted and auto-descends through arrays and maps, so you can
+name a leaf without knowing the container shape:
+  omni documents v2-create --schema --depth 1                       # top-level overview
+  omni documents v2-create --schema --field queryPresentations.data # just the tiles map
+  omni documents v2-create --schema --field queryPresentations.data.query
+
 ## Common Flags
   --compact       Non-indented JSON output
   --token TOKEN   API token (overrides env/config)
@@ -93,6 +101,8 @@ instead of guessing the JSON for --body.
   --profile NAME  Config profile to use
   --body JSON     Request body (JSON string or "-" for stdin)
   --schema        Print the request body's schema + example, then exit
+  --field PATH    With --schema: drill into a dotted field path
+  --depth N       With --schema: cap nesting depth (lower = smaller)
 
 ## Tips
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
