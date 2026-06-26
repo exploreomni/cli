@@ -91,6 +91,7 @@ type operationInfo struct {
 	PathParams  []paramInfo
 	QueryParams []paramInfo
 	HasBody     bool
+	BodySchema  *base.SchemaProxy // request body schema, when HasBody
 	Deprecated  bool
 }
 
@@ -157,6 +158,7 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 		// Check for request body
 		if op.RequestBody != nil {
 			info.HasBody = true
+			info.BodySchema = requestBodySchema(op.RequestBody)
 		}
 
 		groups[tag] = append(groups[tag], info)
@@ -259,7 +261,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 
 	// If the operation accepts a body, add --body and --json-body flags
 	if op.HasBody {
-		cmd.Flags().String("body", "", `request body as JSON string, or "-" for stdin`)
+		cmd.Flags().String("body", "", `request body as JSON string, or "-" for stdin (run with --schema to see its shape)`)
 		cmd.Flags().String("json-body", "", `request body as JSON string, or "-" for stdin (alias for --body)`)
 		cmd.Flags().MarkHidden("json-body")
 	}
@@ -269,7 +271,70 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		applyBodyShorthand(cmd, op, sh)
 	}
 
+	// Add the --schema discovery flag last, wrapping arg validation and RunE so
+	// it short-circuits before any positional-arg checks, body assembly, auth,
+	// or network call. This lets `omni <cmd> --schema` work with no args/token.
+	if op.HasBody {
+		cmd.Flags().Bool("schema", false, "print the request body's JSON schema and a filled-in example, then exit (no API call)")
+		// --field / --depth refine the --schema output for deeply nested bodies.
+		// Guarded so a future query/path param of the same name can't panic the
+		// flag registration.
+		if cmd.Flags().Lookup("field") == nil {
+			cmd.Flags().String("field", "", "with --schema: drill into a dotted field path (e.g. queryPresentations.data.query); auto-descends arrays and maps")
+		}
+		if cmd.Flags().Lookup("depth") == nil {
+			cmd.Flags().Int("depth", maxSchemaDepth, "with --schema: max nesting depth to expand; lower for a compact overview")
+		}
+
+		innerArgs := cmd.Args
+		cmd.Args = func(c *cobra.Command, args []string) error {
+			if schemaRequested(c) || innerArgs == nil {
+				return nil
+			}
+			return innerArgs(c, args)
+		}
+
+		innerRun := cmd.RunE
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			if schemaRequested(c) {
+				// A schema error (e.g. a bad --field path) should print just the
+				// helpful message, not the full usage block.
+				c.SilenceUsage = true
+				return emitBodySchema(c, op)
+			}
+			return innerRun(c, args)
+		}
+	}
+
 	return cmd
+}
+
+// schemaRequested reports whether the --schema discovery flag is set.
+func schemaRequested(cmd *cobra.Command) bool {
+	v, err := cmd.Flags().GetBool("schema")
+	return err == nil && v
+}
+
+// requestBodySchema returns the schema for a request body, preferring the
+// application/json media type and falling back to the first declared one.
+func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
+	if rb == nil || rb.Content == nil {
+		return nil
+	}
+	var first *base.SchemaProxy
+	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
+		mt := pair.Value()
+		if mt == nil || mt.Schema == nil {
+			continue
+		}
+		if pair.Key() == "application/json" {
+			return mt.Schema
+		}
+		if first == nil {
+			first = mt.Schema
+		}
+	}
+	return first
 }
 
 // commandName derives a CLI subcommand name from the operationId or method+path.
