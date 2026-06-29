@@ -302,6 +302,152 @@ func TestSchema_MapExampleShowsRepresentativeEntry(t *testing.T) {
 	}
 }
 
+// describeRefTestSpec exercises the `.describe()`-on-a-ref pattern: a typed ref
+// wrapped in an allOf alongside a description-only sibling. `containers` wraps an
+// array ref (Layout) and `identifier` wraps a scalar ref (DocId). A naive
+// allOf merge that only harvests object properties/required drops these to an
+// empty object; the describer must instead adopt the underlying shape.
+const describeRefTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/docs": {
+      "post": {
+        "operationId": "docsCreate",
+        "tags": ["docs"],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateDoc"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Grid": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string", "example": "grid"}}},
+      "Stack": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string", "example": "stack"}}},
+      "Layout": {
+        "type": "array",
+        "description": "Container layout array.",
+        "items": {"anyOf": [{"$ref": "#/components/schemas/Grid"}, {"$ref": "#/components/schemas/Stack"}]}
+      },
+      "DocId": {"type": "string", "minLength": 2, "description": "Base identifier description."},
+      "CreateDoc": {
+        "type": "object",
+        "required": ["containers", "identifier"],
+        "properties": {
+          "containers": {
+            "allOf": [
+              {"$ref": "#/components/schemas/Layout"},
+              {"description": "Override: when present, replaces the existing layout."}
+            ]
+          },
+          "identifier": {
+            "allOf": [
+              {"$ref": "#/components/schemas/DocId"},
+              {"description": "Override: identifier for the new document."}
+            ]
+          }
+        }
+      }
+    }
+  }
+}`
+
+// An array ref wrapped in a describe()-allOf must keep its array shape and items
+// union, not collapse to an empty object.
+func TestSchema_DescribeOnRefArrayKeepsShape(t *testing.T) {
+	doc, err := runSchemaWith(t, describeRefTestSpec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body := doc.Body.(map[string]interface{})
+	props := body["properties"].(map[string]interface{})
+	containers, ok := props["containers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("containers property missing or not an object")
+	}
+	if containers["type"] != "array" {
+		t.Errorf("containers.type = %v, want array (shape lost to allOf merge)", containers["type"])
+	}
+	items, ok := containers["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("containers.items missing — array shape was dropped: %v", containers)
+	}
+	anyOf, ok := items["anyOf"].([]interface{})
+	if !ok || len(anyOf) != 2 {
+		t.Errorf("containers.items.anyOf = %v, want 2 members (Grid/Stack)", items["anyOf"])
+	}
+	// The description-only sibling overrides the ref's own description.
+	if got, _ := containers["description"].(string); !strings.HasPrefix(got, "Override:") {
+		t.Errorf("containers.description = %q, want the sibling override to win", got)
+	}
+}
+
+// A scalar ref wrapped in a describe()-allOf must keep its scalar type and take
+// the sibling's overriding description.
+func TestSchema_DescribeOnRefScalarKeepsType(t *testing.T) {
+	doc, err := runSchemaWith(t, describeRefTestSpec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body := doc.Body.(map[string]interface{})
+	props := body["properties"].(map[string]interface{})
+	identifier, ok := props["identifier"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("identifier property missing or not an object")
+	}
+	if identifier["type"] != "string" {
+		t.Errorf("identifier.type = %v, want string (scalar shape lost)", identifier["type"])
+	}
+	if got, _ := identifier["description"].(string); !strings.HasPrefix(got, "Override:") {
+		t.Errorf("identifier.description = %q, want the sibling override to win", got)
+	}
+}
+
+// The synthesized example must reflect the underlying typed member: an array for
+// the array ref and a scalar placeholder for the scalar ref, not empty objects.
+func TestSchema_DescribeOnRefExampleSynthesizesShape(t *testing.T) {
+	doc, err := runSchemaWith(t, describeRefTestSpec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ex, ok := doc.Example.(map[string]interface{})
+	if !ok {
+		t.Fatalf("example is not an object: %T", doc.Example)
+	}
+	arr, ok := ex["containers"].([]interface{})
+	if !ok || len(arr) != 1 {
+		t.Errorf("example.containers = %v, want a one-element array (got empty object?)", ex["containers"])
+	}
+	if s, ok := ex["identifier"].(string); !ok || !strings.HasPrefix(s, "<") {
+		t.Errorf("example.identifier = %v, want a scalar placeholder", ex["identifier"])
+	}
+}
+
+// Drilling --field into a describe()-on-a-ref array resolves and expands it,
+// rather than returning an empty body.
+func TestSchema_DescribeOnRefFieldDrill(t *testing.T) {
+	doc, err := runSchemaWith(t, describeRefTestSpec, "--field", "containers")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body, ok := doc.Body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is not an object: %T", doc.Body)
+	}
+	if body["type"] != "array" {
+		t.Errorf("drilled containers.type = %v, want array", body["type"])
+	}
+	if _, ok := body["items"].(map[string]interface{}); !ok {
+		t.Errorf("drilled containers.items missing: %v", body)
+	}
+}
+
 // runSchemaWith runs "create --schema" plus extra flags against a spec. On
 // success it returns the parsed doc; on failure it returns the execution error
 // (usage/errors silenced so the error carries only the message under test).
