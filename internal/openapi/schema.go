@@ -174,6 +174,17 @@ func fieldNotFoundErr(seg string, props map[string]*base.SchemaProxy, sch *base.
 	}
 }
 
+// allOfShapeKeys are the non-object schema facets simplify adopts from allOf
+// members so a typed ref wrapped in an allOf (the `.describe()`-on-a-ref
+// pattern) keeps its shape instead of collapsing to an empty object. properties
+// and required are merged separately, so they are deliberately excluded here. A
+// later member's value overrides an earlier one's; the schema's own facets,
+// applied after the allOf loop, override these in turn.
+var allOfShapeKeys = []string{
+	"type", "items", "anyOf", "oneOf", "additionalProperties",
+	"enum", "format", "description", "default", "example",
+}
+
 // simplify turns a libopenapi schema into a compact, agent-friendly map. It
 // merges allOf composition into a single object, preserves descriptions, enums,
 // formats, required fields and examples, and guards against deep nesting (via
@@ -230,9 +241,13 @@ func (d *describer) simplify(proxy *base.SchemaProxy, depth int, seen map[string
 		}
 	}
 
-	// allOf composes at the same level: merge member properties and required
-	// into this object. Members are expanded at the same depth, since allOf is
-	// composition rather than nesting.
+	// allOf composes at the same level. Object members contribute their
+	// properties and required, merged here at the same depth since allOf is
+	// composition rather than nesting. A member that instead carries a
+	// non-object shape is the `.describe()`-on-a-ref pattern: a typed ref —
+	// array, scalar, or union — wrapped in an allOf alongside a description-only
+	// sibling. We adopt that shape directly (see allOfShapeKeys); without it the
+	// field would lose its type/items and collapse to an empty object.
 	for _, member := range sch.AllOf {
 		sub, ok := d.simplify(member, depth, childSeen).(map[string]interface{})
 		if !ok {
@@ -245,6 +260,11 @@ func (d *describer) simplify(proxy *base.SchemaProxy, depth int, seen map[string
 		}
 		if req, ok := sub["required"].([]string); ok {
 			addRequired(req)
+		}
+		for _, k := range allOfShapeKeys {
+			if v, ok := sub[k]; ok {
+				out[k] = v
+			}
 		}
 	}
 
@@ -356,6 +376,14 @@ func (d *describer) synth(proxy *base.SchemaProxy, name string, depth int, seen 
 			return obj
 		}
 		reqSet, props := gatherObject(sch, childSeen)
+		// A `.describe()`-on-a-ref wrapper around a non-object (e.g. an array or
+		// scalar ref beside a description-only sibling) has nothing to gather as
+		// an object. Synthesize the underlying typed member instead of {}.
+		if len(props) == 0 && len(reqSet) == 0 && len(sch.AllOf) > 0 {
+			if m := substantiveAllOfMember(sch); m != nil {
+				return d.synth(m, name, depth, childSeen)
+			}
+		}
 		for _, fieldName := range sortedKeys(reqSet) {
 			if p, ok := props[fieldName]; ok {
 				obj[fieldName] = d.synth(p, fieldName, depth+1, childSeen)
@@ -426,6 +454,46 @@ func gatherObject(sch *base.Schema, seen map[string]bool) (map[string]bool, map[
 	}
 
 	return reqSet, props
+}
+
+// substantiveAllOfMember returns the single allOf member that carries an actual
+// shape — a $ref or any typed/composed schema — ignoring description-only
+// siblings. It lets synth handle the `.describe()`-on-a-ref pattern, where a
+// typed ref is wrapped in an allOf next to a metadata-only member. It returns
+// nil unless exactly one member is substantive, so an ambiguous composition
+// falls back to plain object handling.
+func substantiveAllOfMember(sch *base.Schema) *base.SchemaProxy {
+	var found *base.SchemaProxy
+	for _, m := range sch.AllOf {
+		if m == nil {
+			continue
+		}
+		if !m.IsReference() {
+			ms := m.Schema()
+			if ms == nil || isMetadataOnly(ms) {
+				continue
+			}
+		}
+		if found != nil {
+			return nil
+		}
+		found = m
+	}
+	return found
+}
+
+// isMetadataOnly reports whether a schema carries no structural shape — only
+// annotations like description. Such a member is the description-only sibling in
+// the `.describe()`-on-a-ref pattern.
+func isMetadataOnly(sch *base.Schema) bool {
+	return len(sch.Type) == 0 &&
+		sch.Properties == nil &&
+		len(sch.AllOf) == 0 &&
+		len(sch.AnyOf) == 0 &&
+		len(sch.OneOf) == 0 &&
+		sch.Items == nil &&
+		len(sch.Enum) == 0 &&
+		(sch.AdditionalProperties == nil || !sch.AdditionalProperties.IsA())
 }
 
 // placeholder returns a typed stand-in value for a required field that carries
