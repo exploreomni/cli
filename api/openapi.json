@@ -1347,6 +1347,11 @@
             "description": "Human-readable name describing what this query retrieves.",
             "example": "Top 5 Products by Revenue"
           },
+          "resultId": {
+            "type": "string",
+            "description": "Stable, unique identifier for this query result within the job. Use it to reference a specific result — for example, to correlate or de-duplicate results across responses.",
+            "example": "928c5838-000d-4943-b305-f6242c1b4922"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -1392,7 +1397,7 @@
           "body": {
             "type": "string",
             "description": "Body / description copy shown beneath the headline on AI helper landing surfaces.",
-            "example": "Ask a data question to get started. I can help refine answers, adjust charts, or surface new areas to explore."
+            "example": "I can help answer data questions, build a Dashboard, or create an App."
           },
           "headline": {
             "type": "string",
@@ -1728,7 +1733,7 @@
             "description": "Display-only notes about the routine, or null."
           },
           "destination": {
-            "$ref": "#/components/schemas/RoutineEmailDestination"
+            "$ref": "#/components/schemas/RoutineDestinationResponse"
           },
           "disabled": {
             "type": "boolean",
@@ -1749,7 +1754,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Customer-visible name of the routine, used as the email subject."
+            "description": "Customer-visible name of the routine. Used as the email subject for email destinations, and shown on Slack deliveries."
           },
           "prompt": {
             "type": "string",
@@ -1757,7 +1762,7 @@
           },
           "recipientCount": {
             "type": "integer",
-            "description": "Number of distinct deliverable recipients after expanding user groups and removing duplicates."
+            "description": "Number of distinct deliverable recipients. For email, user groups are expanded to members and duplicates removed; a Slack routine is always 1 (its single channel or DM)."
           },
           "schedule": {
             "type": "string",
@@ -1810,7 +1815,25 @@
           "updatedAt"
         ]
       },
-      "RoutineEmailDestination": {
+      "RoutineDestinationResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RoutineEmailDestinationResponse"
+          },
+          {
+            "$ref": "#/components/schemas/RoutineSlackDestination"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "email": "#/components/schemas/RoutineEmailDestinationResponse",
+            "slack": "#/components/schemas/RoutineSlackDestination"
+          }
+        },
+        "description": "Delivery configuration for the routine."
+      },
+      "RoutineEmailDestinationResponse": {
         "type": "object",
         "properties": {
           "recipientEmails": {
@@ -1819,9 +1842,7 @@
               "type": "string",
               "format": "email"
             },
-            "maxItems": 100,
-            "default": [],
-            "description": "Email addresses that receive each scheduled run of the routine.",
+            "description": "Email addresses configured as direct recipients of each scheduled run, resolved from their current membership.",
             "example": [
               "alice@example.com",
               "bob@example.com"
@@ -1832,7 +1853,7 @@
             "enum": [
               "email"
             ],
-            "description": "Destination type. Only `email` is supported.",
+            "description": "Selects email delivery — each scheduled run is sent to the listed email recipients and user groups.",
             "example": "email"
           },
           "userGroupIds": {
@@ -1841,8 +1862,6 @@
               "type": "string",
               "format": "uuid"
             },
-            "maxItems": 100,
-            "default": [],
             "description": "User group IDs whose active members receive each scheduled run. Omni expands each group to the members' current email addresses when the routine runs.",
             "example": [
               "550e8400-e29b-41d4-a716-446655440000"
@@ -1850,10 +1869,45 @@
           }
         },
         "required": [
+          "recipientEmails",
+          "type",
+          "userGroupIds"
+        ],
+        "additionalProperties": false
+      },
+      "RoutineSlackDestination": {
+        "type": "object",
+        "properties": {
+          "recipientId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The Slack channel ID (e.g. \"C01234567\") or user ID (e.g. \"U01234567\") that receives each scheduled run. Exactly one recipient per Slack routine.",
+            "example": "C01234567"
+          },
+          "slackRecipientType": {
+            "type": "string",
+            "enum": [
+              "channel",
+              "users"
+            ],
+            "description": "Whether `recipientId` is a Slack channel or a user (delivered as a direct message).",
+            "example": "channel"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "slack"
+            ],
+            "description": "Selects Slack delivery — each scheduled run is posted to one Slack channel or sent as a direct message to one user.",
+            "example": "slack"
+          }
+        },
+        "required": [
+          "recipientId",
+          "slackRecipientType",
           "type"
         ],
-        "additionalProperties": false,
-        "description": "Email delivery configuration for the routine."
+        "additionalProperties": false
       },
       "RoutineLastRun": {
         "type": [
@@ -1944,7 +1998,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
-            "description": "Customer-visible name of the routine. Used as the email subject for each scheduled run.",
+            "description": "Customer-visible name of the routine. Used as the email subject for email destinations, and shown on Slack deliveries.",
             "example": "Weekly user signups"
           },
           "prompt": {
@@ -1989,15 +2043,63 @@
         "oneOf": [
           {
             "$ref": "#/components/schemas/RoutineEmailDestination"
+          },
+          {
+            "$ref": "#/components/schemas/RoutineSlackDestination"
           }
         ],
         "discriminator": {
           "propertyName": "type",
           "mapping": {
-            "email": "#/components/schemas/RoutineEmailDestination"
+            "email": "#/components/schemas/RoutineEmailDestination",
+            "slack": "#/components/schemas/RoutineSlackDestination"
           }
         },
         "description": "Single delivery destination for the routine. To send results to multiple destinations, create one routine per destination. Omni runs the prompt once per scheduled run using the routine owner's permissions, and every recipient receives the same result regardless of their own permissions."
+      },
+      "RoutineEmailDestination": {
+        "type": "object",
+        "properties": {
+          "recipientEmails": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            },
+            "maxItems": 100,
+            "default": [],
+            "description": "Email addresses that receive each scheduled run of the routine.",
+            "example": [
+              "alice@example.com",
+              "bob@example.com"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "email"
+            ],
+            "description": "Selects email delivery — each scheduled run is sent to the listed email recipients and user groups.",
+            "example": "email"
+          },
+          "userGroupIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100,
+            "default": [],
+            "description": "User group IDs whose active members receive each scheduled run. Omni expands each group to the members' current email addresses when the routine runs.",
+            "example": [
+              "550e8400-e29b-41d4-a716-446655440000"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
       },
       "RoutineUpdateBody": {
         "type": "object",
@@ -2024,7 +2126,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
-            "description": "New customer-visible name of the routine, used as the email subject."
+            "description": "New customer-visible name of the routine. Used as the email subject for email destinations, and shown on Slack deliveries."
           },
           "prompt": {
             "type": "string",
@@ -3428,6 +3530,7 @@
               "sankey",
               "single-record",
               "svg-map",
+              "treemap",
               "omni-spreadsheet",
               "spreadsheet-tab",
               "summary-value",
@@ -3660,6 +3763,7 @@
               "summaryValue",
               "svgMap",
               "table",
+              "treemap",
               null
             ],
             "description": "Chart type"
@@ -4221,6 +4325,33 @@
         "required": [
           "name"
         ]
+      },
+      "DocumentsUpgradeLayoutResponse": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "description": "Document identifier"
+          },
+          "upgraded": {
+            "type": "boolean",
+            "description": "True when the layout was upgraded, false when the document already had advanced layout (no-op)."
+          }
+        },
+        "required": [
+          "identifier",
+          "upgraded"
+        ]
+      },
+      "DocumentsUpgradeLayoutBody": {
+        "type": "object",
+        "properties": {
+          "clearExistingDraft": {
+            "type": "boolean",
+            "default": false,
+            "description": "When upgrading a published document, discard any existing draft instead of failing with a conflict."
+          }
+        }
       },
       "DocumentsBulkUpdateLabelsResponse": {
         "type": "object",
@@ -5389,6 +5520,10 @@
                                 "metadata"
                               ],
                               "description": "Render mode: \"chart\" for visualization, \"result\" for data table, \"ai\" for AI summary, \"metadata\" for query metadata"
+                            },
+                            "detachedContent": {
+                              "type": "string",
+                              "description": "Set when a metadata field is detached: local text rendered instead of the query value"
                             },
                             "format": {
                               "type": "string",
@@ -7125,10 +7260,12 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "description": "Page link target. Must exactly equal an existing page container’s instanceKey — not its name, label, or a slug. A value matching no page redirects to the main dashboard view with a \"Page not found\" message. Ignored when `uri` is set."
                                   }
                                 }
-                              }
+                              },
+                              "description": "Omit to auto-derive one tab per page, kept in sync as pages are added, removed, renamed, or reordered. Set to curate, reorder, or add custom-URL tabs; each option’s `value` must then match a page instanceKey."
                             },
                             "style": {
                               "type": "object",
@@ -11187,6 +11324,804 @@
                           "type": "object",
                           "properties": {
                             "instanceKey": {
+                              "type": "string",
+                              "description": "Unique identifier for this specific placement of the content item. Use this key (not the query id) when repositioning or removing items."
+                            },
+                            "padding": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                },
+                                {
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            0.5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            1
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            2
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            3
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            4
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            5
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            6
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            7
+                                          ]
+                                        },
+                                        {
+                                          "type": "number",
+                                          "enum": [
+                                            8
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "preset": {
+                              "type": "string",
+                              "pattern": "^[a-z0-9-]+$",
+                              "description": "Visual preset for the content item (e.g., \"tile-align\" for outer spacing to align with tile containers)"
+                            },
+                            "description": {
+                              "type": "string",
+                              "description": "Lightweight supporting text shown beneath the label, e.g. wire-frame instructions."
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "Custom heading. Falls back to a type-derived default (e.g. \"Placeholder query\") when unset."
+                            },
+                            "placeholderType": {
+                              "type": "string",
+                              "enum": [
+                                "query",
+                                "control",
+                                "filter",
+                                "text"
+                              ],
+                              "description": "The content type this placeholder stands in for. Unset means no type has been picked yet."
+                            },
+                            "style": {
+                              "type": "object",
+                              "properties": {
+                                "aspectRatio": {
+                                  "type": "string"
+                                },
+                                "fillSpace": {
+                                  "type": "boolean"
+                                },
+                                "height": {
+                                  "type": "string"
+                                },
+                                "maxHeight": {
+                                  "type": "string"
+                                },
+                                "maxWidth": {
+                                  "type": "string"
+                                },
+                                "minHeight": {
+                                  "type": "string"
+                                },
+                                "minWidth": {
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "placeholder"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "instanceKey",
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "instanceKey": {
                               "type": "string"
                             },
                             "type": {
@@ -11247,19 +12182,23 @@
             "type": "object",
             "properties": {
               "h": {
-                "type": "number",
+                "type": "integer",
+                "minimum": 1,
                 "description": "Height in grid units (default: 36 for charts)"
               },
               "w": {
-                "type": "number",
+                "type": "integer",
+                "minimum": 1,
                 "description": "Width in grid columns on a 24-column grid. Common widths: 24 (full), 12 (half), 8 (third), 6 (quarter). x + w must not exceed 24."
               },
               "x": {
-                "type": "number",
+                "type": "integer",
+                "minimum": 0,
                 "description": "X position on a 24-column grid (0=left edge, 12=middle). Items side-by-side share the same y with complementary x values."
               },
               "y": {
-                "type": "number",
+                "type": "integer",
+                "minimum": 0,
                 "description": "Y position in grid units (0=top, higher values=lower on page)"
               }
             },
@@ -12845,6 +13784,10 @@
                         "metadata"
                       ],
                       "description": "Render mode: \"chart\" for visualization, \"result\" for data table, \"ai\" for AI summary, \"metadata\" for query metadata"
+                    },
+                    "detachedContent": {
+                      "type": "string",
+                      "description": "Set when a metadata field is detached: local text rendered instead of the query value"
                     },
                     "format": {
                       "type": "string",
@@ -14581,10 +15524,12 @@
                             "type": "string"
                           },
                           "value": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Page link target. Must exactly equal an existing page container’s instanceKey — not its name, label, or a slug. A value matching no page redirects to the main dashboard view with a \"Page not found\" message. Ignored when `uri` is set."
                           }
                         }
-                      }
+                      },
+                      "description": "Omit to auto-derive one tab per page, kept in sync as pages are added, removed, renamed, or reordered. Set to curate, reorder, or add custom-URL tabs; each option’s `value` must then match a page instanceKey."
                     },
                     "style": {
                       "type": "object",
@@ -18631,6 +19576,804 @@
                       "type": "string",
                       "enum": [
                         "inline-divider"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "instanceKey",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "instanceKey": {
+                      "type": "string",
+                      "description": "Unique identifier for this specific placement of the content item. Use this key (not the query id) when repositioning or removing items."
+                    },
+                    "padding": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "enum": [
+                            0
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            0.5
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            2
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            3
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            4
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            5
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            6
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            7
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            8
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    0.5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    1
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    2
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    3
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    4
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    5
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    6
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    7
+                                  ]
+                                },
+                                {
+                                  "type": "number",
+                                  "enum": [
+                                    8
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "preset": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9-]+$",
+                      "description": "Visual preset for the content item (e.g., \"tile-align\" for outer spacing to align with tile containers)"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Lightweight supporting text shown beneath the label, e.g. wire-frame instructions."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Custom heading. Falls back to a type-derived default (e.g. \"Placeholder query\") when unset."
+                    },
+                    "placeholderType": {
+                      "type": "string",
+                      "enum": [
+                        "query",
+                        "control",
+                        "filter",
+                        "text"
+                      ],
+                      "description": "The content type this placeholder stands in for. Unset means no type has been picked yet."
+                    },
+                    "style": {
+                      "type": "object",
+                      "properties": {
+                        "aspectRatio": {
+                          "type": "string"
+                        },
+                        "fillSpace": {
+                          "type": "boolean"
+                        },
+                        "height": {
+                          "type": "string"
+                        },
+                        "maxHeight": {
+                          "type": "string"
+                        },
+                        "maxWidth": {
+                          "type": "string"
+                        },
+                        "minHeight": {
+                          "type": "string"
+                        },
+                        "minWidth": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "placeholder"
                       ]
                     }
                   },
@@ -23594,6 +25337,7 @@
                   "summaryValue",
                   "svgMap",
                   "table",
+                  "treemap",
                   null
                 ],
                 "description": "High-level chart type (e.g. \"bar\", \"line\", \"area\")."
@@ -23612,6 +25356,12 @@
               "visConfig": {
                 "type": "object",
                 "properties": {
+                  "config": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": {},
+                    "description": "The vis-type-specific spec — KPI rows, chart mark/series, etc. GET nests the spec here; PATCH also accepts it spread flat next to visType for backward compatibility."
+                  },
                   "visType": {
                     "type": [
                       "string",
@@ -23628,6 +25378,7 @@
                       "sankey",
                       "single-record",
                       "svg-map",
+                      "treemap",
                       "omni-spreadsheet",
                       "spreadsheet-tab",
                       "summary-value",
@@ -27666,6 +29417,7 @@
                   "summaryValue",
                   "svgMap",
                   "table",
+                  "treemap",
                   null
                 ],
                 "description": "High-level chart type (e.g. \"bar\", \"line\", \"area\")."
@@ -27684,6 +29436,12 @@
               "visConfig": {
                 "type": "object",
                 "properties": {
+                  "config": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": {},
+                    "description": "The vis-type-specific spec — KPI rows, chart mark/series, etc. GET nests the spec here; PATCH also accepts it spread flat next to visType for backward compatibility."
+                  },
                   "visType": {
                     "type": [
                       "string",
@@ -27700,6 +29458,7 @@
                       "sankey",
                       "single-record",
                       "svg-map",
+                      "treemap",
                       "omni-spreadsheet",
                       "spreadsheet-tab",
                       "summary-value",
@@ -28743,6 +30502,14 @@
           "agentic_job": {
             "$ref": "#/components/schemas/EvalRunResultAgenticJob"
           },
+          "ai_timing_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Strict main-agent LLM processing time in milliseconds — the measured model-call duration, excluding tool execution and subagent model calls (those count toward `tool_timing_ms`). Shown as \"AI time\" in the UI. Runs recorded before this was measured fall back to an approximation (`timing_ms` minus tool latency).",
+            "example": 4121
+          },
           "cost": {
             "type": [
               "number",
@@ -28815,12 +30582,21 @@
               "integer",
               "null"
             ],
-            "description": "Total AI time in milliseconds — all LLM processing and tool calls. Shown as \"AI time\" in the UI.",
+            "description": "Total `/generate` wall-time in milliseconds — LLM processing plus inner-loop tool execution. `ai_timing_ms` and `tool_timing_ms` split this; warehouse query time is separate (`query_timing_ms`).",
             "example": 4321
+          },
+          "tool_timing_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Inner-loop tool latency in milliseconds — time spent running tools the model invoked (model and field-value lookups, query planning), excluding the warehouse query itself (`query_timing_ms`). Null for runs recorded before per-tool latency was tracked.",
+            "example": 200
           }
         },
         "required": [
           "agentic_job",
+          "ai_timing_ms",
           "cost",
           "error_reason",
           "expectation",
@@ -28830,7 +30606,8 @@
           "query_timing_ms",
           "score",
           "scoring_cost",
-          "timing_ms"
+          "timing_ms",
+          "tool_timing_ms"
         ]
       },
       "EvalRunResultAgenticJob": {
@@ -31679,6 +33456,10 @@
             "type": "integer",
             "description": "Number of documents modified"
           },
+          "replaced_input_column_keys_count": {
+            "type": "integer",
+            "description": "Number of input columns whose key references were replaced"
+          },
           "replaced_queries_count": {
             "type": "integer",
             "description": "Number of queries replaced"
@@ -31695,6 +33476,7 @@
         "required": [
           "replaced_dashboard_filters_count",
           "replaced_documents_count",
+          "replaced_input_column_keys_count",
           "replaced_queries_count",
           "replaced_workbook_models_count",
           "skipped_pr_required_count"
@@ -34796,6 +36578,16 @@
               }
             }
           },
+          "403": {
+            "description": "Insufficient permissions. AI query generation must be enabled for the organization and the caller must have permission to use AI on the job's model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Job not found. The job may not exist or may belong to a different organization.",
             "content": {
@@ -34948,6 +36740,16 @@
               }
             }
           },
+          "403": {
+            "description": "Insufficient permissions. AI query generation must be enabled for the organization and the caller must have permission to use AI on the job's model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Job not found, not in COMPLETE state, or result is no longer available (results are retained for 14 days).",
             "content": {
@@ -35011,6 +36813,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions. AI query generation must be enabled for the organization and the caller must have permission to use AI on the job's model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
                 }
               }
             }
@@ -35451,7 +37263,7 @@
         }
       },
       "post": {
-        "description": "Create a routine that runs a saved prompt on a schedule and delivers the AI response through a single email destination. Each scheduled run executes once using the routine owner's permissions, and every recipient receives the same result. Organization API keys can pass `?userId=<membershipId>` to create the routine for a specific organization member.",
+        "description": "Create a routine that runs a saved prompt on a schedule and delivers the AI response through a single destination — email (one or more recipients / user groups) or Slack (a single channel or direct message). Each scheduled run executes once using the routine owner's permissions, and every recipient receives the same result. Organization API keys can pass `?userId=<membershipId>` to create the routine for a specific organization member.",
         "operationId": "routineCreate",
         "summary": "Create a routine",
         "tags": [
@@ -36254,6 +38066,14 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "allowBranchConnectionEnvironments": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ],
+                            "description": "Whether a branch may select its own connection environment. When user-attribute environment selection is also enabled, a branch selection overrides the user attribute.",
+                            "example": false
+                          },
                           "baseRole": {
                             "type": [
                               "string",
@@ -36267,7 +38087,8 @@
                               "boolean",
                               "null"
                             ],
-                            "description": "Whether branch environments override user attributes",
+                            "deprecated": true,
+                            "description": "Deprecated alias for `allowBranchConnectionEnvironments`; same value. Use `allowBranchConnectionEnvironments` instead.",
                             "example": false
                           },
                           "createdAt": {
@@ -36369,6 +38190,7 @@
                           }
                         },
                         "required": [
+                          "allowBranchConnectionEnvironments",
                           "baseRole",
                           "branchConnectionEnvironmentOverridesUserAttr",
                           "createdAt",
@@ -36734,6 +38556,14 @@
                     "connection": {
                       "type": "object",
                       "properties": {
+                        "allowBranchConnectionEnvironments": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ],
+                          "description": "Whether a branch may select its own connection environment. When user-attribute environment selection is also enabled, a branch selection overrides the user attribute.",
+                          "example": false
+                        },
                         "baseRole": {
                           "type": [
                             "string",
@@ -36747,7 +38577,8 @@
                             "boolean",
                             "null"
                           ],
-                          "description": "Whether branch environments override user attributes",
+                          "deprecated": true,
+                          "description": "Deprecated alias for `allowBranchConnectionEnvironments`; same value. Use `allowBranchConnectionEnvironments` instead.",
                           "example": false
                         },
                         "createdAt": {
@@ -36849,6 +38680,7 @@
                         }
                       },
                       "required": [
+                        "allowBranchConnectionEnvironments",
                         "baseRole",
                         "branchConnectionEnvironmentOverridesUserAttr",
                         "createdAt",
@@ -40150,6 +41982,65 @@
           },
           "404": {
             "description": "Document or folder not found"
+          }
+        }
+      }
+    },
+    "/api/v1/documents/{identifier}/upgrade": {
+      "post": {
+        "description": "Upgrades a document to the advanced dashboard layout (the \"File > Upgrade layout\" UI action). No-ops when the document already has advanced layout. For published documents the upgrade goes through a draft/publish workflow automatically; if a draft already exists, the request returns 409 unless `clearExistingDraft` is set to `true`.",
+        "operationId": "documentsUpgradeLayout",
+        "summary": "Upgrade dashboard layout",
+        "tags": [
+          "Documents"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Document identifier (either document ID or identifier slug)",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Document identifier (either document ID or identifier slug)",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentsUpgradeLayoutBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Layout upgraded, or no-op if the document already had advanced layout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsUpgradeLayoutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Document does not have a dashboard to upgrade"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "409": {
+            "description": "A draft already exists for the published document; set clearExistingDraft to override"
           }
         }
       }
