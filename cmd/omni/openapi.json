@@ -1656,6 +1656,15 @@
             "minimum": 0,
             "description": "Shutoff threshold, or `null` if the shutoff control is off.",
             "example": 1200
+          },
+          "userDefaultCredits": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Default per-user AI credit limit, or `null` when users are unlimited by default.",
+            "example": 100
           }
         },
         "required": [
@@ -1664,7 +1673,8 @@
           "downgradeCredits",
           "periodEnd",
           "periodStart",
-          "shutoffCredits"
+          "shutoffCredits",
+          "userDefaultCredits"
         ]
       },
       "AiCreditControlsUpdateBody": {
@@ -1687,8 +1697,143 @@
             "minimum": 0,
             "description": "Credit usage at which AI shuts off entirely. Omit to leave unchanged, `null` to turn off, or a non-negative number to set.",
             "example": 1200
+          },
+          "userDefaultCredits": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Default per-user AI credit limit for the billing period — what every user without an individual limit gets. Omit to leave unchanged, `null` for unlimited by default, or a non-negative number to set.",
+            "example": 100
           }
         },
+        "additionalProperties": false
+      },
+      "AiCreditControlsUsersListResponse": {
+        "type": "object",
+        "properties": {
+          "pageInfo": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "creditLimit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "description": "The user's individual AI credit limit, or `null` for an explicit unlimited override.",
+                  "example": 50
+                },
+                "userId": {
+                  "type": "string",
+                  "description": "The user's id within this organization.",
+                  "example": "f4a2b3c8-0d1e-4f5a-9b6c-7d8e9f0a1b2c"
+                }
+              },
+              "required": [
+                "creditLimit",
+                "userId"
+              ]
+            },
+            "description": "Users with an individual AI credit limit, ordered by userId ascending."
+          }
+        },
+        "required": [
+          "pageInfo",
+          "records"
+        ]
+      },
+      "AiUserCreditLimitsResponse": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "creditLimit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "description": "The user's effective AI credit limit, or `null` for unlimited.",
+                  "example": 50
+                },
+                "userId": {
+                  "type": "string",
+                  "description": "The user's id within this organization.",
+                  "example": "f4a2b3c8-0d1e-4f5a-9b6c-7d8e9f0a1b2c"
+                },
+                "usesDefaultLimit": {
+                  "type": "boolean",
+                  "description": "True when the user has no individual limit and follows the org default."
+                }
+              },
+              "required": [
+                "creditLimit",
+                "userId",
+                "usesDefaultLimit"
+              ]
+            }
+          }
+        },
+        "required": [
+          "users"
+        ]
+      },
+      "AiUserCreditLimitsUpdateBody": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiUserCreditLimitEntry"
+            },
+            "minItems": 1,
+            "maxItems": 1000,
+            "description": "Users to update, at most 1000 per request. Each entry has a `userId` plus exactly one of `creditLimit` (number or `null`) or `useDefaultLimit: true`."
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "additionalProperties": false
+      },
+      "AiUserCreditLimitEntry": {
+        "type": "object",
+        "properties": {
+          "creditLimit": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "The user's individual AI credit limit for the billing period, or `null` for unlimited. Either way this overrides the org default. Mutually exclusive with `useDefaultLimit`.",
+            "example": 50
+          },
+          "useDefaultLimit": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Removes the user's individual limit so they follow the org default. Mutually exclusive with `creditLimit`."
+          },
+          "userId": {
+            "type": "string",
+            "description": "The user's id within this organization.",
+            "example": "f4a2b3c8-0d1e-4f5a-9b6c-7d8e9f0a1b2c"
+          }
+        },
+        "required": [
+          "userId"
+        ],
         "additionalProperties": false
       },
       "RoutinesListResponse": {
@@ -25475,6 +25620,11 @@
             ],
             "description": "Document description."
           },
+          "modelId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Base model the document is built on (the `modelId` supplied at create). Immutable — echoed here so a GET round-trips through PATCH; supplying a different value on PATCH is rejected."
+          },
           "name": {
             "type": "string",
             "maxLength": 254,
@@ -25485,12 +25635,19 @@
           },
           "settings": {
             "$ref": "#/components/schemas/SettingsReadExternal"
+          },
+          "workbookModelId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Server-assigned WORKBOOK-layer model layered on `modelId`. Read-only — echoed here so a GET round-trips through PATCH; each draft has its own, so a draft read returns the draft workbook’s model."
           }
         },
         "required": [
           "description",
+          "modelId",
           "name",
-          "queryPresentations"
+          "queryPresentations",
+          "workbookModelId"
         ]
       },
       "Containers": {
@@ -29644,6 +29801,16 @@
             "minLength": 1,
             "maxLength": 255,
             "description": "Optional. Caller-supplied description of what this patch changes, written to the history audit trail. When omitted, the server auto-generates one from the touched sections."
+          },
+          "modelId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The document's base model. Immutable and accepted only so a GET response round-trips through PATCH: a value matching the current model is a no-op, and a differing value is rejected — it cannot re-base the document. Omit it to leave the model untouched."
+          },
+          "workbookModelId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server-assigned workbook-layer model. Read-only and accepted only so a GET response round-trips through PATCH: a value from a GET of the draft or of the published document it targets is a no-op, and any other value is rejected. Omit it otherwise."
           }
         },
         "additionalProperties": false
@@ -29673,6 +29840,51 @@
           "name"
         ]
       },
+      "DocumentsV2UpdateIdentifierResponse": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Document description."
+          },
+          "identifier": {
+            "type": "string",
+            "description": "The document identifier after the rename."
+          },
+          "name": {
+            "type": "string",
+            "description": "Document name."
+          }
+        },
+        "required": [
+          "description",
+          "identifier",
+          "name"
+        ]
+      },
+      "DocumentsV2UpdateIdentifierBody": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DocumentIdentifier"
+              },
+              {
+                "description": "New identifier for the document. Must be unique within the organization.",
+                "example": "new-slug"
+              }
+            ]
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false
+      },
       "EmbedSsoGenerateSessionResponse": {
         "type": "object",
         "properties": {
@@ -29698,7 +29910,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Optional list of group names to assign to the user",
+            "description": "Optional list of non-entity group names to assign to the user. Entity-group membership is managed by the entity parameter.",
             "example": [
               "engineering",
               "sales"
@@ -31904,6 +32116,12 @@
                 "enum": [
                   "BRANCH"
                 ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "QUERY"
+                ]
               }
             ],
             "default": "SCHEMA",
@@ -32684,6 +32902,19 @@
           "dbt_environment_id"
         ]
       },
+      "JobCreatedResponse": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "ID of the created job. Poll GET /api/v1/jobs/{jobId}/status for its status.",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          }
+        },
+        "required": [
+          "jobId"
+        ]
+      },
       "ModelsMergeBranchResponse": {
         "type": "object",
         "properties": {
@@ -33099,6 +33330,16 @@
             "description": "Clone URL of the git repository. SSH (git@...) for deploy key auth, HTTPS (https://...) for token auth.",
             "example": "git@github.com:org/repo.git"
           },
+          "deployKeyPassphrase": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Passphrase for deployPrivateKey when it is encrypted. Omni uses it once to decrypt the key, then stores the key under its own encryption at rest; the passphrase itself is not retained."
+          },
+          "deployPrivateKey": {
+            "type": "string",
+            "maxLength": 65536,
+            "description": "Bring-your-own SSH deploy private key in PEM format (RSA or ED25519, as produced by ssh-keygen), used instead of an Omni-generated keypair. On update it replaces the current key, enabling zero-downtime rotation: authorize the matching public key with your git provider first, then set it here. Only valid for SSH auth."
+          },
           "gitFollower": {
             "type": "boolean",
             "default": false,
@@ -33283,6 +33524,16 @@
             "minLength": 1,
             "description": "Clone URL of the git repository (SSH or HTTPS).",
             "example": "git@github.com:org/repo.git"
+          },
+          "deployKeyPassphrase": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Passphrase for deployPrivateKey when it is encrypted. Omni uses it once to decrypt the key, then stores the key under its own encryption at rest; the passphrase itself is not retained."
+          },
+          "deployPrivateKey": {
+            "type": "string",
+            "maxLength": 65536,
+            "description": "Bring-your-own SSH deploy private key in PEM format (RSA or ED25519, as produced by ssh-keygen), used instead of an Omni-generated keypair. On update it replaces the current key, enabling zero-downtime rotation: authorize the matching public key with your git provider first, then set it here. Only valid for SSH auth."
           },
           "gitFollower": {
             "type": "boolean",
@@ -33745,7 +33996,7 @@
           "environmentConnectionId": {
             "type": "string",
             "format": "uuid",
-            "description": "Connection ID of the environment to run the query against, overriding the connection environment inherited from the (target) user's session or default. Must be a configured environment of the query model's connection that the user can access. Obtain valid IDs from the `connectionId` field of `GET /api/v1/connection-environments`.",
+            "description": "Connection ID of the environment to run the query against, overriding the connection environment inherited from the (target) user's session or default. Must be a configured environment of the query model's connection that the user can access.",
             "example": "550e8400-e29b-41d4-a716-446655440000"
           },
           "formatResults": {
@@ -36159,6 +36410,7 @@
                 "SCHEDULE",
                 "SAVE_SPREADSHEETS",
                 "USE_AI",
+                "USE_IDE",
                 "USE_WORKBOOKS",
                 "UPDATE",
                 "UPDATE_RESTRICTED"
@@ -37037,7 +37289,7 @@
     },
     "/api/v1/ai/credit-controls": {
       "get": {
-        "description": "Get the organization's AI credit controls: the downgrade and shutoff thresholds, plus read-only context (the credit limit, usage so far this billing period, and the period bounds). This is the API mirror of the AI Hub credit controls page and requires the same AI-admin permission.",
+        "description": "Get the organization's AI credit controls: the downgrade and shutoff thresholds, the default per-user credit limit, plus read-only context (the credit limit, usage so far this billing period, and the period bounds). This is the API mirror of the AI Hub credit controls page and requires the same AI-admin permission.",
         "operationId": "aiCreditControlsGet",
         "summary": "Get AI credit controls",
         "tags": [
@@ -37077,7 +37329,7 @@
         }
       },
       "patch": {
-        "description": "Update the organization's AI credit thresholds. Both fields are optional and tri-state: omit a field to leave it unchanged, send `null` to turn that control off, or send a non-negative number to set it. At least one field is required. The `downgradeCredits <= shutoffCredits` invariant is enforced against the merged result. Returns the full current state, the same shape as GET.",
+        "description": "Update the organization's AI credit controls: the downgrade and shutoff thresholds and the default per-user credit limit (userDefaultCredits). All fields are optional and tri-state: omit a field to leave it unchanged, send `null` to turn that control off (for userDefaultCredits: unlimited by default), or send a non-negative number to set it. At least one field is required. The `downgradeCredits <= shutoffCredits` invariant is enforced against the merged result. Returns the full current state, the same shape as GET.",
         "operationId": "aiCreditControlsUpdate",
         "summary": "Update AI credit controls",
         "tags": [
@@ -37105,7 +37357,7 @@
             }
           },
           "400": {
-            "description": "Invalid request. Common causes: empty body, a negative threshold, an unknown field, or downgradeCredits above shutoffCredits.",
+            "description": "Invalid request. Common causes: empty body, a negative value, an unknown field, or downgradeCredits above shutoffCredits.",
             "content": {
               "application/json": {
                 "schema": {
@@ -37130,6 +37382,155 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/credit-controls/users": {
+      "get": {
+        "description": "List the organization's active individual user AI credit limits, ordered by userId ascending. Only users with an individual limit appear — everyone else follows the org default. A `null` creditLimit is an explicit unlimited override, distinct from following the default. Paginated via opaque cursors: pass `pageInfo.nextCursor` from one response as the `cursor` query parameter on the next request. Requires the same manage-user-attributes permission as the PATCH.",
+        "operationId": "aiCreditControlsUsersList",
+        "summary": "List individual users' AI credit limits",
+        "tags": [
+          "AI"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for pagination (from previous response nextCursor)",
+              "example": "eyJpZCI6IjEyMzQ1In0"
+            },
+            "required": false,
+            "description": "Cursor for pagination (from previous response nextCursor)",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100, integer)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Number of results per page (1-100, integer)",
+            "name": "pageSize",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of users' individual AI credit limits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCreditControlsUsersListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or pageSize.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions, or per-user AI credit limits are not enabled for the organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "description": "Set individual users' AI credit limits in bulk. Each entry names a user (`userId`) and either sets an individual limit (`creditLimit`: a non-negative number, or `null` for unlimited) or removes one (`useDefaultLimit: true`) so the user follows the org default. Each userId may appear at most once and must be a member of the organization. All updates are applied in one transaction, so either every entry takes effect or none do — an invalid userId fails the whole request with a 404 naming it. Requires the same manage-user-attributes permission as the AI credit limit settings pages.",
+        "operationId": "aiCreditControlsUsersUpdate",
+        "summary": "Set individual users' AI credit limits",
+        "tags": [
+          "AI"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiUserCreditLimitsUpdateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "All entries applied. Returns each user's effective limit, in request order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUserCreditLimitsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request. Common causes: an empty users array, more than 1000 entries, an entry with both creditLimit and useDefaultLimit (or neither), a negative creditLimit, or a duplicated userId.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions, per-user AI credit limits are not enabled, or credit controls editing is disabled for the organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A userId is not a member of the organization; the response names the first invalid id. No limits are changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
                 }
               }
             }
@@ -38466,8 +38867,18 @@
                   },
                   "warehouse": {
                     "type": "string",
-                    "description": "Required for Snowflake (specify the warehouse) and Databricks (specify the HTTP path).",
+                    "description": "Required for Snowflake (specify the warehouse) and Databricks (specify the HTTP path). May be omitted for Snowflake OAuth connections, in which case each user's Snowflake default warehouse applies.",
                     "example": "COMPUTE_WH"
+                  },
+                  "wifAudience": {
+                    "type": "string",
+                    "description": "Full resource name of the workload identity pool provider. Required for BigQuery workload identity federation authentication.",
+                    "example": "//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider"
+                  },
+                  "wifServiceAccountEmail": {
+                    "type": "string",
+                    "description": "Service account to impersonate for BigQuery workload identity federation authentication. When omitted, the federated identity is used directly.",
+                    "example": "omni@my-project.iam.gserviceaccount.com"
                   }
                 },
                 "required": [
@@ -40157,84 +40568,6 @@
       }
     },
     "/api/v1/connection-environments": {
-      "get": {
-        "operationId": "connectionEnvironmentsList",
-        "summary": "List connection environments",
-        "tags": [
-          "Connections"
-        ],
-        "responses": {
-          "200": {
-            "description": "List of connection environments",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "connectionEnvironments": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "baseConnectionId": {
-                            "type": "string",
-                            "format": "uuid",
-                            "description": "ID of the base connection",
-                            "example": "550e8400-e29b-41d4-a716-446655440000"
-                          },
-                          "connectionId": {
-                            "type": "string",
-                            "format": "uuid",
-                            "description": "ID of the environment connection",
-                            "example": "550e8400-e29b-41d4-a716-446655440002"
-                          },
-                          "id": {
-                            "type": "string",
-                            "format": "uuid",
-                            "description": "Unique connection environment identifier",
-                            "example": "550e8400-e29b-41d4-a716-446655440001"
-                          },
-                          "userAttributeValues": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "User attribute values for this environment",
-                            "example": [
-                              "us-east",
-                              "production"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "baseConnectionId",
-                          "connectionId",
-                          "id",
-                          "userAttributeValues"
-                        ],
-                        "description": "Connection environment object",
-                        "title": "ConnectionEnvironment"
-                      },
-                      "description": "List of connection environments"
-                    }
-                  },
-                  "required": [
-                    "connectionEnvironments"
-                  ],
-                  "description": "List connection environments response",
-                  "title": "ConnectionsEnvironmentsListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication required"
-          },
-          "403": {
-            "description": "Permission denied - admin role required"
-          }
-        }
-      },
       "post": {
         "operationId": "connectionEnvironmentsCreate",
         "summary": "Create connection environments",
@@ -42631,7 +42964,7 @@
     },
     "/api/v2/documents/{identifier}": {
       "get": {
-        "description": "Read the document's current draft state (or the published state if no draft exists). Returns the full `DocumentsV2ReadResponse` shape.\n\nThe response is structured so a caller can take it verbatim and submit it as the body of the draft PATCH routes. Tiles in `queryPresentations.data` are keyed by a stable record key (e.g. `\"1\"`, `\"2\"`) — the server uses that key to identify existing tiles for updates, so callers do not need to track or send any other identifier. Control IDs and container `instanceKey` / `referenceKey` values also round-trip unchanged.",
+        "description": "Read the document's published state — draft edits are never surfaced here. When a draft exists, read it via `GET /api/v2/documents/{identifier}/draft/{draftIdentifier}` before round-tripping the response into a draft PATCH, so you patch the draft's own content rather than published content over it. Returns the full `DocumentsV2ReadResponse` shape.\n\nThe response is structured so a caller can take it verbatim and submit it as the body of the draft PATCH routes. Tiles in `queryPresentations.data` are keyed by a stable record key (e.g. `\"1\"`, `\"2\"`) — the server uses that key to identify existing tiles for updates, so callers do not need to track or send any other identifier. Control IDs and container `instanceKey` / `referenceKey` values also round-trip unchanged.",
         "operationId": "documentsV2Get",
         "summary": "Read document state",
         "tags": [
@@ -42734,7 +43067,7 @@
             }
           },
           "400": {
-            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded)."
+            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded, a `modelId` that differs from the document’s immutable base model, or a `workbookModelId` that differs from the read-only value a GET returns)."
           },
           "401": {
             "description": "Authentication required."
@@ -42882,7 +43215,7 @@
             }
           },
           "400": {
-            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded)."
+            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded, a `modelId` that differs from the document’s immutable base model, or a `workbookModelId` that differs from the read-only value a GET returns)."
           },
           "401": {
             "description": "Authentication required."
@@ -42901,6 +43234,70 @@
           },
           "422": {
             "description": "The draft cannot satisfy the patch: a classic-layout dashboard (upgrade to the advanced layout first), an app document, or a workbook-only draft patched without a `containers` payload (or with an empty one)."
+          }
+        }
+      }
+    },
+    "/api/v2/documents/{identifier}/draft/{draftIdentifier}/dashboard": {
+      "delete": {
+        "description": "Remove the dashboard from an existing draft, leaving a workbook-only document. Its schedules are removed too, but at publish time (see below), not on this call. Parity with the UI’s \"Remove dashboard\" action, and the inverse of adding a dashboard via a `containers` patch.\n\nOperates only on the draft named by `draftIdentifier`, which the caller creates first via `PATCH …/draft`. Requiring an explicit draft keeps the removal from silently reusing (and clobbering) a draft that holds other unpublished work.\n\nNo auto-publish — publish via `POST …/draft/publish` to make the document workbook-only (publishing also clears the previously-published dashboard’s schedules). Idempotent: a draft that is already workbook-only returns 200 unchanged.",
+        "operationId": "documentsV2RemoveDashboard",
+        "summary": "Remove dashboard from document",
+        "tags": [
+          "Documents"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Draft workbook identifier (see `POST /api/v1/documents/{identifier}/draft`).",
+              "example": "def456"
+            },
+            "required": true,
+            "description": "Draft workbook identifier (see `POST /api/v1/documents/{identifier}/draft`).",
+            "name": "draftIdentifier",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Published document identifier.",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Published document identifier.",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dashboard removed on the draft (or a no-op when already workbook-only); the response carries the `draftIdentifier`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsV2PatchDraftResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Insufficient permissions to update the document."
+          },
+          "404": {
+            "description": "Document or draft not found."
+          },
+          "405": {
+            "description": "Method not allowed."
+          },
+          "409": {
+            "description": "The target is not a published document."
+          },
+          "422": {
+            "description": "The document is an app, not a dashboard."
           }
         }
       }
@@ -42954,6 +43351,69 @@
           },
           "409": {
             "description": "The target is not a published document."
+          }
+        }
+      }
+    },
+    "/api/v2/documents/{identifier}/identifier": {
+      "put": {
+        "description": "Rename a published document's identifier. The change is applied live and immediately — it does not go through the draft/publish workflow — and the former identifier is recorded in the document's rename history.\n\nOnly published documents can be renamed. A draft target returns 409; an unknown or archived target returns 404. The new identifier must be a valid slug (otherwise 400) and unused by any other document in the organization (otherwise 409).",
+        "operationId": "documentsV2UpdateIdentifier",
+        "summary": "Rename document identifier",
+        "tags": [
+          "Documents"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Document identifier — either the URL slug (e.g. `abc123`) or the canonical workbook UUID.",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Document identifier — either the URL slug (e.g. `abc123`) or the canonical workbook UUID.",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentsV2UpdateIdentifierBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Identifier updated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsV2UpdateIdentifierResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identifier format."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Insufficient permissions to rename the document."
+          },
+          "404": {
+            "description": "Document not found or archived."
+          },
+          "405": {
+            "description": "Method not allowed."
+          },
+          "409": {
+            "description": "The target is a draft rather than a published document, or the requested identifier is already in use by another document."
           }
         }
       }
@@ -45300,7 +45760,7 @@
         }
       },
       "post": {
-        "description": "Create a new model. Supports creating schema, shared, branch, and shared_extension models.",
+        "description": "Create a new model. Supports creating schema, shared, branch, shared_extension, and query models. A query model (modelKind QUERY) is created empty under a workbook model (baseModelId); populate its views and fields via the model YAML endpoint.",
         "operationId": "modelsCreate",
         "summary": "Create model",
         "tags": [
@@ -45447,9 +45907,9 @@
     },
     "/api/v1/jobs/{jobId}/status": {
       "get": {
-        "description": "Check status of a schema refresh job (initiated via POST /api/v1/models/{modelId}/refresh). Returns IN_PROGRESS, COMPLETED, or FAILED.",
+        "description": "Check status of a schema refresh job (POST /api/v1/models/{modelId}/refresh) or a dbt sync job (POST /api/v1/models/{modelId}/dbt-sync). Returns IN_PROGRESS, COMPLETED, or FAILED.",
         "operationId": "jobsGetStatus",
-        "summary": "Get schema refresh job status",
+        "summary": "Get schema refresh or dbt sync job status",
         "tags": [
           "Models"
         ],
@@ -45478,7 +45938,7 @@
             }
           },
           "400": {
-            "description": "Unsupported job type (only schema refresh supported)"
+            "description": "Unsupported job type (only schema refresh and dbt sync supported)"
           },
           "401": {
             "description": "Authentication required"
@@ -46729,6 +47189,72 @@
         }
       }
     },
+    "/api/v1/models/{modelId}/dbt-sync": {
+      "post": {
+        "description": "Trigger a dbt metadata sync (\"dbt quick sync\") for a branch. Recompiles the branch's dbt manifest and merges the regenerated dbt extension model, without a full database schema scan. The branch (via branch_id) supplies the dbt environment and dbt git branch. Runs as a background job.",
+        "operationId": "modelsDbtSync",
+        "summary": "Trigger a dbt metadata sync for a branch",
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Model UUID",
+              "example": "123e4567-e89b-12d3-a456-426614174000"
+            },
+            "required": true,
+            "description": "Model UUID",
+            "name": "modelId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "ID of the branch to sync dbt metadata for. The branch supplies the dbt environment and dbt git branch to compile against (set via POST /api/v1/models/{modelId}/branch/{branchName}/dbt).",
+              "example": "123e4567-e89b-12d3-a456-426614174001"
+            },
+            "required": true,
+            "description": "ID of the branch to sync dbt metadata for. The branch supplies the dbt environment and dbt git branch to compile against (set via POST /api/v1/models/{modelId}/branch/{branchName}/dbt).",
+            "name": "branch_id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "dbt sync job started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Model or branch not found, or model deleted"
+          },
+          "405": {
+            "description": "Method not allowed"
+          },
+          "422": {
+            "description": "The model is not a shared model"
+          }
+        }
+      }
+    },
     "/api/v1/models/{modelId}/branch/{branchName}/merge": {
       "post": {
         "operationId": "modelsMergeBranch",
@@ -46976,6 +47502,7 @@
         }
       },
       "post": {
+        "description": "Create git configuration for a model. For SSH auth, Omni generates a deploy keypair by default; supply deployPrivateKey (with deployKeyPassphrase for encrypted keys) to bring your own instead.",
         "operationId": "modelsGitCreate",
         "summary": "Create git configuration",
         "tags": [
@@ -47033,6 +47560,7 @@
         }
       },
       "patch": {
+        "description": "Update git configuration for a model. Only provided fields are changed. For SSH auth, a bring-your-own deploy key can be set via deployPrivateKey (with deployKeyPassphrase for encrypted keys), enabling zero-downtime key rotation: authorize the matching public key with the git provider first, then set the key here.",
         "operationId": "modelsGitUpdate",
         "summary": "Update git configuration",
         "tags": [
