@@ -58,6 +58,10 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ### Search Omni documentation
   omni ai search-omni-docs --body '{"query":"how do I..."}'
 
+### Upload a CSV
+Multipart body fields are generated as flags; binary fields take file paths.
+  omni uploads create --file ./people.csv --model-id MODEL_ID --view-name people
+
 ## Command Groups
   ai            AI-powered query generation, jobs, doc search
   ai-eval       AI eval prompt set management
@@ -94,6 +98,10 @@ name a leaf without knowing the container shape:
   omni documents v2-create --schema --field queryPresentations.data # just the tiles map
   omni documents v2-create --schema --field queryPresentations.data.query
 
+For multipart/form-data commands, top-level schema properties are also exposed
+as flags. Binary properties are labeled "file path" in --help. --body remains
+available; binary values in its JSON object are interpreted as file paths.
+
 ## Common Flags
   --compact       Non-indented JSON output
   --token TOKEN   API token (overrides env/config)
@@ -109,7 +117,7 @@ name a leaf without knowing the container shape:
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
 - Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
-- Query parameters are flags: omni models list --pagesize 10
+- Query parameters are flags: omni models list --page-size 10
 - Run "omni <group> --help" to see all commands in a group.
 - Run "omni <group> <command> --help" to see flags for a specific command.
 `

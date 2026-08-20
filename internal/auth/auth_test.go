@@ -46,6 +46,26 @@ func TestDo_SetsHeaders(t *testing.T) {
 	}
 }
 
+func TestDoWithContentType_PreservesMultipartBoundary(t *testing.T) {
+	var gotContentType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := &config.ResolvedConfig{Token: "tok", BaseURL: srv.URL}
+	want := "multipart/form-data; boundary=test-boundary"
+	resp, err := DoWithContentType(cfg, "POST", "/uploads", []byte("body"), want)
+	if err != nil {
+		t.Fatalf("DoWithContentType: %v", err)
+	}
+	resp.Body.Close()
+	if gotContentType != want {
+		t.Errorf("Content-Type = %q, want %q", gotContentType, want)
+	}
+}
+
 // Verify that the HTTP method (GET, POST, etc.) and URL path are forwarded
 // correctly to the server.
 func TestDo_MethodAndPath(t *testing.T) {

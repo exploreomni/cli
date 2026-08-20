@@ -69,6 +69,25 @@ omni documents list
 omni --help
 ```
 
+### Upload a CSV
+
+Multipart request fields are generated as normal CLI flags. Binary OpenAPI
+fields accept a local file path:
+
+```bash
+omni uploads create \
+  --file ./people.csv \
+  --model-id 00000000-0000-0000-0000-000000000000 \
+  --view-name people
+```
+
+Multipart commands also accept `--body` JSON for compatibility. Values for
+binary fields are interpreted as file paths:
+
+```bash
+omni uploads create --body '{"file":"./people.csv","modelId":"00000000-0000-0000-0000-000000000000"}'
+```
+
 ## Shell completions
 
 `omni` supports tab completion for bash, zsh, fish, and PowerShell. Pick your shell below and run the snippet once — tab completion works on every new shell thereafter.
@@ -120,7 +139,7 @@ After installing, restart your shell and try: `omni <TAB>`, `omni ai <TAB>`, `om
 
 ## How it works
 
-The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup it parses the spec and generates cobra subcommands for every operation. Each API tag becomes a command group, path params become positional args, query params become flags, and request bodies are passed via `--body` or stdin.
+The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup it parses the spec and generates cobra subcommands for every operation. Each API tag becomes a command group, path params become positional args, query params become flags, and JSON request bodies are passed via `--body` or stdin. For `multipart/form-data` bodies, top-level schema properties become flags and binary properties are read from file paths.
 
 A request body can be given three ways: inline JSON (`--body '{"name":"x"}'`), a file
 (`--body @path/to/body.json`), or stdin (`--body - < path/to/body.json`). The body is
