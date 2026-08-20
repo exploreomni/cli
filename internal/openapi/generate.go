@@ -4,7 +4,6 @@
 package openapi
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -20,10 +19,11 @@ import (
 
 // APIRequest is passed to the executor callback when a generated command runs.
 type APIRequest struct {
-	Cmd    *cobra.Command
-	Method string
-	Path   string // fully resolved path with query string
-	Body   []byte // nil for GET/DELETE
+	Cmd         *cobra.Command
+	Method      string
+	Path        string // fully resolved path with query string
+	Body        []byte // nil for GET/DELETE
+	ContentType string // request body media type; defaults to application/json when empty
 }
 
 // Executor is the callback that actually makes the HTTP request.
@@ -83,19 +83,19 @@ type paramInfo struct {
 }
 
 type operationInfo struct {
-	Tag         string
-	OperationID string
-	Summary     string
-	Description string
-	Method      string
-	Path        string
-	PathParams  []paramInfo
-	QueryParams []paramInfo
-	HasBody     bool
-	BodySchema  *base.SchemaProxy // request body schema, when HasBody
-	BodyNonJSON bool              // request body uses a media type the CLI cannot send (e.g. multipart)
-	BodyMedia   string            // media type the request body is declared with
-	Deprecated  bool
+	Tag           string
+	OperationID   string
+	Summary       string
+	Description   string
+	Method        string
+	Path          string
+	PathParams    []paramInfo
+	QueryParams   []paramInfo
+	HasBody       bool
+	BodySchema    *base.SchemaProxy // request body schema, when HasBody
+	BodyMediaType string
+	BodyFields    []multipartFieldInfo
+	Deprecated    bool
 }
 
 func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*operationInfo) {
@@ -161,9 +161,14 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 		// Check for request body
 		if op.RequestBody != nil {
 			info.HasBody = true
-			info.BodySchema = requestBodySchema(op.RequestBody)
-			info.BodyMedia = requestBodyMediaType(op.RequestBody)
-			info.BodyNonJSON = !isJSONMediaType(info.BodyMedia)
+			mediaType, media := requestBodyMediaType(op.RequestBody)
+			info.BodyMediaType = mediaType
+			if media != nil {
+				info.BodySchema = media.Schema
+				if mediaType == "multipart/form-data" {
+					info.BodyFields = multipartFields(media.Schema, media.Encoding)
+				}
+			}
 		}
 
 		groups[tag] = append(groups[tag], info)
@@ -175,7 +180,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	name := commandName(op)
 	use := name
 	for _, p := range op.PathParams {
-		use += " <" + slugify(p.Name) + ">"
+		use += " <" + cliFlagName(p.Name) + ">"
 	}
 
 	short := op.Summary
@@ -184,9 +189,6 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	}
 
 	long := op.Description
-	if op.BodyNonJSON {
-		long = strings.TrimSpace(fmt.Sprintf("NOT SUPPORTED: this endpoint requires a %s request body, which the omni CLI cannot send yet.\n\n%s", op.BodyMedia, long))
-	}
 	if op.Deprecated {
 		long = "DEPRECATED: " + long
 	}
@@ -207,10 +209,9 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 			// Build query string from flags
 			query := url.Values{}
 			for _, q := range op.QueryParams {
-				flagName := slugify(q.Name)
-				val, err := cmd.Flags().GetString(flagName)
+				val, err := queryFlagValue(cmd, q.Name)
 				if err != nil {
-					continue
+					return err
 				}
 				if val != "" {
 					query.Set(q.Name, val)
@@ -220,14 +221,10 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				path += "?" + query.Encode()
 			}
 
-			// Read body from stdin, a file, or the flag value itself
+			// Read body from stdin, a file, or the flag value itself.
 			var body []byte
+			contentType := op.BodyMediaType
 			if op.HasBody {
-				if op.BodyNonJSON {
-					cmd.SilenceUsage = true
-					return unsupportedBodyError(op)
-				}
-
 				// Flag selection goes by Changed, not by value: an explicitly
 				// empty --body is a mistake worth reporting rather than an
 				// unset flag.
@@ -240,7 +237,8 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 					flagName = "json-body"
 				}
 
-				if cmd.Flags().Changed(flagName) {
+				bodyProvided := cmd.Flags().Changed(flagName)
+				if bodyProvided {
 					raw, _ := cmd.Flags().GetString(flagName)
 					var err error
 					body, err = resolveBody(raw, flagName)
@@ -251,38 +249,59 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 						return err
 					}
 				}
+
+				if op.BodyMediaType == "multipart/form-data" {
+					var err error
+					body, contentType, err = buildMultipartBody(cmd, body, bodyProvided, op.BodyFields)
+					if err != nil {
+						return err
+					}
+				}
 			}
 
 			return exec(APIRequest{
-				Cmd:    cmd,
-				Method: op.Method,
-				Path:   path,
-				Body:   body,
+				Cmd:         cmd,
+				Method:      op.Method,
+				Path:        path,
+				Body:        body,
+				ContentType: contentType,
 			})
 		},
 	}
 
 	// Register query params as flags
 	for _, q := range op.QueryParams {
-		flagName := slugify(q.Name)
+		flagName := cliFlagName(q.Name)
 		desc := q.Description
 		if len(q.Enum) > 0 {
 			desc += fmt.Sprintf(" [%s]", strings.Join(q.Enum, ", "))
 		}
 		cmd.Flags().String(flagName, "", desc)
+
+		// Before camelCase names were normalized, flags such as modelId were
+		// exposed as --modelid. Keep a hidden deprecated alias so existing
+		// scripts continue to work while help and new usage use --model-id.
+		legacyName := slugify(q.Name)
+		if legacyName != flagName {
+			cmd.Flags().String(legacyName, "", "deprecated alias for --"+flagName)
+			_ = cmd.Flags().MarkDeprecated(legacyName, "use --"+flagName+" instead")
+			_ = cmd.Flags().MarkHidden(legacyName)
+		}
 	}
 
-	// If the operation accepts a body, add --body and --json-body flags. They
-	// stay registered for unsendable media types so that `--body ...` reports
-	// the real reason instead of "unknown flag".
+	// If the operation accepts a body, add --body and --json-body flags.
 	if op.HasBody {
-		bodyDesc := `request body as JSON string, "@path/to/file.json" to read a file, or "-" for stdin (run with --schema to see its shape)`
-		if op.BodyNonJSON {
-			bodyDesc = fmt.Sprintf("not supported: this endpoint requires a %s request body, which the omni CLI cannot send yet", op.BodyMedia)
+		bodyHelp := `request body as JSON string, "@path/to/file.json" to read a file, or "-" for stdin (run with --schema to see its shape)`
+		if op.BodyMediaType == "multipart/form-data" {
+			bodyHelp = `multipart fields as JSON string, "@path/to/file.json", or "-" for stdin; binary field values are file paths`
 		}
-		cmd.Flags().String("body", "", bodyDesc)
+		cmd.Flags().String("body", "", bodyHelp)
 		cmd.Flags().String("json-body", "", `request body as JSON string, "@path/to/file.json", or "-" for stdin (alias for --body)`)
 		cmd.Flags().MarkHidden("json-body")
+
+		if op.BodyMediaType == "multipart/form-data" {
+			registerMultipartFlags(cmd, op.BodyFields)
+		}
 	}
 
 	// Apply body shorthand if one exists for this operation
@@ -334,92 +353,44 @@ func schemaRequested(cmd *cobra.Command) bool {
 	return err == nil && v
 }
 
-// requestBodySchema returns the schema for a request body, preferring the
-// application/json media type and falling back to the first declared one.
-func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
+// requestBodyMediaType returns the media type and definition the CLI will use,
+// preferring application/json for backward compatibility and otherwise using
+// the first declared media type.
+func requestBodyMediaType(rb *v3.RequestBody) (string, *v3.MediaType) {
 	if rb == nil || rb.Content == nil {
-		return nil
+		return "", nil
 	}
-	var first *base.SchemaProxy
+	var firstType string
+	var first *v3.MediaType
 	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
 		mt := pair.Value()
-		if mt == nil || mt.Schema == nil {
+		if mt == nil {
 			continue
 		}
 		if pair.Key() == "application/json" {
-			return mt.Schema
+			return pair.Key(), mt
 		}
 		if first == nil {
-			first = mt.Schema
-		}
-	}
-	return first
-}
-
-// requestBodyMediaType returns the media type an operation's request body is
-// declared with, preferring JSON. Bodies with no declared content default to
-// JSON — that's what the CLI sends.
-func requestBodyMediaType(rb *v3.RequestBody) string {
-	if rb == nil || rb.Content == nil || rb.Content.Len() == 0 {
-		return "application/json"
-	}
-	first := ""
-	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
-		mt := pair.Key()
-		if isJSONMediaType(mt) {
-			return mt
-		}
-		if first == "" {
+			firstType = pair.Key()
 			first = mt
 		}
 	}
-	return first
+	return firstType, first
 }
 
-// isJSONMediaType reports whether a media type is sent as a JSON document.
-func isJSONMediaType(mt string) bool {
-	return mt == "application/json" || strings.HasSuffix(mt, "+json")
-}
-
-// unsupportedBodyError explains that an operation's body cannot be sent by the
-// CLI. auth.Do labels every request application/json and passes the bytes
-// through unchanged, so a multipart body would arrive mislabeled and without
-// its part framing — better to say so than to send something the API rejects.
-func unsupportedBodyError(op *operationInfo) error {
-	msg := fmt.Sprintf("this endpoint requires a %s request body, which the omni CLI cannot send yet", op.BodyMedia)
-	if hint := curlHint(op); hint != "" {
-		msg += "\nsend it with curl instead:\n  " + hint
+// bodyFlagIsJSON reports whether the --body flag value is JSON, and so worth
+// validating client-side. A JSON body is sent verbatim; a multipart body takes
+// a JSON object of field values that buildMultipartBody turns into form parts.
+// A body with no declared content defaults to JSON — that's what the CLI sends.
+// Any other media type passes --body through as raw bytes, unvalidated.
+func (op *operationInfo) bodyFlagIsJSON() bool {
+	switch {
+	case op.BodyMediaType == "", op.BodyMediaType == "application/json":
+		return true
+	case op.BodyMediaType == "multipart/form-data":
+		return true
 	}
-	return errors.New(msg)
-}
-
-// curlHint renders a curl command for a multipart operation, naming the parts
-// the spec marks required.
-func curlHint(op *operationInfo) string {
-	if op.BodyMedia != "multipart/form-data" || op.BodySchema == nil {
-		return ""
-	}
-	schema := op.BodySchema.Schema()
-	if schema == nil {
-		return ""
-	}
-
-	path := op.Path
-	for _, p := range op.PathParams {
-		path = strings.Replace(path, "{"+p.Name+"}", strings.ToUpper(slugify(p.Name)), 1)
-	}
-
-	cmd := fmt.Sprintf("curl -X %s \"$OMNI_BASE_URL%s\" -H \"Authorization: Bearer $OMNI_API_TOKEN\"", op.Method, path)
-	for _, name := range schema.Required {
-		value := strings.ToUpper(slugify(name))
-		if prop, ok := schema.Properties.Get(name); ok && prop != nil {
-			if ps := prop.Schema(); ps != nil && ps.Format == "binary" {
-				value = "@path/to/file.csv"
-			}
-		}
-		cmd += fmt.Sprintf(" -F %s=%s", name, value)
-	}
-	return cmd
+	return strings.HasSuffix(op.BodyMediaType, "+json")
 }
 
 // commandName derives a CLI subcommand name from the operationId or method+path.
@@ -449,6 +420,24 @@ func slugify(s string) string {
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "_", "-")
 	return s
+}
+
+func cliFlagName(s string) string {
+	return slugify(camelToKebab(s))
+}
+
+func queryFlagValue(cmd *cobra.Command, parameterName string) (string, error) {
+	canonicalName := cliFlagName(parameterName)
+	legacyName := slugify(parameterName)
+	canonicalChanged := cmd.Flags().Changed(canonicalName)
+	legacyChanged := legacyName != canonicalName && cmd.Flags().Changed(legacyName)
+	if canonicalChanged && legacyChanged {
+		return "", fmt.Errorf("cannot use both --%s and deprecated --%s", canonicalName, legacyName)
+	}
+	if legacyChanged {
+		return cmd.Flags().GetString(legacyName)
+	}
+	return cmd.Flags().GetString(canonicalName)
 }
 
 func camelToKebab(s string) string {

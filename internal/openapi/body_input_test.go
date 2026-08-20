@@ -324,97 +324,59 @@ func TestBuildCommand_InvalidBodyMakesNoRequest(t *testing.T) {
 	}
 }
 
-// A multipart operation cannot be sent at all: auth.Do labels every body
-// application/json and the CLI builds no part framing, so it fails client-side
-// instead of shipping bytes the API will reject.
-func TestBuildCommand_NonJSONBodyOperation(t *testing.T) {
+// A multipart operation still goes through the shared body pipeline: --body is
+// read, validated as JSON, and then framed into form parts. The media type the
+// spec declares is what the request is labelled with.
+func TestBuildCommand_MultipartBodyOperation(t *testing.T) {
 	op := &operationInfo{
-		Tag:         "uploads",
-		OperationID: "uploadsCreate",
-		Method:      "POST",
-		Path:        "/api/v1/uploads",
-		HasBody:     true,
-		BodyNonJSON: true,
-		BodyMedia:   "multipart/form-data",
+		Tag:           "uploads",
+		OperationID:   "uploadsCreate",
+		Method:        "POST",
+		Path:          "/api/v1/uploads",
+		HasBody:       true,
+		BodyMediaType: "multipart/form-data",
+		BodyFields: []multipartFieldInfo{
+			{Name: "modelId", FlagName: "model-id", Type: "string"},
+		},
 	}
 
-	for _, args := range [][]string{
-		{"--body", "@/tmp/upload.csv"},
-		{"--body", `{"modelId":"m"}`},
-		{},
-	} {
-		called := false
-		cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
-		cmd.SilenceUsage, cmd.SilenceErrors = true, true
-		cmd.SetArgs(args)
-
-		err := cmd.Execute()
-		if err == nil {
-			t.Fatalf("%v: expected an unsupported-body error, got nil", args)
-		}
-		if called {
-			t.Errorf("%v: executor ran for an unsendable media type", args)
-		}
-		if !strings.Contains(err.Error(), "multipart/form-data") {
-			t.Errorf("%v: error = %q, want it to name the media type", args, err.Error())
-		}
+	var captured APIRequest
+	cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+	cmd.SetArgs([]string{"--body", `{"modelId":"m"}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.HasPrefix(captured.ContentType, "multipart/form-data; boundary=") {
+		t.Errorf("ContentType = %q, want a multipart type with a boundary", captured.ContentType)
+	}
+	if !strings.Contains(string(captured.Body), `name="modelId"`) {
+		t.Errorf("body = %q, want a modelId part", string(captured.Body))
 	}
 }
 
-// The multipart error points at a curl command that names the required parts,
-// with the binary part shown as a file upload.
-func TestGenerateCommands_MultipartCurlHint(t *testing.T) {
-	spec := `{
-		"openapi": "3.1.0",
-		"info": {"title": "test", "version": "1.0"},
-		"paths": {
-			"/api/v1/uploads": {
-				"post": {
-					"operationId": "uploadsCreate",
-					"tags": ["Uploads"],
-					"requestBody": {
-						"required": true,
-						"content": {
-							"multipart/form-data": {
-								"schema": {
-									"type": "object",
-									"properties": {
-										"file": {"type": "string", "format": "binary"},
-										"modelId": {"type": "string"}
-									},
-									"required": ["file", "modelId"]
-								}
-							}
-						}
-					},
-					"responses": {"201": {"description": "ok"}}
-				}
-			}
-		}
-	}`
+// The file-path hint still fires on a multipart command, where a bare path is
+// the most likely mistake of all.
+func TestBuildCommand_MultipartBodyPathHint(t *testing.T) {
+	op := &operationInfo{
+		Tag:           "uploads",
+		OperationID:   "uploadsCreate",
+		Method:        "POST",
+		Path:          "/api/v1/uploads",
+		HasBody:       true,
+		BodyMediaType: "multipart/form-data",
+	}
 
 	called := false
-	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { called = true; return nil })
-	if err != nil {
-		t.Fatalf("GenerateCommands: %v", err)
-	}
+	cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	cmd.SetArgs([]string{"--body", "/tmp/upload.csv"})
 
-	root := &cobra.Command{Use: "omni"}
-	root.AddCommand(cmds...)
-	root.SilenceUsage, root.SilenceErrors = true, true
-	root.SetArgs([]string{"uploads", "create", "--body", "@upload.csv"})
-
-	err = root.Execute()
-	if err == nil {
-		t.Fatal("expected an unsupported-body error, got nil")
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "looks like a file path") {
+		t.Fatalf("error = %v, want the file-path hint", err)
 	}
 	if called {
-		t.Error("executor ran for a multipart operation")
-	}
-	for _, want := range []string{"multipart/form-data", "curl -X POST", "-F file=@path/to/file.csv", "-F modelId=MODELID"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
-		}
+		t.Error("executor ran despite an invalid body")
 	}
 }
 

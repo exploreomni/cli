@@ -263,8 +263,8 @@ func TestGenerateCommands_PathParamsFollowPathOrder(t *testing.T) {
 	}
 
 	sub := cmds[0].Commands()[0]
-	if sub.Use != "get-item <outerid> <innerid>" {
-		t.Errorf("Use = %q, want %q", sub.Use, "get-item <outerid> <innerid>")
+	if sub.Use != "get-item <outer-id> <inner-id>" {
+		t.Errorf("Use = %q, want %q", sub.Use, "get-item <outer-id> <inner-id>")
 	}
 
 	// Positional args in path order must substitute into the matching slots.
@@ -352,6 +352,61 @@ func TestBuildCommand_QueryFlags(t *testing.T) {
 	if !strings.Contains(captured.Path, "cursor=abc") {
 		t.Errorf("path %q missing cursor=abc", captured.Path)
 	}
+}
+
+func TestBuildCommand_CamelCaseQueryFlags(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+		QueryParams: []paramInfo{
+			{Name: "modelId", In: "query"},
+			{Name: "searchTerm", In: "query"},
+		},
+	}
+
+	t.Run("canonical kebab-case flags", func(t *testing.T) {
+		var captured APIRequest
+		cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+		if cmd.Flags().Lookup("model-id") == nil || cmd.Flags().Lookup("search-term") == nil {
+			t.Fatal("missing canonical camelCase query flags")
+		}
+		legacy := cmd.Flags().Lookup("modelid")
+		if legacy == nil || legacy.Deprecated == "" || !legacy.Hidden {
+			t.Fatalf("legacy --modelid flag = %#v, want hidden and deprecated", legacy)
+		}
+		cmd.SetArgs([]string{"--model-id", "model-123", "--search-term", "people"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if !strings.Contains(captured.Path, "modelId=model-123") || !strings.Contains(captured.Path, "searchTerm=people") {
+			t.Errorf("path = %q, want original OpenAPI parameter names", captured.Path)
+		}
+	})
+
+	t.Run("legacy aliases remain compatible", func(t *testing.T) {
+		var captured APIRequest
+		cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+		cmd.SetArgs([]string{"--modelid", "model-123", "--searchterm", "people"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if !strings.Contains(captured.Path, "modelId=model-123") || !strings.Contains(captured.Path, "searchTerm=people") {
+			t.Errorf("path = %q, want legacy aliases to preserve parameter names", captured.Path)
+		}
+	})
+
+	t.Run("canonical and legacy conflict", func(t *testing.T) {
+		cmd := buildCommand(op, func(req APIRequest) error { return nil })
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--model-id", "new", "--modelid", "old"})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "cannot use both --model-id and deprecated --modelid") {
+			t.Fatalf("error = %v, want conflicting alias error", err)
+		}
+	})
 }
 
 // Verify that operations with a request body (POST/PUT/PATCH) get a --body
@@ -491,11 +546,18 @@ func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 				Path:        pathStr,
 				PathParams:  pathParams,
 				HasBody:     op.RequestBody != nil,
-				BodyMedia:   requestBodyMediaType(op.RequestBody),
+				BodyMedia:   specBodyMediaType(op.RequestBody),
 			})
 		}
 	}
 	return ops
+}
+
+// specBodyMediaType names the media type the generator will pick for a request
+// body, so the coverage table records what each operation is sent as.
+func specBodyMediaType(rb *v3.RequestBody) string {
+	mediaType, _ := requestBodyMediaType(rb)
+	return mediaType
 }
 
 func TestSpecCoverage(t *testing.T) {
@@ -562,18 +624,6 @@ func TestSpecCoverage(t *testing.T) {
 
 			if sub.RunE == nil {
 				failures = append(failures, fmt.Sprintf("%s: no RunE", key))
-				continue
-			}
-
-			// Media types the CLI can't build (multipart uploads) are covered
-			// by refusing client-side with a message that names the media type.
-			if sop.HasBody && !isJSONMediaType(sop.BodyMedia) {
-				err := sub.RunE(sub, args)
-				if err == nil || !strings.Contains(err.Error(), sop.BodyMedia) {
-					failures = append(failures, fmt.Sprintf("%s: want an unsupported-%s error, got %v", key, sop.BodyMedia, err))
-					continue
-				}
-				called[sop.OperationID] = true
 				continue
 			}
 

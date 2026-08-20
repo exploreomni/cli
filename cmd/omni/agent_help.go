@@ -58,6 +58,10 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ### Search Omni documentation
   omni ai search-omni-docs --body '{"query":"how do I..."}'
 
+### Upload a CSV
+Multipart body fields are generated as flags; binary fields take file paths.
+  omni uploads create --file ./people.csv --model-id MODEL_ID --view-name people
+
 ## Command Groups
   ai            AI-powered query generation, jobs, doc search
   ai-eval       AI eval prompt set management
@@ -72,7 +76,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   query         Execute and wait for semantic queries
   scim          SCIM user/group provisioning
   schedules     Manage delivery schedules
-  uploads       List and delete CSV uploads (create/replace need multipart — use curl)
+  uploads       Upload and manage CSV files
   unstable      Unstable/preview commands (document import/export)
   user-attributes  User attribute definitions
   users         User/group role management, set user attribute values
@@ -94,6 +98,10 @@ name a leaf without knowing the container shape:
   omni documents v2-create --schema --field queryPresentations.data # just the tiles map
   omni documents v2-create --schema --field queryPresentations.data.query
 
+For multipart/form-data commands, top-level schema properties are also exposed
+as flags. Binary properties are labeled "file path" in --help. --body remains
+available; binary values in its JSON object are interpreted as file paths.
+
 ## Common Flags
   --compact       Non-indented JSON output
   --token TOKEN   API token (overrides env/config)
@@ -101,9 +109,9 @@ name a leaf without knowing the container shape:
   --profile NAME  Config profile to use
   --body JSON     Request body: JSON string, @path/to/file.json, or "-" for stdin
                   (a bare path is rejected client-side — prefix it with @)
-                  Endpoints whose body is multipart/form-data (uploads create,
-                  uploads replace-data) cannot be called by the CLI; it says so
-                  and prints the equivalent curl command.
+                  For multipart/form-data endpoints (uploads create, uploads
+                  replace-data) the JSON is a map of field values; binary
+                  fields take file paths.
   --schema        Print the request body's schema + example, then exit
   --field PATH    With --schema: drill into a dotted field path
   --depth N       With --schema: cap nesting depth (lower = smaller)
@@ -112,7 +120,7 @@ name a leaf without knowing the container shape:
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
 - Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
-- Query parameters are flags: omni models list --pagesize 10
+- Query parameters are flags: omni models list --page-size 10
 - Run "omni <group> --help" to see all commands in a group.
 - Run "omni <group> <command> --help" to see flags for a specific command.
 `
