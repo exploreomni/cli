@@ -3,8 +3,10 @@ package openapi
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/pb33f/libopenapi/datamodel/high/base"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +24,33 @@ type FlagMapping struct {
 	FieldPath   string // JSON field name
 	Description string
 	Default     string
-	IsBool      bool
+}
+
+// shorthandFlagValue keeps promoted body flags value-taking (so both
+// `--flag true` and `--flag false` work) while exposing the OpenAPI type in
+// Cobra's help output. The raw token is converted when the JSON body is built.
+type shorthandFlagValue struct {
+	value    string
+	typeName string
+}
+
+func (v *shorthandFlagValue) Set(value string) error {
+	v.value = value
+	return nil
+}
+
+func (v *shorthandFlagValue) String() string {
+	if v == nil {
+		return ""
+	}
+	return v.value
+}
+
+func (v *shorthandFlagValue) Type() string {
+	if v.typeName == "" {
+		return "string"
+	}
+	return v.typeName
 }
 
 // BodyShorthand defines how a single operation's body can be simplified.
@@ -50,9 +78,9 @@ var bodyShorthands = map[string]*BodyShorthand{
 			{Name: "prompt", FieldPath: "prompt", Description: "natural language query prompt", Transform: "string"},
 		},
 		Flags: []FlagMapping{
-			{FlagName: "run-query", FieldPath: "runQuery", Description: "execute the generated query (server default: true)", IsBool: true},
+			{FlagName: "run-query", FieldPath: "runQuery", Description: "execute the generated query (server default: true)"},
 			{FlagName: "user-id", FieldPath: "userId", Description: "user ID to execute as"},
-			{FlagName: "workbook-url", FieldPath: "workbookUrl", Description: "workbook URL for context"},
+			{FlagName: "workbook-url", FieldPath: "workbookUrl", Description: "create a workbook with the generated query and return its URL"},
 			{FlagName: "current-topic-name", FieldPath: "currentTopicName", Description: "topic name to scope query generation"},
 			{FlagName: "branch-id", FieldPath: "branchId", Description: "branch ID for the model"},
 		},
@@ -82,7 +110,7 @@ var bodyShorthands = map[string]*BodyShorthand{
 			{FlagName: "conversation-id", FieldPath: "conversationId", Description: "conversation ID to continue"},
 			{FlagName: "webhook-url", FieldPath: "webhookUrl", Description: "webhook URL for job completion"},
 			{FlagName: "webhook-signing-secret", FieldPath: "webhookSigningSecret", Description: "webhook signing secret"},
-			{FlagName: "progress-webhook-enabled", FieldPath: "progressWebhookEnabled", Description: "enable progress webhooks", IsBool: true},
+			{FlagName: "progress-webhook-enabled", FieldPath: "progressWebhookEnabled", Description: "enable progress webhooks"},
 		},
 		ExampleShort: `omni ai job-submit 770e8400-e29b-41d4-a716-446655440002 "Top 5 products by revenue"`,
 		ExampleJSON:  `omni ai job-submit --body '{"modelId":"770e8400-...","prompt":"Top 5 products by revenue"}'`,
@@ -190,7 +218,7 @@ var bodyShorthands = map[string]*BodyShorthand{
 		Flags: []FlagMapping{
 			{FlagName: "name", FieldPath: "name", Description: "new document name"},
 			{FlagName: "description", FieldPath: "description", Description: "document description"},
-			{FlagName: "clear-existing-draft", FieldPath: "clearExistingDraft", Description: "clear existing draft before updating", IsBool: true},
+			{FlagName: "clear-existing-draft", FieldPath: "clearExistingDraft", Description: "clear existing draft before updating"},
 		},
 		ExampleShort: `omni documents update <identifier> --name "New Name"`,
 		ExampleJSON:  `omni documents update <identifier> --body '{"name":"New Name"}'`,
@@ -257,10 +285,15 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 		cmd.Use += " <" + a.Name + ">"
 	}
 
-	// Register promoted flags (all as strings; bool flags are parsed from
-	// their string value in assembleBody)
+	// Keep promoted flags value-taking so callers can use an explicit value such
+	// as `--run-query false`, but show their schema type in help. assembleBody
+	// uses the same request schema to encode the JSON value.
 	for _, f := range sh.Flags {
-		cmd.Flags().String(f.FlagName, f.Default, f.Description)
+		fieldType, err := shorthandFieldType(op.BodySchema, f.FieldPath)
+		if err != nil {
+			fieldType = "string"
+		}
+		cmd.Flags().Var(&shorthandFlagValue{value: f.Default, typeName: fieldType}, f.FlagName, f.Description)
 	}
 
 	// Replace the Args validator with a flexible one
@@ -294,7 +327,7 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 		}
 
 		// Assemble body from shorthand args and promoted flags
-		body, err := assembleBody(sh, args, numPathParams, cmd)
+		body, err := assembleBody(sh, args, numPathParams, cmd, op.BodySchema)
 		if err != nil {
 			return err
 		}
@@ -344,7 +377,7 @@ func flexibleArgs(numPathParams, numShorthandArgs int) cobra.PositionalArgs {
 }
 
 // assembleBody builds a JSON body from shorthand positional args and promoted flags.
-func assembleBody(sh *BodyShorthand, args []string, pathParamCount int, cmd *cobra.Command) ([]byte, error) {
+func assembleBody(sh *BodyShorthand, args []string, pathParamCount int, cmd *cobra.Command, bodySchema *base.SchemaProxy) ([]byte, error) {
 	body := map[string]interface{}{}
 
 	shorthandArgs := args[pathParamCount:]
@@ -372,16 +405,42 @@ func assembleBody(sh *BodyShorthand, args []string, pathParamCount int, cmd *cob
 	}
 
 	for _, fm := range sh.Flags {
-		val, _ := cmd.Flags().GetString(fm.FlagName)
+		flag := cmd.Flags().Lookup(fm.FlagName)
+		if flag == nil {
+			continue
+		}
+		val := flag.Value.String()
 		if val == "" {
 			continue
 		}
-		if fm.IsBool {
-			body[fm.FieldPath] = (val == "true")
+		fieldType, err := shorthandFieldType(bodySchema, fm.FieldPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid shorthand --%s: %w", fm.FlagName, err)
+		}
+		if fieldType == "boolean" {
+			parsed, err := strconv.ParseBool(val)
+			if err != nil {
+				return nil, fmt.Errorf("invalid --%s value %q: expected a boolean", fm.FlagName, val)
+			}
+			body[fm.FieldPath] = parsed
 		} else {
 			body[fm.FieldPath] = val
 		}
 	}
 
 	return json.Marshal(body)
+}
+
+// shorthandFieldType resolves a promoted flag against the operation's request
+// body schema. The shorthand registry chooses which fields get a convenient
+// CLI flag; the OpenAPI document remains authoritative for their JSON types.
+func shorthandFieldType(bodySchema *base.SchemaProxy, fieldPath string) (string, error) {
+	if bodySchema == nil {
+		return "string", nil
+	}
+	fieldSchema, err := resolveField(bodySchema, fieldPath)
+	if err != nil {
+		return "", fmt.Errorf("field %q is not present in the request schema: %w", fieldPath, err)
+	}
+	return schemaType(fieldSchema), nil
 }
