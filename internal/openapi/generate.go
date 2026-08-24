@@ -4,6 +4,7 @@
 package openapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -60,6 +61,7 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 		tagCmd := &cobra.Command{
 			Use:   slugify(tag),
 			Short: fmt.Sprintf("%s commands", tag),
+			RunE:  GroupRunE,
 		}
 
 		for _, op := range ops {
@@ -70,6 +72,74 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 	}
 
 	return cmds, nil
+}
+
+// GroupRunE is the RunE for a tag/group command (e.g. `omni models`). Without
+// it cobra prints the group's help on stdout and exits 0, so a mistyped
+// subcommand is indistinguishable from a successful response when piped.
+//
+//   - unknown subcommand: a cobra-style error with suggestions, exit non-zero,
+//     nothing on stdout.
+//   - no subcommand at all: the group's help, but on stderr and with a
+//     non-zero exit, since "omni models" produced no data.
+//
+// `omni <group> --help` is unaffected — cobra handles the help flag before
+// RunE and still writes to stdout with exit 0.
+func GroupRunE(cmd *cobra.Command, args []string) error {
+	// Past flag parsing: from here on, errors are runtime errors, not usage
+	// errors, so don't bury the message under the usage block.
+	cmd.SilenceUsage = true
+
+	if len(args) == 0 {
+		cmd.SetOut(cmd.ErrOrStderr())
+		if err := cmd.Help(); err != nil {
+			return err
+		}
+		return fmt.Errorf("%q requires a subcommand", cmd.CommandPath())
+	}
+
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "unknown subcommand %q for %q", args[0], cmd.CommandPath())
+	if names := subcommandSuggestions(cmd, args[0]); len(names) > 0 {
+		msg.WriteString("\n\nDid you mean this?")
+		for _, n := range names {
+			fmt.Fprintf(&msg, "\n\t%s", n)
+		}
+	}
+	fmt.Fprintf(&msg, "\n\nRun '%s --help' for a list of available subcommands", cmd.CommandPath())
+	return errors.New(msg.String())
+}
+
+// subcommandSuggestions returns close matches for a mistyped subcommand. It
+// extends cobra's Levenshtein/prefix matching with a reverse-prefix pass so an
+// over-specified guess like `models list-branches` still points at `list`
+// (the real answer being `list --model-kind BRANCH`).
+func subcommandSuggestions(cmd *cobra.Command, typed string) []string {
+	if cmd.DisableSuggestions {
+		return nil
+	}
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = 2
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	for _, s := range cmd.SuggestionsFor(typed) {
+		if !seen[s] {
+			seen[s] = true
+			names = append(names, s)
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		if !sub.IsAvailableCommand() || seen[sub.Name()] {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(typed), strings.ToLower(sub.Name())+"-") {
+			seen[sub.Name()] = true
+			names = append(names, sub.Name())
+		}
+	}
+	return names
 }
 
 type paramInfo struct {
@@ -190,6 +260,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		Deprecated: deprecatedMsg(op),
 		Args:       cobra.ExactArgs(len(op.PathParams)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags parsed and args validated: anything that fails from here on
+			// (bad body, HTTP 4xx/5xx) is a runtime error, and dumping the usage
+			// block after it just buries the message — and, when the caller is
+			// piping, mixes prose into the stream.
+			cmd.SilenceUsage = true
+
 			// Substitute path params
 			path := op.Path
 			for i, p := range op.PathParams {

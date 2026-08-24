@@ -138,6 +138,8 @@ Config file lives at `~/.config/omni-cli/config.json`.
 
 All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for non-indented output (good for piping to `jq`).
 
+Failures write nothing to stdout — the API's error body, the error message, and any subcommand suggestions go to stderr, and the exit code is non-zero. An empty stdout therefore always means "no data", which keeps `omni ... | jq` from choking on error JSON.
+
 ## Environment variables
 
 | Variable | Description |

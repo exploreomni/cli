@@ -11,6 +11,7 @@ import (
 
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/oauth"
+	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	"golang.org/x/term"
@@ -28,6 +29,8 @@ func addConfigCommands(root *cobra.Command) {
 	configCmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage CLI configuration profiles",
+		// Same unknown-subcommand handling as the generated groups.
+		RunE: openapi.GroupRunE,
 	}
 
 	configCmd.AddCommand(configInitCmd())

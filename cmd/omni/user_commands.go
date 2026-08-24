@@ -64,6 +64,9 @@ changed; the user's other attributes are left untouched. Values given with
 attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Runtime failures past this point shouldn't drag the usage block along.
+			cmd.SilenceUsage = true
+
 			attrs, _ := cmd.Flags().GetStringArray("attr")
 			attrJSON, _ := cmd.Flags().GetString("attr-json")
 

@@ -108,7 +108,14 @@ func executeAPICall(req openapi.APIRequest) error {
 	}
 	defer resp.Body.Close()
 
-	return outputResponse(resp, format, compact)
+	err = outputResponse(resp, format, compact)
+	if err != nil && format == config.FormatHuman {
+		// Human mode already printed "Error: <detail> (HTTP N)" to stderr;
+		// letting cobra print its own line too just says the same thing twice.
+		// JSON mode keeps it — there the status code appears nowhere else.
+		req.Cmd.SilenceErrors = true
+	}
+	return err
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.

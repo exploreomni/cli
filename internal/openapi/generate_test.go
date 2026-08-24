@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -402,6 +404,185 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 	cmd.SetArgs([]string{}) // 0 args, expects 1
 	if err := cmd.Execute(); err == nil {
 		t.Error("expected error for wrong arg count, got nil")
+	}
+}
+
+// A command that fails at runtime (e.g. the API returned HTTP 400) should not
+// print the usage block after the error — the message is the useful part, and
+// the usage text is noise that buries it.
+func TestBuildCommand_RuntimeErrorSilencesUsage(t *testing.T) {
+	exec := func(req APIRequest) error { return fmt.Errorf("API returned HTTP 400") }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+	}
+
+	var out bytes.Buffer
+	cmd := buildCommand(op, exec)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected the executor error to propagate")
+	}
+	if !cmd.SilenceUsage {
+		t.Error("SilenceUsage should be set once RunE is entered")
+	}
+	if strings.Contains(out.String(), "Usage:") {
+		t.Errorf("usage block should be suppressed, got %q", out.String())
+	}
+}
+
+// Flag-parse errors happen before RunE, so they're genuine usage errors and
+// should still print the usage block.
+func TestBuildCommand_FlagErrorKeepsUsage(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+	}
+
+	var out bytes.Buffer
+	cmd := buildCommand(op, exec)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--nope"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for unknown flag")
+	}
+	if !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("usage block should be printed for flag errors, got %q", out.String())
+	}
+}
+
+// newTestGroup builds a tag group shaped like the ones GenerateCommands makes,
+// hung off a root command so cobra routes args to the group the way it does in
+// the real binary.
+func newTestGroup(out, errOut *bytes.Buffer) (*cobra.Command, *cobra.Command) {
+	root := &cobra.Command{Use: "omni"}
+	root.SilenceErrors = true
+	group := &cobra.Command{
+		Use:   "models",
+		Short: "models commands",
+		RunE:  GroupRunE,
+	}
+	group.AddCommand(&cobra.Command{Use: "list", Short: "list models", RunE: func(*cobra.Command, []string) error { return nil }})
+	group.AddCommand(&cobra.Command{Use: "get <id>", Short: "get a model", RunE: func(*cobra.Command, []string) error { return nil }})
+	root.AddCommand(group)
+	root.SetOut(out)
+	root.SetErr(errOut)
+	return root, group
+}
+
+// A mistyped subcommand must be a hard error with suggestions — not a silent
+// help dump on stdout that a piped consumer would try to parse as data.
+func TestGroupRunE_UnknownSubcommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list-branches"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected an error for an unknown subcommand")
+	}
+	if !strings.Contains(err.Error(), `unknown subcommand "list-branches" for "omni models"`) {
+		t.Errorf("error = %q, want an unknown-subcommand message", err.Error())
+	}
+	// "list-branches" is too far from "list" for Levenshtein, but the
+	// reverse-prefix pass should still point there.
+	if !strings.Contains(err.Error(), "Did you mean this?") || !strings.Contains(err.Error(), "list") {
+		t.Errorf("error = %q, want a suggestion for 'list'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "omni models --help") {
+		t.Errorf("error = %q, want a --help hint", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !group.SilenceUsage {
+		t.Error("SilenceUsage should be set so the error isn't buried in usage text")
+	}
+}
+
+// Nothing similar to suggest: still an error, still nothing on stdout.
+func TestGroupRunE_UnknownSubcommandNoSuggestions(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "zzzzzzzz"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected an error for an unknown subcommand")
+	}
+	if strings.Contains(err.Error(), "Did you mean this?") {
+		t.Errorf("error = %q, want no suggestion block", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+}
+
+// A bare group produced no data, so its help goes to stderr and the exit code
+// is non-zero — stdout stays empty for the pipe.
+func TestGroupRunE_NoSubcommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a non-nil error so the CLI exits non-zero")
+	}
+	if !strings.Contains(err.Error(), "requires a subcommand") {
+		t.Errorf("error = %q, want a 'requires a subcommand' message", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "Available Commands") {
+		t.Errorf("stderr = %q, want the group help", errOut.String())
+	}
+}
+
+// --help is not an error: it still prints to stdout and exits zero.
+func TestGroupRunE_HelpFlagStaysOnStdout(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--help should not error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Available Commands") {
+		t.Errorf("stdout = %q, want the group help", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr should be empty, got %q", errOut.String())
+	}
+}
+
+// Every generated group gets the unknown-subcommand handling, not just the
+// ones someone remembered to wire up.
+func TestGenerateCommands_GroupsAreRunnable(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	for _, tagCmd := range cmds {
+		if tagCmd.RunE == nil {
+			t.Errorf("group %q has no RunE; an unknown subcommand would exit 0", tagCmd.Use)
+		}
 	}
 }
 

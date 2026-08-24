@@ -33,6 +33,9 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 		Long:  "Create a new branch of an existing model. The model-id is the base model to branch from.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Runtime failures past this point shouldn't drag the usage block along.
+			cmd.SilenceUsage = true
+
 			baseModelID := args[0]
 			name, _ := cmd.Flags().GetString("name")
 

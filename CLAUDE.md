@@ -58,3 +58,5 @@ Config directory is resolved as: `OMNI_CONFIG_DIR` > `XDG_CONFIG_HOME/omni-cli` 
 ## Output
 
 All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for non-indented output (good for piping to `jq`).
+
+Nothing is written to stdout on failure: HTTP ≥400 bodies, error messages, and subcommand suggestions all go to stderr, and the exit code is non-zero. Runtime errors don't print the usage block (flag-parse errors still do). A group command with no subcommand (`omni models`) prints its help to stderr and exits 1; an unknown subcommand errors with suggestions.
