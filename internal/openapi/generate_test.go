@@ -9,6 +9,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -592,17 +593,18 @@ func TestValidateFlagNames(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// A query param that collides with a built-in body flag is also caught.
+	// A param whose name matches a built-in flag is renamed out of the way
+	// rather than reported, so it is not a collision.
 	withBody := &operationInfo{
 		OperationID: "thingsCreate",
 		QueryParams: []paramInfo{{Name: "Body"}},
 		HasBody:     true,
 	}
-	if err := validateFlagNames(withBody); err == nil {
-		t.Error("expected --body collision to be reported")
+	if err := validateFlagNames(withBody); err != nil {
+		t.Errorf("unexpected error for a reserved-name param: %v", err)
 	}
 
-	// ...as is one that collides with a promoted body-shorthand flag.
+	// A param colliding with a promoted body-shorthand flag is reported —
 	// labelsCreate promotes "color" and "description".
 	withShorthand := &operationInfo{
 		OperationID: "labelsCreate",
@@ -612,6 +614,148 @@ func TestValidateFlagNames(t *testing.T) {
 	if err := validateFlagNames(withShorthand); err == nil {
 		t.Error("expected shorthand flag collision to be reported")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Reserved (global / built-in) flag names
+//
+// Normalization widened what counts as a collision: a spec param named
+// "baseUrl" used to slugify to the harmless --baseurl, but canonicalizes to
+// --base-url. Registered locally it would win the name — pflag's AddFlagSet
+// skips a persistent flag whose name is already taken — and resolveConfig's
+// GetString("base-url") would then read the query param's value, letting one
+// value both filter the request and choose the host it goes to.
+// ---------------------------------------------------------------------------
+
+func TestQueryFlagName_ReservedNamesArePrefixed(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// Reserved: renamed out of the way.
+		{"baseUrl", "param-base-url"},
+		{"base_url", "param-base-url"},
+		{"token", "param-token"},
+		{"profile", "param-profile"},
+		{"compact", "param-compact"},
+		{"format", "param-format"},
+		{"help", "param-help"},
+		{"body", "param-body"},
+		{"schema", "param-schema"},
+		{"field", "param-field"},
+		{"depth", "param-depth"},
+		// Everything else keeps its canonical name.
+		{"branchId", "branch-id"},
+		{"pageSize", "page-size"},
+		{"baseModelId", "base-model-id"},
+		{"formatting", "formatting"},
+		{"tokenId", "token-id"},
+	}
+	for _, c := range cases {
+		if got := queryFlagName(c.in); got != c.want {
+			t.Errorf("queryFlagName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestIsReservedFlagName_IgnoresSpelling(t *testing.T) {
+	for _, name := range []string{"base-url", "baseUrl", "base_url", "BASEURL", "json-body", "jsonBody"} {
+		if !IsReservedFlagName(name) {
+			t.Errorf("IsReservedFlagName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"branch-id", "page-size", "param-base-url", "tokens"} {
+		if IsReservedFlagName(name) {
+			t.Errorf("IsReservedFlagName(%q) = true, want false", name)
+		}
+	}
+}
+
+// A spec param that would shadow a global flag is registered under --param-,
+// the global name is left alone, and the value still goes out under the
+// param's original spec spelling.
+func TestBuildCommand_ReservedQueryParamDoesNotShadowGlobalFlag(t *testing.T) {
+	var captured APIRequest
+	op := &operationInfo{
+		Tag:         "things",
+		OperationID: "thingsList",
+		Method:      "GET",
+		Path:        "/api/v1/things",
+		QueryParams: []paramInfo{
+			{Name: "baseUrl", In: "query", Description: "filter by callback base URL"},
+			{Name: "cursor", In: "query"},
+		},
+	}
+	cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+
+	// The command must not define --base-url itself; that name belongs to the
+	// root's persistent flag, which merges in at parse time.
+	if f := cmd.Flags().Lookup("base-url"); f != nil {
+		t.Fatalf("generated command registered a local --%s, shadowing the global flag", f.Name)
+	}
+	if cmd.Flags().Lookup("param-base-url") == nil {
+		t.Fatal("expected the param to be registered as --param-base-url")
+	}
+	if usage := cmd.Flags().FlagUsages(); !strings.Contains(usage, `"baseUrl"`) {
+		t.Errorf("help should name the original spec param, got:\n%s", usage)
+	}
+
+	// A real root command with the global flag, so parsing mirrors production.
+	root := &cobra.Command{Use: "omni"}
+	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
+	root.SetGlobalNormalizationFunc(NormalizeFlagName)
+	root.AddCommand(cmd)
+	root.SetArgs([]string{"list", "--param-base-url", "https://filter.example", "--base-url", "https://api.example"})
+	root.SilenceUsage, root.SilenceErrors = true, true
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if captured.Path != "/api/v1/things?baseUrl=https%3A%2F%2Ffilter.example" {
+		t.Errorf("path = %q, want the param sent as baseUrl", captured.Path)
+	}
+	// The global flag still holds the value the user gave it.
+	if got, _ := cmd.Flags().GetString("base-url"); got != "https://api.example" {
+		t.Errorf("--base-url = %q, want the global value %q", got, "https://api.example")
+	}
+}
+
+// The real spec must generate cleanly: no operation may declare two params that
+// normalize to one flag. Any param that had to be renamed is logged, since that
+// is a spec change worth noticing on a sync.
+func TestRealSpec_NoFlagCollisions(t *testing.T) {
+	specData := loadSpec(t)
+	specOps := parseSpecOperations(t, specData)
+	if len(specOps) == 0 {
+		t.Fatal("no operations parsed from the spec")
+	}
+
+	doc, err := libopenapi.NewDocument(specData)
+	if err != nil {
+		t.Fatalf("parsing spec: %v", err)
+	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("building model: %v", err)
+	}
+
+	groups := map[string][]*operationInfo{}
+	for pair := model.Model.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		extractOperations(pair.Key(), pair.Value(), groups)
+	}
+
+	renamed := 0
+	for tag, ops := range groups {
+		for _, op := range ops {
+			if err := validateFlagNames(op); err != nil {
+				t.Errorf("%s %s: %v", slugify(tag), commandName(op), err)
+			}
+			for _, q := range op.QueryParams {
+				if flag := queryFlagName(q.Name); flag != canonicalFlagName(q.Name) {
+					renamed++
+					t.Logf("%s %s: param %q registered as --%s (reserved name)", slugify(tag), commandName(op), q.Name, flag)
+				}
+			}
+		}
+	}
+	t.Logf("%d query params renamed to avoid global/built-in flags", renamed)
 }
 
 // ---------------------------------------------------------------------------

@@ -47,12 +47,7 @@ func main() {
 		},
 	}
 
-	// Global flags
-	root.PersistentFlags().StringP("profile", "p", "", "config profile to use")
-	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
-	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
-	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
-	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
+	addGlobalFlags(root)
 
 	// Flag names are matched ignoring case and dash/underscore placement, so
 	// --base-url, --baseurl and --base_url are the same flag on every command.
@@ -89,6 +84,21 @@ func main() {
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// addGlobalFlags registers the flags every command inherits.
+//
+// These names are reserved: openapi.IsReservedFlagName knows them, so a spec
+// query param that would otherwise shadow one (say a param named "baseUrl"
+// taking over --base-url) is registered under a --param- prefix instead.
+// TestGlobalFlagsAreReserved fails if a flag is added here without being
+// added there too.
+func addGlobalFlags(root *cobra.Command) {
+	root.PersistentFlags().StringP("profile", "p", "", "config profile to use")
+	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
+	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
+	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
+	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
 }
 
 // executeAPICall is the callback invoked by generated commands to make the actual HTTP request.
