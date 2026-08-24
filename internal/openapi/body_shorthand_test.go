@@ -906,14 +906,9 @@ func TestShorthand_HelpContainsExamples(t *testing.T) {
 func TestShorthand_PromotedFlagsDeclareBodyExclusivity(t *testing.T) {
 	exec := func(req APIRequest) error { return nil }
 
-	op := &operationInfo{
-		Tag:         "Documents",
-		OperationID: "documentsV2PatchDraft",
-		Method:      "PATCH",
-		Path:        "/api/v2/documents/{identifier}/draft",
-		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
-		HasBody:     true,
-	}
+	// Built from the real spec so promoted flags get their schema-derived
+	// types, matching what a user actually sees in --help.
+	op := operationFromRealSpec(t, "documentsV2PatchDraft")
 
 	cmd := buildCommand(op, exec)
 	sh := GetBodyShorthand(op.OperationID)
@@ -942,14 +937,20 @@ func TestShorthand_PromotedFlagsDeclareBodyExclusivity(t *testing.T) {
 
 // Every promoted flag on every registered shorthand carries the note, and
 // commands with no promoted flags leave --body's description alone.
+//
+// Flag types come from the request schema, so this walks the real spec and
+// asserts the note lands regardless of the type Cobra ends up printing —
+// including the boolean-typed flags, which are registered through the same
+// custom flag.Value as the string ones.
 func TestShorthand_BodyExclusivityNoteEverywhere(t *testing.T) {
+	ops := operationsFromRealSpec(t)
+	sawBooleanFlag := false
+
 	for opID, sh := range bodyShorthands {
-		op := &operationInfo{
-			Tag:         "test",
-			OperationID: opID,
-			Method:      "POST",
-			Path:        "/test",
-			HasBody:     true,
+		op, ok := ops[opID]
+		if !ok {
+			t.Errorf("%s: operation is not present in the OpenAPI spec", opID)
+			continue
 		}
 		cmd := buildCommand(op, func(req APIRequest) error { return nil })
 
@@ -959,8 +960,15 @@ func TestShorthand_BodyExclusivityNoteEverywhere(t *testing.T) {
 				t.Errorf("%s: missing promoted flag --%s", opID, f.FlagName)
 				continue
 			}
+			if flag.Value.Type() == "boolean" {
+				sawBooleanFlag = true
+			}
 			if !strings.HasSuffix(flag.Usage, bodyExclusiveSuffix) {
-				t.Errorf("%s: --%s usage = %q, want suffix %q", opID, f.FlagName, flag.Usage, bodyExclusiveSuffix)
+				t.Errorf("%s: --%s (type %s) usage = %q, want suffix %q",
+					opID, f.FlagName, flag.Value.Type(), flag.Usage, bodyExclusiveSuffix)
+			}
+			if !strings.Contains(flag.Usage, f.Description) {
+				t.Errorf("%s: --%s usage = %q, want it to keep its description", opID, f.FlagName, flag.Usage)
 			}
 		}
 
@@ -968,6 +976,12 @@ func TestShorthand_BodyExclusivityNoteEverywhere(t *testing.T) {
 		if len(sh.Flags) == 0 && strings.Contains(bodyUsage, "cannot be combined") {
 			t.Errorf("%s: --body usage = %q, want no conflict note (no promoted flags)", opID, bodyUsage)
 		}
+	}
+
+	// Guard against this test silently degenerating into a string-only check
+	// if schema-derived typing ever stops resolving.
+	if !sawBooleanFlag {
+		t.Error("expected at least one boolean-typed promoted flag (e.g. --run-query); schema typing may have regressed")
 	}
 }
 
