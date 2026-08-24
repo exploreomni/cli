@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // ---------------------------------------------------------------------------
@@ -355,6 +357,246 @@ func TestBuildCommand_QueryFlags(t *testing.T) {
 	}
 	if !strings.Contains(captured.Path, "cursor=abc") {
 		t.Errorf("path %q missing cursor=abc", captured.Path)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Required query params + the generic --query escape hatch
+// ---------------------------------------------------------------------------
+
+// listOp is a GET operation with one required query param and one optional one.
+func listOp() *operationInfo {
+	return &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+		QueryParams: []paramInfo{
+			{Name: "connectionId", In: "query", Required: true},
+			{Name: "page_size", In: "query"},
+		},
+	}
+}
+
+// A query param the spec marks required must fail client-side when it's
+// missing, instead of costing a round trip and a server 400.
+func TestBuildCommand_RequiredQueryParamMissing(t *testing.T) {
+	called := false
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--page-size", "10"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error for a missing required query param, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection-id") {
+		t.Errorf("error = %q, want it to name the missing flag", err.Error())
+	}
+	if called {
+		t.Error("executor should not run when a required flag is missing")
+	}
+
+	// The flag's usage should advertise that it's required.
+	usage := cmd.Flags().Lookup("connection-id").Usage
+	if !strings.Contains(usage, "(required)") {
+		t.Errorf("usage = %q, want it to mention (required)", usage)
+	}
+}
+
+func TestBuildCommand_RequiredQueryParamPresent(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{"--connectionid", "c-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "connectionId=c-1") {
+		t.Errorf("path %q missing connectionId=c-1", captured.Path)
+	}
+}
+
+// --query is the escape hatch for params the spec doesn't declare. It's
+// repeatable, and repeating a key sends every value.
+func TestBuildCommand_ExtraQueryParams(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{
+		"--connectionid", "c-1",
+		"--query", "undeclared=yes",
+		"--query", "tag=a",
+		"--query", "tag=b",
+		"--query", "empty=",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"connectionId=c-1", "undeclared=yes", "tag=a&tag=b", "empty="} {
+		if !strings.Contains(captured.Path, want) {
+			t.Errorf("path %q missing %q", captured.Path, want)
+		}
+	}
+}
+
+func TestBuildCommand_ExtraQueryParamMalformed(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	for _, bad := range []string{"noequals", "=novalue"} {
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--connectionid", "c-1", "--query", bad})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("--query %q: expected an error, got nil", bad)
+		}
+		if !strings.Contains(err.Error(), "key=value") {
+			t.Errorf("--query %q: error = %q, want it to explain key=value", bad, err.Error())
+		}
+	}
+}
+
+// Sending the same param both ways is ambiguous — error rather than silently
+// picking one. Both the spec spelling and the flag spelling are caught.
+func TestBuildCommand_ExtraQueryParamConflict(t *testing.T) {
+	for _, key := range []string{"connectionId", "connectionid", "connection-id"} {
+		called := false
+		exec := func(req APIRequest) error { called = true; return nil }
+
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--connectionid", "c-1", "--query", key + "=c-2"})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("--query %s=: expected a conflict error, got nil", key)
+		}
+		if !strings.Contains(err.Error(), "conflicts with --connection-id") {
+			t.Errorf("error = %q, want it to name the conflicting flag", err.Error())
+		}
+		if called {
+			t.Error("executor should not run on a conflicting --query")
+		}
+	}
+}
+
+// An unset declared flag isn't a conflict — --query can supply its value.
+func TestBuildCommand_ExtraQueryParamNoConflictWhenFlagUnset(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{"--connectionid", "c-1", "--query", "page_size=25"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "page_size=25") {
+		t.Errorf("path %q missing page_size=25", captured.Path)
+	}
+}
+
+// A spec param that slugifies to "query" owns the flag name; the escape hatch
+// steps aside rather than panicking the flag registration.
+func TestBuildCommand_QueryParamNamedQuery(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testSearch",
+		Method:      "GET",
+		Path:        "/api/v1/search",
+		QueryParams: []paramInfo{{Name: "query", In: "query"}},
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SetArgs([]string{"--query", "revenue"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "query=revenue") {
+		t.Errorf("path %q missing query=revenue", captured.Path)
+	}
+}
+
+// --schema is local discovery with no API call, so it must stay zero-friction
+// even on an operation with required query params.
+func TestBuildCommand_SchemaIgnoresRequiredQueryParams(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/widgets": {
+				"post": {
+					"operationId": "widgetsCreate",
+					"tags": ["widgets"],
+					"parameters": [
+						{"name": "connectionId", "in": "query", "required": true, "schema": {"type": "string"}}
+					],
+					"requestBody": {
+						"content": {"application/json": {"schema": {
+							"type": "object",
+							"required": ["name"],
+							"properties": {"name": {"type": "string"}}
+						}}}
+					},
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	called := false
+	// Each case gets a fresh command tree; cobra keeps parsed flag state on the
+	// command, and the real CLI runs one command per process.
+	run := func(args ...string) (string, error) {
+		exec := func(req APIRequest) error { called = true; return nil }
+		cmds, err := GenerateCommands([]byte(spec), exec)
+		if err != nil {
+			t.Fatalf("GenerateCommands: %v", err)
+		}
+		group := cmds[0]
+		var buf bytes.Buffer
+		group.SetOut(&buf)
+		group.SetErr(&buf)
+		group.SilenceUsage = true
+		group.SilenceErrors = true
+		group.SetArgs(args)
+		execErr := group.Execute()
+		return buf.String(), execErr
+	}
+
+	out, err := run("create", "--schema")
+	if err != nil {
+		t.Fatalf("Execute --schema: %v\n%s", err, out)
+	}
+	if called {
+		t.Error("--schema must not make an API call")
+	}
+	if !strings.Contains(out, `"name"`) {
+		t.Errorf("schema output missing body fields: %s", out)
+	}
+
+	// Without --schema the required param is still enforced.
+	if _, err := run("create", "--body", "{}"); err == nil {
+		t.Fatal("expected a missing-required-flag error without --schema")
+	}
+
+	// ...and supplying it goes through.
+	if out, err := run("create", "--body", "{}", "--connectionid", "c-1"); err != nil {
+		t.Fatalf("Execute with required param: %v\n%s", err, out)
+	}
+	if !called {
+		t.Error("expected the API call to run once the required param was set")
 	}
 }
 
@@ -1281,6 +1523,24 @@ func TestSpecCoverage(t *testing.T) {
 					failures = append(failures, fmt.Sprintf("%s: set body flag: %v", key, err))
 					continue
 				}
+			}
+
+			// Query params the spec marks required are enforced client-side, so
+			// give each one a dummy value — otherwise the command could never
+			// reach RunE and the operation would read as uncovered.
+			setErr := ""
+			sub.Flags().VisitAll(func(f *pflag.Flag) {
+				ann := f.Annotations[cobra.BashCompOneRequiredFlag]
+				if setErr != "" || len(ann) == 0 || ann[0] != "true" {
+					return
+				}
+				if err := sub.Flags().Set(f.Name, "test-value"); err != nil {
+					setErr = fmt.Sprintf("%s: set %s flag: %v", key, f.Name, err)
+				}
+			})
+			if setErr != "" {
+				failures = append(failures, setErr)
+				continue
 			}
 
 			if sub.RunE == nil {
