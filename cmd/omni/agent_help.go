@@ -78,18 +78,25 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   users         User/group role management, set user attribute values
   config        CLI configuration profiles
 
-## Discovering request body shapes
-Any command that takes a body accepts --schema. It prints the body's JSON
-schema (field types, descriptions, enums, required fields) plus a filled-in
-example, then exits without making an API call (no token needed). Use this
-instead of guessing the JSON for --body.
+## Discovering request and response shapes
+Every API command accepts --schema, including GET/DELETE commands that take no
+body. It prints the full call contract and exits without making an API call (no
+token or positional args needed):
+  - args:        positional args, with type and description
+  - queryParams: query flags, with type, enum, required, description
+  - body:        the request body's JSON schema plus a filled-in example
+                 (null when the operation takes no body)
+  - response:    the success response's shape (status, content type, schema)
+Use it instead of guessing the JSON for --body, or the shape of a response you
+are about to parse.
+  omni models list --schema      # no body: args, query flags, response shape
   omni query run --schema
   omni connections create --schema --compact
 
-Deeply nested bodies (e.g. documents v2-create) can be large. Narrow the
+Deeply nested shapes (e.g. documents v2-create) can be large. Narrow the
 output with --depth N for a shallow overview, then --field PATH to drill into
-one part. PATH is dotted and auto-descends through arrays and maps, so you can
-name a leaf without knowing the container shape:
+one part of the request body. PATH is dotted and auto-descends through arrays
+and maps, so you can name a leaf without knowing the container shape:
   omni documents v2-create --schema --depth 1                       # top-level overview
   omni documents v2-create --schema --field queryPresentations.data # just the tiles map
   omni documents v2-create --schema --field queryPresentations.data.query
@@ -100,8 +107,9 @@ name a leaf without knowing the container shape:
   --base-url URL  API base URL (overrides config)
   --profile NAME  Config profile to use
   --body JSON     Request body (JSON string or "-" for stdin)
-  --schema        Print the request body's schema + example, then exit
-  --field PATH    With --schema: drill into a dotted field path
+  --schema        Print args, flags, body schema + example, and response shape,
+                  then exit (works on every API command)
+  --field PATH    With --schema: drill into a dotted field path of the body
   --depth N       With --schema: cap nesting depth (lower = smaller)
 
 ## Tips

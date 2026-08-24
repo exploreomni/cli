@@ -70,7 +70,7 @@ const schemaTestSpec = `{
 // command with --schema, returning the parsed JSON document. It dispatches
 // through the parent group with the full arg path, since cobra's Execute()
 // re-parses from the root regardless of the receiver.
-func runSchema(t *testing.T) bodySchemaDoc {
+func runSchema(t *testing.T) SchemaDoc {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands([]byte(schemaTestSpec), noop)
@@ -90,7 +90,7 @@ func runSchema(t *testing.T) bodySchemaDoc {
 		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
 	}
 
-	var doc bodySchemaDoc
+	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
 	}
@@ -225,7 +225,7 @@ const mapTestSpec = `{
   }
 }`
 
-func runMapSchema(t *testing.T) bodySchemaDoc {
+func runMapSchema(t *testing.T) SchemaDoc {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands([]byte(mapTestSpec), noop)
@@ -243,7 +243,7 @@ func runMapSchema(t *testing.T) bodySchemaDoc {
 	if err := group.Execute(); err != nil {
 		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
 	}
-	var doc bodySchemaDoc
+	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
 	}
@@ -451,7 +451,7 @@ func TestSchema_DescribeOnRefFieldDrill(t *testing.T) {
 // runSchemaWith runs "create --schema" plus extra flags against a spec. On
 // success it returns the parsed doc; on failure it returns the execution error
 // (usage/errors silenced so the error carries only the message under test).
-func runSchemaWith(t *testing.T, spec string, extra ...string) (bodySchemaDoc, error) {
+func runSchemaWith(t *testing.T, spec string, extra ...string) (SchemaDoc, error) {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands([]byte(spec), noop)
@@ -466,9 +466,9 @@ func runSchemaWith(t *testing.T, spec string, extra ...string) (bodySchemaDoc, e
 	group.SetErr(&buf)
 	group.SetArgs(append([]string{"create", "--schema"}, extra...))
 	if execErr := group.Execute(); execErr != nil {
-		return bodySchemaDoc{}, execErr
+		return SchemaDoc{}, execErr
 	}
-	var doc bodySchemaDoc
+	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
 	}
@@ -549,6 +549,232 @@ func TestSchema_DepthLimitsExpansion(t *testing.T) {
 	rawFull, _ := json.Marshal(full.Body)
 	if strings.Contains(string(rawFull), "max depth reached") {
 		t.Errorf("default depth should not truncate this small schema: %s", rawFull)
+	}
+}
+
+// bodylessTestSpec exercises --schema on operations that take no request body:
+// a GET with a path param, two query params (one enum-valued and required) and a
+// bare-array 200 response, plus a DELETE whose only success status (204) carries
+// no content. The 202 is declared before the 200 so the "lowest 2xx wins"
+// selection can't pass by accident of declaration order, and text/csv sits
+// before application/json so the media-type preference is exercised too.
+const bodylessTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/widgets/{widgetId}/checks": {
+      "get": {
+        "operationId": "widgetsChecks",
+        "tags": ["widgets"],
+        "parameters": [
+          {"name": "widgetId", "in": "path", "required": true, "description": "Widget UUID", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "description": "Max results", "schema": {"type": "integer"}},
+          {"name": "severity", "in": "query", "required": true, "description": "Filter by severity", "schema": {"type": "string", "enum": ["error", "warning"]}}
+        ],
+        "responses": {
+          "202": {"description": "queued", "content": {"application/json": {"schema": {"type": "object"}}}},
+          "200": {
+            "description": "Check results",
+            "content": {
+              "text/csv": {"schema": {"type": "string"}},
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "description": "Bare top-level array of issues.",
+                  "items": {
+                    "type": "object",
+                    "required": ["message"],
+                    "properties": {"message": {"type": "string"}, "nested": {"type": "object", "properties": {"deep": {"type": "string"}}}}
+                  }
+                }
+              }
+            }
+          },
+          "404": {"description": "not found"}
+        }
+      },
+      "delete": {
+        "operationId": "widgetsDeleteChecks",
+        "tags": ["widgets"],
+        "parameters": [
+          {"name": "widgetId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "Checks cleared"}}
+      }
+    }
+  }
+}`
+
+// runSchemaCmd runs "<name> --schema" plus extra flags against a spec, with no
+// positional args — --schema must short-circuit before arg validation.
+func runSchemaCmd(t *testing.T, spec, name string, extra ...string) (SchemaDoc, error) {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(spec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	var buf bytes.Buffer
+	group.SetOut(&buf)
+	group.SetErr(&buf)
+	group.SetArgs(append([]string{name, "--schema"}, extra...))
+	if execErr := group.Execute(); execErr != nil {
+		return SchemaDoc{}, execErr
+	}
+	var doc SchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc, nil
+}
+
+// --schema on a bodyless GET works with no positional args and describes the
+// call: args, query flags, and an explicit null body.
+func TestSchema_BodylessGetDescribesArgsAndQueryParams(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Method != "GET" || doc.Path != "/api/v1/widgets/{widgetId}/checks" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if doc.Body != nil {
+		t.Errorf("body = %v, want null for a bodyless operation", doc.Body)
+	}
+	if len(doc.Args) != 1 {
+		t.Fatalf("args = %v, want 1 entry", doc.Args)
+	}
+	arg := doc.Args[0]
+	if arg.Name != "widgetId" || arg.Placeholder != "<widgetid>" || arg.Type != "string" || arg.Description != "Widget UUID" {
+		t.Errorf("arg = %+v, want the widgetId path param", arg)
+	}
+
+	byFlag := map[string]SchemaQueryParam{}
+	for _, q := range doc.QueryParams {
+		byFlag[q.Flag] = q
+	}
+	limit, ok := byFlag["--limit"]
+	if !ok {
+		t.Fatalf("query params %v missing --limit", doc.QueryParams)
+	}
+	if limit.Type != "integer" || limit.Required || limit.Description != "Max results" {
+		t.Errorf("--limit = %+v, want an optional integer with its description", limit)
+	}
+	severity, ok := byFlag["--severity"]
+	if !ok {
+		t.Fatalf("query params %v missing --severity", doc.QueryParams)
+	}
+	if !severity.Required {
+		t.Errorf("--severity.required = false, want true")
+	}
+	if strings.Join(severity.Enum, ",") != "error,warning" {
+		t.Errorf("--severity.enum = %v, want [error warning]", severity.Enum)
+	}
+}
+
+// The response section reports the lowest declared 2xx, prefers application/json
+// over other media types, and renders a bare top-level array as such — the shape
+// a caller would otherwise have to discover by crashing on it.
+func TestSchema_ResponseBareArray(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp := doc.Response
+	if resp == nil {
+		t.Fatal("response section missing")
+	}
+	if resp.Status != "200" {
+		t.Errorf("response.status = %q, want 200 (lowest 2xx wins over 202)", resp.Status)
+	}
+	if resp.ContentType != "application/json" {
+		t.Errorf("response.contentType = %q, want application/json", resp.ContentType)
+	}
+	if resp.Description != "Check results" {
+		t.Errorf("response.description = %q", resp.Description)
+	}
+	schema, ok := resp.Schema.(map[string]interface{})
+	if !ok {
+		t.Fatalf("response.schema is not an object: %T", resp.Schema)
+	}
+	if schema["type"] != "array" {
+		t.Errorf("response.schema.type = %v, want array", schema["type"])
+	}
+	items, ok := schema["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("response.schema.items missing: %v", schema)
+	}
+	props, ok := items["properties"].(map[string]interface{})
+	if !ok || props["message"] == nil {
+		t.Errorf("response item properties = %v, want a message field", items["properties"])
+	}
+}
+
+// A 2xx with no content still reports the status, so a caller can tell "no body"
+// from "unknown".
+func TestSchema_ResponseWithoutContent(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "delete-checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.Status != "204" {
+		t.Errorf("response.status = %q, want 204", doc.Response.Status)
+	}
+	if doc.Response.Schema != nil {
+		t.Errorf("response.schema = %v, want null for a contentless status", doc.Response.Schema)
+	}
+}
+
+// --depth bounds the response expansion too, not just the request body.
+func TestSchema_DepthLimitsResponseExpansion(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks", "--depth", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := json.Marshal(doc.Response)
+	if !strings.Contains(string(raw), "max depth reached") {
+		t.Errorf("expected a depth-truncation note in the response at --depth 1: %s", raw)
+	}
+}
+
+// --field only drills the request body, so asking for it on a bodyless operation
+// must say so plainly rather than silently returning an empty body.
+func TestSchema_FieldOnBodylessOperationErrors(t *testing.T) {
+	_, err := runSchemaCmd(t, bodylessTestSpec, "checks", "--field", "anything")
+	if err == nil {
+		t.Fatal("expected an error for --field on a bodyless operation")
+	}
+	if !strings.Contains(err.Error(), "request body") {
+		t.Errorf("error = %q, want it to explain that --field needs a request body", err.Error())
+	}
+}
+
+// A body operation's document keeps its established shape (method, path,
+// required, body, example) and gains the response section — existing consumers
+// must not break.
+func TestSchema_BodyOperationStaysBackwardCompatible(t *testing.T) {
+	doc := runSchema(t)
+	if doc.Method != "POST" || doc.Path != "/api/v1/widgets" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if len(doc.Required) == 0 {
+		t.Error("required is empty; the body op's required list regressed")
+	}
+	if _, ok := doc.Body.(map[string]interface{}); !ok {
+		t.Errorf("body is not an object: %T", doc.Body)
+	}
+	if _, ok := doc.Example.(map[string]interface{}); !ok {
+		t.Errorf("example is not an object: %T", doc.Example)
+	}
+	// schemaTestSpec's 200 declares a description but no content.
+	if doc.Response == nil || doc.Response.Status != "200" {
+		t.Errorf("response = %+v, want the declared 200", doc.Response)
 	}
 }
 

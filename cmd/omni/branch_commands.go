@@ -92,5 +92,78 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 
 	cmd.Flags().String("name", "", "name for the new branch")
 
+	// This command is hand-written rather than generated, but agents reach for
+	// --schema on any command; describe the body it assembles so the flag works
+	// here too. The body is static (the CLI fills modelKind and looks up
+	// connectionId itself), so --field has nothing to drill into.
+	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command) error {
+		if field, _ := c.Flags().GetString("field"); field != "" {
+			return fmt.Errorf("--field is not supported for create-branch; its request body is assembled by the CLI and shown in full")
+		}
+		return openapi.EmitSchemaDoc(c, createBranchSchemaDoc())
+	})
+
 	return cmd
+}
+
+// createBranchSchemaDoc mirrors the generated commands' --schema document for the
+// hand-written create-branch command. The body shown is what the CLI sends to
+// POST /api/v1/models: modelKind is fixed to BRANCH, connectionId is resolved
+// from the base model, and modelName comes from --name.
+func createBranchSchemaDoc() openapi.SchemaDoc {
+	str := func(desc string) map[string]interface{} {
+		return map[string]interface{}{"type": "string", "description": desc}
+	}
+	return openapi.SchemaDoc{
+		Method: "POST",
+		Path:   "/api/v1/models",
+		Args: []openapi.SchemaArg{{
+			Name:        "modelId",
+			Placeholder: "<model-id>",
+			Type:        "string",
+			Description: "ID of the base model to branch from",
+		}},
+		Required: []string{"modelKind", "baseModelId", "connectionId"},
+		Body: map[string]interface{}{
+			"type":        "object",
+			"description": "Assembled by the CLI from <model-id> and --name; not passed through as JSON.",
+			"properties": map[string]interface{}{
+				"modelKind":    str(`always "BRANCH" for this command`),
+				"baseModelId":  str("the <model-id> positional arg"),
+				"connectionId": str("looked up from the base model; not settable"),
+				"modelName":    str("the --name flag; omitted when --name is unset"),
+			},
+			"required": []string{"modelKind", "baseModelId", "connectionId"},
+		},
+		Example: map[string]interface{}{
+			"modelKind":    "BRANCH",
+			"baseModelId":  "<model-id>",
+			"connectionId": "<resolved by the CLI>",
+			"modelName":    "<name>",
+		},
+		Response: &openapi.SchemaResponse{
+			Status:      "200",
+			ContentType: "application/json",
+			Description: "Model created successfully",
+			Schema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"success": map[string]interface{}{"type": "boolean", "description": "Whether the operation succeeded"},
+					"error":   str("Error message if creation failed"),
+					"message": str("Additional message"),
+					"model": map[string]interface{}{
+						"type":        "object",
+						"description": "Created model details",
+						"properties": map[string]interface{}{
+							"id":        map[string]interface{}{"type": "string", "format": "uuid", "description": "Created model ID"},
+							"modelKind": str("Kind of model created"),
+							"name":      map[string]interface{}{"type": "string | null", "description": "Model name"},
+						},
+						"required": []string{"id", "modelKind", "name"},
+					},
+				},
+				"required": []string{"success"},
+			},
+		},
+	}
 }

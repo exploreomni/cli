@@ -11,21 +11,56 @@ import (
 )
 
 // maxSchemaDepth caps how deep we expand nested objects when describing a
-// request body. Some bodies (notably the v2 document content blob) nest very
-// deeply; without a cap a single --schema dump could be megabytes. Beyond this
-// depth we emit a short placeholder noting the omission rather than recursing.
+// request body or response. Some shapes (notably the v2 document content blob)
+// nest very deeply; without a cap a single --schema dump could be megabytes.
+// Beyond this depth we emit a short placeholder noting the omission rather than
+// recursing.
 const maxSchemaDepth = 8
 
-// bodySchemaDoc is the JSON document emitted by `omni <cmd> --schema`. It gives
-// an agent both the authoritative contract (Body) and a copy-pasteable starting
-// point (Example) for an operation's request body.
-type bodySchemaDoc struct {
-	Method   string      `json:"method"`
-	Path     string      `json:"path"`
-	Field    string      `json:"field,omitempty"`
-	Required []string    `json:"required,omitempty"`
-	Body     interface{} `json:"body"`
-	Example  interface{} `json:"example,omitempty"`
+// SchemaArg describes a positional argument, derived from a spec path param.
+type SchemaArg struct {
+	Name        string `json:"name"`
+	Placeholder string `json:"placeholder"`
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// SchemaQueryParam describes a query parameter as it is exposed on the CLI.
+type SchemaQueryParam struct {
+	Flag        string   `json:"flag"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Required    bool     `json:"required"`
+	Description string   `json:"description,omitempty"`
+}
+
+// SchemaResponse describes the operation's success response: the lowest 2xx
+// status the spec declares, its media type, and the simplified schema. Schema is
+// nil when that status carries no body (e.g. 204) or declares no schema.
+type SchemaResponse struct {
+	Status      string      `json:"status,omitempty"`
+	ContentType string      `json:"contentType,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Schema      interface{} `json:"schema"`
+}
+
+// SchemaDoc is the JSON document emitted by `omni <cmd> --schema`. It gives an
+// agent the full call contract: positional args, query flags, the request body
+// (authoritative shape plus a copy-pasteable Example) and the success response
+// shape. Body is explicitly null for operations that take no request body, so
+// "no body" is unambiguous rather than merely absent. Response is always present
+// (null when the spec declares no 2xx status).
+type SchemaDoc struct {
+	Method      string             `json:"method"`
+	Path        string             `json:"path"`
+	Field       string             `json:"field,omitempty"`
+	Args        []SchemaArg        `json:"args,omitempty"`
+	QueryParams []SchemaQueryParam `json:"queryParams,omitempty"`
+	Required    []string           `json:"required,omitempty"`
+	Body        interface{}        `json:"body"`
+	Example     interface{}        `json:"example,omitempty"`
+	Response    *SchemaResponse    `json:"response"`
 }
 
 // describer carries the per-invocation expansion budget so --depth can override
@@ -35,24 +70,77 @@ type describer struct {
 	maxDepth int
 }
 
-// emitBodySchema writes the resolved request-body schema and a synthesized
-// example to the command's stdout, honoring the global --compact flag. It makes
-// no network call and needs no auth. The optional --field flag drills into a
-// dotted sub-path of the body; --depth caps how deep nested objects expand.
-func emitBodySchema(cmd *cobra.Command, op *operationInfo) error {
-	field, _ := cmd.Flags().GetString("field")
-	depth, derr := cmd.Flags().GetInt("depth")
-	if derr != nil || depth < 0 {
-		depth = maxSchemaDepth
+// RegisterSchemaFlag adds the --schema discovery flag (plus its --field and
+// --depth refinements) to cmd and wraps arg validation and RunE so --schema
+// short-circuits before any positional-arg check, body assembly, auth, or
+// network call. That lets `omni <cmd> --schema` work with no args and no token.
+// emit is called to produce the document when --schema is set.
+//
+// Every command registers this, including bodyless GET/DELETE operations: agents
+// reach for --schema first, and "unknown flag: --schema" wastes a whole call.
+func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command) error) {
+	// A spec parameter that already claims this flag name wins; re-registering
+	// would panic at startup, and every generated command now comes through here.
+	if cmd.Flags().Lookup("schema") != nil {
+		return
+	}
+	cmd.Flags().Bool("schema", false, "print this command's args, flags, request body and response shape, then exit (no API call)")
+	// --field / --depth refine the --schema output for deeply nested shapes.
+	// Guarded so a query/path param of the same name can't panic the flag
+	// registration.
+	if cmd.Flags().Lookup("field") == nil {
+		cmd.Flags().String("field", "", "with --schema: drill into a dotted field path of the request body (e.g. queryPresentations.data.query); auto-descends arrays and maps; does not affect the response section")
+	}
+	if cmd.Flags().Lookup("depth") == nil {
+		cmd.Flags().Int("depth", maxSchemaDepth, "with --schema: max nesting depth to expand (request body and response); lower for a compact overview")
 	}
 
-	doc, err := describeBody(op, field, depth)
+	innerArgs := cmd.Args
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		if schemaRequested(c) || innerArgs == nil {
+			return nil
+		}
+		return innerArgs(c, args)
+	}
+
+	innerRun := cmd.RunE
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		if schemaRequested(c) {
+			// A schema error (e.g. a bad --field path) should print just the
+			// helpful message, not the full usage block.
+			c.SilenceUsage = true
+			return emit(c)
+		}
+		if innerRun == nil {
+			return nil
+		}
+		return innerRun(c, args)
+	}
+}
+
+// emitBodySchema writes a generated operation's schema document to the command's
+// stdout, honoring the global --compact flag. It makes no network call and needs
+// no auth. The optional --field flag drills into a dotted sub-path of the request
+// body; --depth caps how deep nested objects expand.
+func emitBodySchema(cmd *cobra.Command, op *operationInfo) error {
+	field, _ := cmd.Flags().GetString("field")
+
+	doc, err := describeBody(op, field, schemaDepth(cmd))
 	if err != nil {
 		return err
 	}
+	return EmitSchemaDoc(cmd, doc)
+}
 
+// EmitSchemaDoc writes a schema document as JSON to the command's stdout,
+// honoring the global --compact flag. Hand-written commands use it to emit the
+// same document shape as generated ones.
+func EmitSchemaDoc(cmd *cobra.Command, doc SchemaDoc) error {
 	compact, _ := cmd.Flags().GetBool("compact")
-	var data []byte
+	var (
+		data []byte
+		err  error
+	)
 	if compact {
 		data, err = json.Marshal(doc)
 	} else {
@@ -65,13 +153,58 @@ func emitBodySchema(cmd *cobra.Command, op *operationInfo) error {
 	return nil
 }
 
-// describeBody builds the schema document for an operation's request body. When
-// field is non-empty it drills to that dotted sub-path; maxDepth caps nested
-// expansion. Drilling restarts the depth budget from the resolved node, so a
-// deep field still expands fully.
-func describeBody(op *operationInfo, field string, maxDepth int) (bodySchemaDoc, error) {
-	doc := bodySchemaDoc{Method: op.Method, Path: op.Path, Field: field}
+// schemaDepth reads the --depth flag, falling back to the default cap when it is
+// unset or nonsensical.
+func schemaDepth(cmd *cobra.Command) int {
+	depth, err := cmd.Flags().GetInt("depth")
+	if err != nil || depth < 0 {
+		return maxSchemaDepth
+	}
+	return depth
+}
+
+// describeBody builds the schema document for an operation: its positional args,
+// query flags, request body and success response. When field is non-empty it
+// drills to that dotted sub-path of the request body; maxDepth caps nested
+// expansion. Drilling restarts the depth budget from the resolved node, so a deep
+// field still expands fully.
+func describeBody(op *operationInfo, field string, maxDepth int) (SchemaDoc, error) {
+	doc := SchemaDoc{Method: op.Method, Path: op.Path, Field: field}
+	d := &describer{maxDepth: maxDepth}
+
+	for _, p := range op.PathParams {
+		doc.Args = append(doc.Args, SchemaArg{
+			Name:        p.Name,
+			Placeholder: "<" + slugify(p.Name) + ">",
+			Type:        p.Type,
+			Description: p.Description,
+		})
+	}
+	for _, q := range op.QueryParams {
+		doc.QueryParams = append(doc.QueryParams, SchemaQueryParam{
+			Flag:        "--" + slugify(q.Name),
+			Name:        q.Name,
+			Type:        q.Type,
+			Enum:        q.Enum,
+			Required:    q.Required,
+			Description: q.Description,
+		})
+	}
+	doc.Response = describeResponse(d, op.Response)
+
 	if op.BodySchema == nil {
+		// Body stays nil (rendered as null) so a bodyless operation is explicit
+		// rather than ambiguous. An operation that declares a body but no schema
+		// says so instead, so null always means "sends nothing".
+		if op.HasBody {
+			doc.Body = map[string]interface{}{
+				"note": "this operation takes a request body, but the spec declares no schema for it",
+			}
+		}
+		// Either way there is nothing for --field to drill into.
+		if field != "" {
+			return doc, fmt.Errorf("--field is only meaningful for operations with a request body schema; %s %s has none", op.Method, op.Path)
+		}
 		return doc, nil
 	}
 
@@ -84,7 +217,6 @@ func describeBody(op *operationInfo, field string, maxDepth int) (bodySchemaDoc,
 		root = resolved
 	}
 
-	d := &describer{maxDepth: maxDepth}
 	body := d.simplify(root, 0, nil)
 	doc.Body = body
 	if m, ok := body.(map[string]interface{}); ok {
@@ -94,6 +226,23 @@ func describeBody(op *operationInfo, field string, maxDepth int) (bodySchemaDoc,
 	}
 	doc.Example = d.synth(root, "", 0, nil)
 	return doc, nil
+}
+
+// describeResponse renders the captured success response. --field deliberately
+// does not apply here: it drills the request body only.
+func describeResponse(d *describer, resp *responseInfo) *SchemaResponse {
+	if resp == nil {
+		return nil
+	}
+	out := &SchemaResponse{
+		Status:      resp.Status,
+		ContentType: resp.ContentType,
+		Description: resp.Description,
+	}
+	if resp.Schema != nil {
+		out.Schema = d.simplify(resp.Schema, 0, nil)
+	}
+	return out
 }
 
 // resolveField walks a dotted path (e.g. "queryPresentations.data.query") from

@@ -405,6 +405,65 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 	}
 }
 
+// Every generated command must accept --schema (and its --field/--depth
+// refinements), including bodyless GET/DELETE ones. Agents reach for --schema
+// first, so a command missing the flag costs a wasted call.
+func TestGenerateCommands_SchemaFlagOnEveryCommand(t *testing.T) {
+	specData := loadSpec(t)
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands(specData, noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	checked := 0
+	for _, tagCmd := range cmds {
+		for _, sub := range tagCmd.Commands() {
+			for _, flag := range []string{"schema", "field", "depth"} {
+				if sub.Flags().Lookup(flag) == nil {
+					t.Errorf("%s %s: missing --%s", tagCmd.Name(), sub.Name(), flag)
+				}
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no subcommands were checked")
+	}
+	t.Logf("checked --schema registration on %d subcommands", checked)
+}
+
+// --schema must short-circuit before positional-arg validation, so a command
+// with required path params still answers without them (and without a token).
+func TestBuildCommand_SchemaSkipsArgValidation(t *testing.T) {
+	var called bool
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testGetWidget",
+		Method:      "GET",
+		Path:        "/api/v1/widgets/{widgetId}",
+		PathParams:  []paramInfo{{Name: "widgetId", In: "path", Type: "string"}},
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--schema"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --schema with no args: %v", err)
+	}
+	if called {
+		t.Error("executor was called on a --schema run")
+	}
+	if !strings.Contains(buf.String(), `"body": null`) {
+		t.Errorf("schema output missing an explicit null body: %s", buf.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Spec coverage reporter
 //
