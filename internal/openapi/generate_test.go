@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -418,6 +419,96 @@ func TestBuildCommand_RequiredQueryParamPresent(t *testing.T) {
 	}
 	if !strings.Contains(captured.Path, "connectionId=c-1") {
 		t.Errorf("path %q missing connectionId=c-1", captured.Path)
+	}
+}
+
+// MarkFlagRequired only proves the flag was supplied, so an explicit empty
+// value (--connectionid=) would otherwise sail past validation and then be
+// dropped from the query string — the server 400 this is meant to prevent.
+func TestBuildCommand_RequiredQueryParamEmpty(t *testing.T) {
+	cases := [][]string{
+		{"--connectionid="},                      // explicit empty declared flag
+		{"--connectionid", ""},                   // same, separate-arg form
+		{"--connectionid=", "--page-size", "10"}, // empty alongside other params
+	}
+
+	for _, args := range cases {
+		called := false
+		exec := func(req APIRequest) error { called = true; return nil }
+
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs(args)
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("args %v: expected an error for an empty required param, got nil", args)
+		}
+		if !strings.Contains(err.Error(), "connection-id") {
+			t.Errorf("args %v: error = %q, want it to name the flag", args, err.Error())
+		}
+		if called {
+			t.Errorf("args %v: executor should not run for an empty required param", args)
+		}
+	}
+}
+
+// The emptiness check runs on the assembled query string, so it also covers
+// values that arrived through the --query escape hatch (under either the spec
+// spelling or the flag spelling).
+func TestCheckRequiredQueryParams(t *testing.T) {
+	op := listOp()
+	cases := []struct {
+		name    string
+		query   url.Values
+		wantErr bool
+	}{
+		{"absent", url.Values{}, true},
+		{"empty under spec name", url.Values{"connectionId": {""}}, true},
+		{"empty under flag name", url.Values{"connectionid": {""}}, true},
+		{"set under spec name", url.Values{"connectionId": {"c-1"}}, false},
+		{"set under flag name", url.Values{"connectionid": {"c-1"}}, false},
+		{"one of several non-empty", url.Values{"connectionId": {"", "c-1"}}, false},
+		{"optional param empty is fine", url.Values{"connectionId": {"c-1"}, "page_size": {""}}, false},
+	}
+
+	for _, c := range cases {
+		err := checkRequiredQueryParams(resolveQueryFlags(op), c.query)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("%s: expected an error, got nil", c.name)
+			} else if !strings.Contains(err.Error(), "connection-id") {
+				t.Errorf("%s: error = %q, want it to name the flag", c.name, err.Error())
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+		}
+	}
+}
+
+// A declared required param has its own flag, so --query is not a substitute
+// for it: cobra still insists the flag itself be supplied.
+func TestBuildCommand_ExtraQueryDoesNotSubstituteForRequiredFlag(t *testing.T) {
+	called := false
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--query", "connectionId=c-1"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected the required flag to still be enforced, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection-id") {
+		t.Errorf("error = %q, want it to name the missing flag", err.Error())
+	}
+	if called {
+		t.Error("executor should not run when the required flag is missing")
 	}
 }
 
@@ -1394,12 +1485,13 @@ func TestRealSpec_NoFlagCollisions(t *testing.T) {
 // specOperation holds data we parse from the spec independently of the
 // command generator, so we can cross-reference what the generator produced.
 type specOperation struct {
-	Tag         string
-	OperationID string
-	Method      string
-	Path        string
-	PathParams  []string
-	HasBody     bool
+	Tag           string
+	OperationID   string
+	Method        string
+	Path          string
+	PathParams    []string
+	RequiredQuery []string // flag names of required query params
+	HasBody       bool
 }
 
 // parseSpecOperations reads the OpenAPI spec directly (bypassing our generator)
@@ -1443,20 +1535,26 @@ func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 				tag = op.Tags[0]
 			}
 
-			var pathParams []string
+			var pathParams, requiredQuery []string
 			for _, p := range op.Parameters {
-				if p.In == "path" {
+				switch p.In {
+				case "path":
 					pathParams = append(pathParams, p.Name)
+				case "query":
+					if boolVal(p.Required) {
+						requiredQuery = append(requiredQuery, slugify(p.Name))
+					}
 				}
 			}
 
 			ops = append(ops, specOperation{
-				Tag:         tag,
-				OperationID: op.OperationId,
-				Method:      method,
-				Path:        pathStr,
-				PathParams:  pathParams,
-				HasBody:     op.RequestBody != nil,
+				Tag:           tag,
+				OperationID:   op.OperationId,
+				Method:        method,
+				Path:          pathStr,
+				PathParams:    pathParams,
+				RequiredQuery: requiredQuery,
+				HasBody:       op.RequestBody != nil,
 			})
 		}
 	}
@@ -1514,6 +1612,15 @@ func TestSpecCoverage(t *testing.T) {
 			args := make([]string, len(sop.PathParams))
 			for i := range args {
 				args[i] = "test-id"
+			}
+
+			// Required query params must carry a non-empty value, same as they
+			// would on a real invocation.
+			for _, flagName := range sop.RequiredQuery {
+				if err := sub.Flags().Set(flagName, "test-value"); err != nil {
+					failures = append(failures, fmt.Sprintf("%s: set required query flag %s: %v", key, flagName, err))
+					continue
+				}
 			}
 
 			// Operations with a request body (POST/PUT/PATCH) need --body set,

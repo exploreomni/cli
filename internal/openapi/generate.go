@@ -470,12 +470,21 @@ func applyExtraQueryParams(cmd *cobra.Command, queryFlags []queryFlag, query url
 // avoid. A value under either the spec spelling or the flag spelling counts,
 // mirroring how --query conflicts are detected.
 func checkRequiredQueryParams(queryFlags []queryFlag, query url.Values) error {
+	// Index the assembled query by the same normalized key flags match on, so a
+	// value that arrived through --query counts no matter which spelling of the
+	// param the user typed.
+	byKey := map[string][]string{}
+	for k, vals := range query {
+		key := flagLookupKey(k)
+		byKey[key] = append(byKey[key], vals...)
+	}
+
 	var missing []string
 	for _, qf := range queryFlags {
 		if !qf.Param.Required {
 			continue
 		}
-		if hasNonEmptyValue(query[qf.Param.Name]) || hasNonEmptyValue(query[qf.Name]) {
+		if hasNonEmptyValue(byKey[flagLookupKey(qf.Param.Name)]) || hasNonEmptyValue(byKey[flagLookupKey(qf.Name)]) {
 			continue
 		}
 		missing = append(missing, `"`+qf.Name+`"`)
