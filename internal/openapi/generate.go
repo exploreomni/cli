@@ -224,12 +224,15 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 					return fmt.Errorf("cannot use both --body and --json-body; use one or the other")
 				}
 
+				// An explicitly empty --body is a mistake worth reporting, so
+				// track whether the flag was typed at all rather than inferring
+				// it from the value.
 				effectiveBody, flagName := bodyFlag, "body"
-				if jsonBodyFlag != "" {
+				if jsonBodyFlag != "" || (cmd.Flags().Changed("json-body") && !cmd.Flags().Changed("body")) {
 					effectiveBody, flagName = jsonBodyFlag, "json-body"
 				}
 
-				if effectiveBody != "" {
+				if effectiveBody != "" || cmd.Flags().Changed(flagName) {
 					var err error
 					body, err = resolveBody(effectiveBody, flagName, !op.BodyNonJSON)
 					if err != nil {

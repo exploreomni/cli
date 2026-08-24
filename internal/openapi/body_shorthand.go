@@ -326,6 +326,13 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 			return originalRunE(cmd, args)
 		}
 
+		// An explicitly empty --body/--json-body is a typo, not an invitation
+		// to assemble one from shorthand input. Hand it back to the generated
+		// RunE so it reports the same error every other command does.
+		if cmd.Flags().Changed("body") || cmd.Flags().Changed("json-body") {
+			return originalRunE(cmd, args[:numPathParams])
+		}
+
 		// Assemble body from shorthand args and promoted flags
 		body, err := assembleBody(sh, args, numPathParams, cmd, op.BodySchema)
 		if err != nil {

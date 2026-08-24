@@ -167,6 +167,27 @@ func TestResolveBody_ValidJSONPassthrough(t *testing.T) {
 	}
 }
 
+// A quoted path with spaces reaches us looking ordinary — it still gets the
+// hint, and the suggested commands come back re-quoted so they can be pasted.
+func TestResolveBody_PathWithSpacesHint(t *testing.T) {
+	path := writeTempBody(t, "request body.json", `{"a":1}`)
+
+	_, err := resolveBody(path, "body", true)
+	if err == nil {
+		t.Fatalf("resolveBody(%q): expected an error, got nil", path)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "looks like a file path") {
+		t.Errorf("error = %q, want the file-path hint", msg)
+	}
+	if !strings.Contains(msg, `--body "@`+path+`"`) {
+		t.Errorf("error = %q, want a quoted --body @%s suggestion", msg, path)
+	}
+	if !strings.Contains(msg, `--body - < "`+path+`"`) {
+		t.Errorf("error = %q, want a quoted stdin suggestion", msg)
+	}
+}
+
 // Non-JSON media types (the multipart upload endpoints) skip validation.
 func TestResolveBody_SkipsValidationForNonJSON(t *testing.T) {
 	raw := "--boundary\r\nnot json\r\n"
@@ -176,6 +197,31 @@ func TestResolveBody_SkipsValidationForNonJSON(t *testing.T) {
 	}
 	if string(got) != raw {
 		t.Errorf("body = %q, want it unchanged", string(got))
+	}
+}
+
+// Skipping JSON validation must not skip the transport diagnostics: a
+// multipart operation handed a bare path still gets the @file hint.
+func TestResolveBody_NonJSONStillGetsPathHint(t *testing.T) {
+	_, err := resolveBody("/tmp/request.multipart", "body", false)
+	if err == nil {
+		t.Fatal("expected the file-path hint for a non-JSON body, got nil")
+	}
+	if !strings.Contains(err.Error(), "--body @/tmp/request.multipart") {
+		t.Errorf("error = %q, want it to suggest --body @/tmp/request.multipart", err.Error())
+	}
+
+	// An existing file named as a bare path counts too, whatever its contents.
+	path := writeTempBody(t, "upload.bin", "\x00\x01binary")
+	if _, err := resolveBody(path, "body", false); err == nil {
+		t.Fatalf("resolveBody(%q): expected the file-path hint, got nil", path)
+	}
+}
+
+// The empty-body error is a transport check, so it applies to every media type.
+func TestResolveBody_EmptyNonJSON(t *testing.T) {
+	if _, err := resolveBody("", "body", false); err == nil {
+		t.Fatal("expected an error for an explicitly empty --body, got nil")
 	}
 }
 
@@ -312,6 +358,110 @@ func TestBuildCommand_InvalidBodyMakesNoRequest(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "looks like a file path") {
 		t.Errorf("error = %q, want the file-path hint", err.Error())
+	}
+}
+
+// A multipart operation keeps the transport diagnostics but not the JSON
+// validity check.
+func TestBuildCommand_NonJSONBodyOperation(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "uploads",
+		OperationID: "uploadsCreate",
+		Method:      "POST",
+		Path:        "/api/v1/uploads",
+		HasBody:     true,
+		BodyNonJSON: true,
+	}
+
+	// Non-JSON content goes through untouched.
+	var captured APIRequest
+	cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	cmd.SetArgs([]string{"--body", "not json at all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if string(captured.Body) != "not json at all" {
+		t.Errorf("body = %q, want it unchanged", string(captured.Body))
+	}
+
+	// A bare path still gets caught before the request.
+	called := false
+	cmd2 := buildCommand(op, func(req APIRequest) error { called = true; return nil })
+	cmd2.SilenceUsage, cmd2.SilenceErrors = true, true
+	cmd2.SetArgs([]string{"--body", "/tmp/upload.csv"})
+	err := cmd2.Execute()
+	if err == nil {
+		t.Fatal("expected the file-path hint, got nil")
+	}
+	if called {
+		t.Error("executor ran with a path as the body")
+	}
+	if !strings.Contains(err.Error(), "--body @/tmp/upload.csv") {
+		t.Errorf("error = %q, want it to suggest --body @/tmp/upload.csv", err.Error())
+	}
+}
+
+// An explicitly empty --body is a typo (usually a shell variable that didn't
+// expand), not a request to send nothing. Omitting the flag still sends no body.
+func TestBuildCommand_ExplicitlyEmptyBody(t *testing.T) {
+	for _, flag := range []string{"--body", "--json-body"} {
+		called := false
+		cmd := bodyCmd(t, func(req APIRequest) error { called = true; return nil })
+		cmd.SetArgs([]string{flag, ""})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("%s '': expected an error, got nil", flag)
+		}
+		if called {
+			t.Errorf("%s '': executor ran despite an empty body", flag)
+		}
+		if !strings.Contains(err.Error(), flag+" is empty") {
+			t.Errorf("%s '' error = %q, want it to report the empty flag", flag, err.Error())
+		}
+	}
+
+	// Omitting the flag entirely is still a bodiless request.
+	var captured APIRequest
+	sent := false
+	cmd := bodyCmd(t, func(req APIRequest) error { captured = req; sent = true; return nil })
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute without --body: %v", err)
+	}
+	if !sent {
+		t.Fatal("executor did not run without --body")
+	}
+	if captured.Body != nil {
+		t.Errorf("body = %q, want nil when --body is omitted", string(captured.Body))
+	}
+}
+
+// The same holds on a shorthand command: an empty --body isn't shorthand input.
+func TestBodyShorthand_ExplicitlyEmptyBody(t *testing.T) {
+	called := false
+	op := &operationInfo{
+		Tag:         "ai",
+		OperationID: "aiSearchOmniDocs",
+		Method:      "POST",
+		Path:        "/api/v1/ai/search-omni-docs",
+		HasBody:     true,
+	}
+	cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--body", "", "some question"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error for an empty --body, got nil")
+	}
+	if called {
+		t.Error("executor ran despite an empty body")
+	}
+	if !strings.Contains(err.Error(), "--body is empty") {
+		t.Errorf("error = %q, want it to report the empty flag", err.Error())
 	}
 }
 

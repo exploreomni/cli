@@ -79,14 +79,13 @@ func readBodyFile(path string) ([]byte, error) {
 // checkBody validates data and returns it unchanged. source describes where
 // the bytes came from ("stdin", "file X") or is empty when they came straight
 // from the flag value — only in that case can the raw value itself be a
-// mistyped file path. Operations whose request body isn't JSON (e.g. the
-// multipart upload endpoints) pass validateJSON=false and get the bytes back
-// untouched.
+// mistyped file path.
+//
+// Transport checks (empty input, a path-shaped flag value) run for every
+// operation; only the JSON validity check is conditional, so the multipart
+// upload endpoints still get the "--body @path" hint they'd otherwise need
+// most.
 func checkBody(data []byte, raw, flagName, source string, validateJSON bool) ([]byte, error) {
-	if !validateJSON {
-		return data, nil
-	}
-
 	if len(strings.TrimSpace(string(data))) == 0 {
 		if source != "" {
 			return nil, fmt.Errorf("no request body read from %s", source)
@@ -94,13 +93,19 @@ func checkBody(data []byte, raw, flagName, source string, validateJSON bool) ([]
 		return nil, fmt.Errorf("--%s is empty; omit the flag to send no body", flagName)
 	}
 
-	if json.Valid(data) {
+	// Valid JSON is never a path, so this test comes first: it stops a file
+	// that happens to be named "{}" from hijacking a legitimate body.
+	if validateJSON && json.Valid(data) {
 		return data, nil
 	}
 
 	if source == "" && looksLikePath(raw) {
-		return nil, fmt.Errorf("--%s looks like a file path, not JSON: %s\nread the file instead: --%s @%s   (or --%s - < %s)",
-			flagName, raw, flagName, raw, flagName, raw)
+		return nil, fmt.Errorf("--%s looks like a file path, not a request body: %s\nread the file instead: --%s %s   (or --%s - < %s)",
+			flagName, raw, flagName, shellQuote("@"+raw), flagName, shellQuote(raw))
+	}
+
+	if !validateJSON {
+		return data, nil
 	}
 
 	where := "--" + flagName
@@ -110,17 +115,31 @@ func checkBody(data []byte, raw, flagName, source string, validateJSON bool) ([]
 	return nil, fmt.Errorf("request body from %s is not valid JSON: %s", where, jsonProblem(data))
 }
 
+// shellQuote wraps a value in double quotes when it contains whitespace, so the
+// suggested command in an error message can be pasted as-is.
+func shellQuote(s string) string {
+	if !strings.ContainsAny(s, " \t") {
+		return s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
 // looksLikePath reports whether a flag value is more plausibly a file path than
-// a JSON document — an absolute/relative path prefix, or the name of a file
-// that actually exists.
+// a request body — an absolute/relative path prefix, or the name of a file that
+// actually exists. Paths with spaces count: the shell strips the quotes, so the
+// value arrives here looking ordinary.
 func looksLikePath(raw string) bool {
-	if raw == "" || strings.ContainsAny(raw, " \t\r\n") {
+	if raw == "" {
 		return false
 	}
 	for _, prefix := range []string{"/", "./", "../", "~/"} {
 		if strings.HasPrefix(raw, prefix) {
 			return true
 		}
+	}
+	// A multi-line value is a pasted document, not a path worth stat-ing.
+	if strings.ContainsAny(raw, "\r\n") {
+		return false
 	}
 	if info, err := os.Stat(expandHome(raw)); err == nil && !info.IsDir() {
 		return true
