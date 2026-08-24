@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -80,7 +81,12 @@ func main() {
 	addBranchCommands(root, executeAPICall)
 	addUserCommands(root, executeAPICall)
 
-	if err := root.Execute(); err != nil {
+	// ExecuteC, not Execute: cobra returns a nil error whenever it answers the
+	// help flag, including for `omni models list-branches --help`, where the
+	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
+	// command that ran whether that's what happened.
+	cmd, err := root.ExecuteC()
+	if err != nil || openapi.UnknownSubcommand(cmd) {
 		os.Exit(1)
 	}
 }
@@ -109,10 +115,12 @@ func executeAPICall(req openapi.APIRequest) error {
 	defer resp.Body.Close()
 
 	err = outputResponse(resp, format, compact)
-	if err != nil && format == config.FormatHuman {
-		// Human mode already printed "Error: <detail> (HTTP N)" to stderr;
-		// letting cobra print its own line too just says the same thing twice.
-		// JSON mode keeps it — there the status code appears nowhere else.
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		// outputResponse already wrote a complete error message to stderr —
+		// a JSON envelope carrying the status, or the human-mode one-liner.
+		// Letting cobra append its own line would say it twice, and would
+		// leave two documents on stderr for JSON consumers to trip over.
 		req.Cmd.SilenceErrors = true
 	}
 	return err

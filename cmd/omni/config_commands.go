@@ -26,12 +26,8 @@ func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
 }
 
 func addConfigCommands(root *cobra.Command) {
-	configCmd := &cobra.Command{
-		Use:   "config",
-		Short: "Manage CLI configuration profiles",
-		// Same unknown-subcommand handling as the generated groups.
-		RunE: openapi.GroupRunE,
-	}
+	// Same unknown-subcommand handling as the generated groups.
+	configCmd := openapi.NewGroupCommand("config", "Manage CLI configuration profiles")
 
 	configCmd.AddCommand(configInitCmd())
 	configCmd.AddCommand(configShowCmd())

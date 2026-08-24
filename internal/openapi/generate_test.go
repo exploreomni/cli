@@ -471,11 +471,7 @@ func TestBuildCommand_FlagErrorKeepsUsage(t *testing.T) {
 func newTestGroup(out, errOut *bytes.Buffer) (*cobra.Command, *cobra.Command) {
 	root := &cobra.Command{Use: "omni"}
 	root.SilenceErrors = true
-	group := &cobra.Command{
-		Use:   "models",
-		Short: "models commands",
-		RunE:  GroupRunE,
-	}
+	group := NewGroupCommand("models", "models commands")
 	group.AddCommand(&cobra.Command{Use: "list", Short: "list models", RunE: func(*cobra.Command, []string) error { return nil }})
 	group.AddCommand(&cobra.Command{Use: "get <id>", Short: "get a model", RunE: func(*cobra.Command, []string) error { return nil }})
 	root.AddCommand(group)
@@ -571,6 +567,53 @@ func TestGroupRunE_HelpFlagStaysOnStdout(t *testing.T) {
 	}
 }
 
+// A typo plus --help is still a typo. Cobra answers the help flag before RunE,
+// so this is the one path that could still print help to stdout and exit 0.
+func TestGroupHelp_UnknownSubcommandWithHelpFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list-branches", "--help"})
+
+	// Cobra always returns nil once it has handled the help flag, which is why
+	// the caller has to consult UnknownSubcommand for the exit code.
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error from Execute: %v", err)
+	}
+	if !UnknownSubcommand(group) {
+		t.Error("UnknownSubcommand should report the typo so the CLI exits non-zero")
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), `unknown subcommand "list-branches"`) {
+		t.Errorf("stderr = %q, want an unknown-subcommand error", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Did you mean this?") {
+		t.Errorf("stderr = %q, want a suggestion", errOut.String())
+	}
+}
+
+// The group's help func is inherited by its subcommands, so `--help` on a real
+// subcommand must still render normal help on stdout (and not recurse).
+func TestGroupHelp_SubcommandHelpUnaffected(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--help should not error: %v", err)
+	}
+	if UnknownSubcommand(group) {
+		t.Error("a valid subcommand should not be reported as unknown")
+	}
+	if !strings.Contains(out.String(), "list models") || !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("stdout = %q, want the subcommand's help", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr should be empty, got %q", errOut.String())
+	}
+}
+
 // Every generated group gets the unknown-subcommand handling, not just the
 // ones someone remembered to wire up.
 func TestGenerateCommands_GroupsAreRunnable(t *testing.T) {
@@ -582,6 +625,9 @@ func TestGenerateCommands_GroupsAreRunnable(t *testing.T) {
 	for _, tagCmd := range cmds {
 		if tagCmd.RunE == nil {
 			t.Errorf("group %q has no RunE; an unknown subcommand would exit 0", tagCmd.Use)
+		}
+		if !isGroup(tagCmd) {
+			t.Errorf("group %q is missing the group annotation; --help after a typo would exit 0", tagCmd.Use)
 		}
 	}
 }

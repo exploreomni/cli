@@ -140,6 +140,18 @@ All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for n
 
 Failures write nothing to stdout — the API's error body, the error message, and any subcommand suggestions go to stderr, and the exit code is non-zero. An empty stdout therefore always means "no data", which keeps `omni ... | jq` from choking on error JSON.
 
+A failed API call leaves exactly one JSON document on stderr, so `omni ... 2>err.json` stays parseable:
+
+```json
+{
+  "error": "bad model id",
+  "status": 400,
+  "body": { "detail": "bad model id", "code": "INVALID" }
+}
+```
+
+`body` holds the API's own payload and is omitted when the response wasn't JSON. A **successful** response that isn't JSON — `query run` streams `text/ndjson`, and returns CSV or XLSX with a result type — is passed through to stdout unchanged.
+
 ## Environment variables
 
 | Variable | Description |

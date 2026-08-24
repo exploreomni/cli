@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -93,6 +96,142 @@ func TestOutputResponseTo_HumanErrorGoesToStderr(t *testing.T) {
 	if !strings.Contains(stderr.String(), "not found") || !strings.Contains(stderr.String(), "404") {
 		t.Errorf("stderr = %q, want detail and status", stderr.String())
 	}
+}
+
+// The whole stderr capture must be one valid JSON document in JSON mode —
+// `omni ... 2>err.json` has to produce a parseable file, which it doesn't if
+// anything (like cobra's own "Error: ..." line) is appended to the envelope.
+func TestOutputResponseTo_StderrIsSingleJSONDocument(t *testing.T) {
+	for _, compact := range []bool{true, false} {
+		var stdout, stderr bytes.Buffer
+		resp := &http.Response{
+			StatusCode: 400,
+			Body:       io.NopCloser(strings.NewReader(`{"detail":"bad model id","code":"INVALID"}`)),
+		}
+
+		err := outputResponseTo(&stdout, &stderr, resp, "json", compact)
+
+		// The caller silences cobra's duplicate line off the back of this type.
+		var apiErr *apiError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("compact=%v: error = %v, want *apiError", compact, err)
+		}
+		if apiErr.status != 400 {
+			t.Errorf("compact=%v: status = %d, want 400", compact, apiErr.status)
+		}
+
+		var envelope struct {
+			Error  string          `json:"error"`
+			Status int             `json:"status"`
+			Body   json.RawMessage `json:"body"`
+		}
+		if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+			t.Fatalf("compact=%v: stderr is not a single JSON document (%v): %q", compact, err, stderr.String())
+		}
+		if envelope.Error != "bad model id" {
+			t.Errorf("compact=%v: error = %q, want the API's detail", compact, envelope.Error)
+		}
+		if envelope.Status != 400 {
+			t.Errorf("compact=%v: status = %d, want 400", compact, envelope.Status)
+		}
+		if !strings.Contains(string(envelope.Body), `"INVALID"`) {
+			t.Errorf("compact=%v: body = %q, want the API's payload verbatim", compact, string(envelope.Body))
+		}
+	}
+}
+
+// A non-JSON error body (an HTML error page from a proxy, say) must still
+// leave valid JSON on stderr.
+func TestOutputResponseTo_NonJSONErrorBodyStillJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	resp := &http.Response{
+		StatusCode: 502,
+		Body:       io.NopCloser(strings.NewReader("<html><body>Bad Gateway</body></html>")),
+	}
+
+	if err := outputResponseTo(&stdout, &stderr, resp, "json", true); err == nil {
+		t.Fatal("expected error for 502 status")
+	}
+	var envelope struct {
+		Error  string          `json:"error"`
+		Status int             `json:"status"`
+		Body   json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not valid JSON (%v): %q", err, stderr.String())
+	}
+	if !strings.Contains(envelope.Error, "Bad Gateway") {
+		t.Errorf("error = %q, want the raw body as the detail", envelope.Error)
+	}
+	if envelope.Body != nil {
+		t.Errorf("body = %q, want it omitted when the payload isn't JSON", string(envelope.Body))
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", stdout.String())
+	}
+}
+
+// Not every 2xx body is JSON: `query run` streams text/ndjson by default and
+// returns CSV/XLSX with a result type. Those pass through to stdout unchanged
+// and count as success — an un-parseable payload is data, not an error.
+func TestOutputResponseTo_NonJSONSuccessPassesThrough(t *testing.T) {
+	bodies := []string{
+		"{\"kind\":\"jobs_submitted\"}\n{\"kind\":\"job\"}\n",
+		"id,name\n1,widget\n",
+	}
+	for _, body := range bodies {
+		for _, compact := range []bool{true, false} {
+			var stdout, stderr bytes.Buffer
+			resp := &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}
+
+			if err := outputResponseTo(&stdout, &stderr, resp, "json", compact); err != nil {
+				t.Fatalf("compact=%v: non-JSON 2xx body should succeed, got %v", compact, err)
+			}
+			if !strings.Contains(stdout.String(), strings.TrimRight(body, "\n")) {
+				t.Errorf("compact=%v: stdout = %q, want the body passed through", compact, stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("compact=%v: stderr should be empty, got %q", compact, stderr.String())
+			}
+		}
+	}
+}
+
+// A body that fails mid-read (a truncated response) must not leave a partial
+// payload on stdout ahead of the non-zero exit.
+func TestOutputResponseTo_ReadFailureWritesNothing(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(&truncatedReader{data: []byte(`{"records":[`)}),
+	}
+
+	err := outputResponseTo(&stdout, &stderr, resp, "json", false)
+	if err == nil {
+		t.Fatal("expected an error when the body can't be read")
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", stdout.String())
+	}
+}
+
+// truncatedReader yields some bytes and then fails, like a connection dropped
+// mid-response.
+type truncatedReader struct {
+	data []byte
+	done bool
+}
+
+func (r *truncatedReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, fmt.Errorf("unexpected EOF")
+	}
+	r.done = true
+	n := copy(p, r.data)
+	return n, nil
 }
 
 // The mirror image: successful payloads stay on stdout and leave stderr clean.

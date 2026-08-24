@@ -12,24 +12,46 @@ import (
 	"github.com/exploreomni/omni-cli/internal/output"
 )
 
+// apiError reports that the API itself returned a failure status. The response
+// writer has already emitted a complete error message, so the caller silences
+// cobra's own one-line report rather than printing the failure twice.
+type apiError struct {
+	status int
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("API returned HTTP %d", e.status)
+}
+
 func outputResponse(resp *http.Response, format string, compact bool) error {
 	return outputResponseTo(os.Stdout, os.Stderr, resp, format, compact)
 }
 
-// outputResponseTo writes a response to explicit streams. Successful payloads
-// go to stdout; anything about a failure (the API's error body included) goes
-// to stderr, so a pipe consumer either gets well-formed data or nothing at all.
+// outputResponseTo writes a response to explicit streams. Two contracts hold:
+//
+//   - Failures write nothing to stdout. The API's error body goes to stderr,
+//     as exactly one JSON document in JSON mode, so `2>err.json` stays valid.
+//   - A 2xx body that isn't JSON is passed through to stdout unchanged and
+//     counts as success. Several endpoints legitimately return non-JSON —
+//     `query run` streams text/ndjson and returns CSV/XLSX with --result-type
+//     — so an un-parseable payload is data, not an error.
+//
+// The body is read in full before anything is written, so a truncated read
+// can't leave half a payload on stdout ahead of a non-zero exit.
 func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format string, compact bool) error {
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
 	if resp.StatusCode >= 400 {
+		detail := extractErrorDetail(data, resp.StatusCode)
 		if format == config.FormatHuman {
-			body, _ := io.ReadAll(resp.Body)
-			output.HumanErrorTo(stderr, resp.StatusCode, extractErrorDetail(body, resp.StatusCode))
+			output.HumanErrorTo(stderr, resp.StatusCode, detail)
 		} else {
-			if err := output.JSONTo(stderr, resp.Body, compact); err != nil {
-				output.ErrorTo(stderr, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
-			}
+			output.APIErrorTo(stderr, resp.StatusCode, detail, jsonBody(data), compact)
 		}
-		return fmt.Errorf("API returned HTTP %d", resp.StatusCode)
+		return &apiError{status: resp.StatusCode}
 	}
 
 	// 204 No Content
@@ -43,9 +65,19 @@ func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format stri
 	}
 
 	if format == config.FormatHuman {
-		return output.HumanTo(stdout, resp.Body)
+		return output.HumanTo(stdout, bytes.NewReader(data))
 	}
-	return output.JSONTo(stdout, resp.Body, compact)
+	return output.JSONTo(stdout, bytes.NewReader(data), compact)
+}
+
+// jsonBody returns the body as raw JSON for embedding in an error envelope,
+// or nil when it isn't JSON (an HTML error page from a proxy, say).
+func jsonBody(body []byte) json.RawMessage {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || !json.Valid(trimmed) {
+		return nil
+	}
+	return json.RawMessage(trimmed)
 }
 
 // extractErrorDetail pulls a readable message out of a JSON error body.

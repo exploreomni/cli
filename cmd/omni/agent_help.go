@@ -18,9 +18,16 @@ Use --compact for non-indented output (good for piping to jq).
 On failure nothing is written to stdout — the API's error body, the error
 message, and any suggestions all go to stderr, and the exit code is non-zero.
 So an empty stdout always means "no data", never "parse this".
+
+A failed API call leaves exactly one JSON document on stderr:
+  {"error": "<message>", "status": 400, "body": {<the API's payload>}}
+"body" is omitted when the response wasn't JSON. A successful response that
+isn't JSON (query run streams text/ndjson) passes through to stdout unchanged.
+
 A group with no subcommand ("omni models") prints its help to stderr and exits
 1; an unrecognized subcommand ("omni models list-branches") is an error with
-suggestions. Use "omni <group> --help" to see the real subcommand names.
+suggestions, with or without --help. Use "omni <group> --help" to see the real
+subcommand names.
 
 ## Auth
 Set OMNI_API_TOKEN env var, or run: omni config init
