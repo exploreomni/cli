@@ -122,6 +122,8 @@ After installing, restart your shell and try: `omni <TAB>`, `omni ai <TAB>`, `om
 
 The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup it parses the spec and generates cobra subcommands for every operation. Each API tag becomes a command group, path params become positional args, query params become flags, and request bodies are passed via `--body` or stdin.
 
+Flag names are always kebab-case, whatever the spec calls the parameter (`branchId` and `branch_id` both become `--branch-id`). Spelling is forgiving: case, dashes and underscores are ignored when matching, so `--branch-id`, `--branchId`, `--branch_id` and `--branchid` all set the same flag. `--help` shows the canonical form.
+
 Adding a new API endpoint requires no code changes — update `api/openapi.json` (or run `make sync-spec`) and rebuild.
 
 ## Auth

@@ -108,7 +108,10 @@ name a leaf without knowing the container shape:
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
 - Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
-- Query parameters are flags: omni models list --pagesize 10
+- Query parameters are flags: omni models list --page-size 10
+- Flag names are kebab-case, and spelling is forgiving: case, dashes and
+  underscores are ignored, so --branch-id, --branchId, --branch_id and
+  --branchid all mean the same flag. --help always shows the canonical form.
 - Run "omni <group> --help" to see all commands in a group.
 - Run "omni <group> <command> --help" to see flags for a specific command.
 `

@@ -54,6 +54,12 @@ func main() {
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
 	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
 
+	// Flag names are matched ignoring case and dash/underscore placement, so
+	// --base-url, --baseurl and --base_url are the same flag on every command.
+	// Set before the subcommands are added: cobra propagates the function to
+	// children as they're attached, which covers the hand-written commands and
+	// the root's persistent flags as well as the generated ones.
+	root.SetGlobalNormalizationFunc(openapi.NormalizeFlagName)
 
 	// Hand-written commands (not from spec)
 	addConfigCommands(root)

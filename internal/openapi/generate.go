@@ -10,11 +10,13 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/pb33f/libopenapi"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // APIRequest is passed to the executor callback when a generated command runs.
@@ -63,6 +65,9 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 		}
 
 		for _, op := range ops {
+			if err := validateFlagNames(op); err != nil {
+				return nil, fmt.Errorf("generating command %q: %w", slugify(tag)+" "+commandName(op), err)
+			}
 			tagCmd.AddCommand(buildCommand(op, exec))
 		}
 
@@ -170,7 +175,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	name := commandName(op)
 	use := name
 	for _, p := range op.PathParams {
-		use += " <" + slugify(p.Name) + ">"
+		use += " <" + canonicalFlagName(p.Name) + ">"
 	}
 
 	short := op.Summary
@@ -196,11 +201,16 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				path = strings.Replace(path, "{"+p.Name+"}", url.PathEscape(args[i]), 1)
 			}
 
-			// Build query string from flags
+			// Build query string from flags.
+			//
+			// The flag name is the canonical kebab-case rendering of the param
+			// (branchId → --branch-id), but the query string must use the
+			// param's ORIGINAL spec spelling — query.Set takes q.Name, never
+			// the flag name. The server rejects "branch-id" where it expects
+			// "branchId", so these two must not be conflated.
 			query := url.Values{}
 			for _, q := range op.QueryParams {
-				flagName := slugify(q.Name)
-				val, err := cmd.Flags().GetString(flagName)
+				val, err := cmd.Flags().GetString(canonicalFlagName(q.Name))
 				if err != nil {
 					continue
 				}
@@ -249,9 +259,14 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		},
 	}
 
+	// Accept any spelling of a registered flag that differs only in case or
+	// dash/underscore placement, so --branchid and --branchId both hit the
+	// canonical --branch-id no matter how the spec spelled the param.
+	cmd.Flags().SetNormalizeFunc(NormalizeFlagName)
+
 	// Register query params as flags
 	for _, q := range op.QueryParams {
-		flagName := slugify(q.Name)
+		flagName := canonicalFlagName(q.Name)
 		desc := q.Description
 		if len(q.Enum) > 0 {
 			desc += fmt.Sprintf(" [%s]", strings.Join(q.Enum, ", "))
@@ -364,6 +379,120 @@ func slugify(s string) string {
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "_", "-")
 	return s
+}
+
+// canonicalFlagName derives the CLI flag name for an OpenAPI parameter. The
+// spec names the same concept inconsistently across sibling operations —
+// "branchId" here, "branch_id" there — so camelCase is split into words before
+// slugifying and both spellings land on one flag:
+//
+//	branchId    → branch-id
+//	branch_id   → branch-id
+//	pageSize    → page-size
+//	baseModelId → base-model-id
+//
+// Acronym runs stay intact: "modelURL" → "model-url", "URLPrefix" → "url-prefix".
+func canonicalFlagName(s string) string {
+	var b strings.Builder
+	rs := []rune(s)
+	for i, r := range rs {
+		if i > 0 && unicode.IsUpper(r) {
+			prev := rs[i-1]
+			switch {
+			case !unicode.IsUpper(prev) && prev != '-' && prev != '_' && prev != ' ':
+				// lower/digit → upper: a word boundary ("pageSize").
+				b.WriteRune('-')
+			case unicode.IsUpper(prev) && i+1 < len(rs) && unicode.IsLower(rs[i+1]):
+				// End of an acronym run ("URLPrefix" → "URL-Prefix").
+				b.WriteRune('-')
+			}
+		}
+		b.WriteRune(r)
+	}
+	return slugify(b.String())
+}
+
+// flagLookupKey reduces a flag name to the form used for matching: lowercased,
+// with dashes and underscores dropped. "branchId", "branch-id", "branch_id"
+// and "branchid" all reduce to "branchid".
+func flagLookupKey(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r == '-' || r == '_' {
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+// NormalizeFlagName is a pflag normalization function that resolves a flag name
+// the user typed to whichever flag is registered under an equivalent spelling,
+// ignoring case and dash/underscore placement. So --branchid, --branch_id and
+// --branchId all find a registered --branch-id.
+//
+// Names with no registered match are returned unchanged. That matters at
+// registration time: pflag rewrites Flag.Name to whatever this returns, so
+// returning the raw lookup key would make --help advertise "--branchid". Help
+// output keeps showing only the canonical kebab-case name; the alternates are
+// accepted silently.
+func NormalizeFlagName(fs *pflag.FlagSet, name string) pflag.NormalizedName {
+	key := flagLookupKey(name)
+	match := ""
+	fs.VisitAll(func(f *pflag.Flag) {
+		if match == "" && flagLookupKey(f.Name) == key {
+			match = f.Name
+		}
+	})
+	if match != "" {
+		return pflag.NormalizedName(match)
+	}
+	return pflag.NormalizedName(name)
+}
+
+// validateFlagNames reports flags on a single generated command whose names
+// collide once normalized. Since lookups ignore case and separators, a command
+// declaring both "branchId" and "branch_id" would register two flags that are
+// indistinguishable — pflag panics on the second one — so fail generation with
+// a message that names the culprits instead.
+func validateFlagNames(op *operationInfo) error {
+	claimed := map[string]string{} // lookup key → description of the claimant
+
+	claim := func(flagName, source string) error {
+		key := flagLookupKey(flagName)
+		desc := fmt.Sprintf("--%s (%s)", flagName, source)
+		if prev, ok := claimed[key]; ok {
+			return fmt.Errorf("%s collides with %s: flag names are matched ignoring case, dashes and underscores, so both resolve to %q", desc, prev, key)
+		}
+		claimed[key] = desc
+		return nil
+	}
+
+	for _, q := range op.QueryParams {
+		if err := claim(canonicalFlagName(q.Name), "query param "+q.Name); err != nil {
+			return err
+		}
+	}
+
+	if op.HasBody {
+		// --field and --depth are registered defensively (only when free), so
+		// they can't collide; --body, --json-body and --schema always are.
+		for _, reserved := range []string{"body", "json-body", "schema"} {
+			if err := claim(reserved, "built-in flag"); err != nil {
+				return err
+			}
+		}
+	}
+
+	if sh := GetBodyShorthand(op.OperationID); sh != nil {
+		for _, f := range sh.Flags {
+			if err := claim(f.FlagName, "body shorthand for "+op.OperationID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func camelToKebab(s string) string {

@@ -288,6 +288,11 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 	// Keep promoted flags value-taking so callers can use an explicit value such
 	// as `--run-query false`, but show their schema type in help. assembleBody
 	// uses the same request schema to encode the JSON value.
+	//
+	// FlagName is the canonical kebab-case spelling. Registration goes through
+	// the flag set's normalization function (installed in buildCommand), so
+	// --branchid / --branchId / --branch_id reach the same flag, as do the
+	// Lookup and Changed calls below.
 	for _, f := range sh.Flags {
 		fieldType, err := shorthandFieldType(op.BodySchema, f.FieldPath)
 		if err != nil {
