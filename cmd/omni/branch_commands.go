@@ -96,9 +96,9 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 	// --schema on any command; describe the body it assembles so the flag works
 	// here too. The body is static (the CLI fills modelKind and looks up
 	// connectionId itself), so --field has nothing to drill into.
-	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command) error {
-		if field, _ := c.Flags().GetString("field"); field != "" {
-			return fmt.Errorf("--field is not supported for create-branch; its request body is assembled by the CLI and shown in full")
+	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command, names openapi.SchemaFlags) error {
+		if field, _ := c.Flags().GetString(names.Field); field != "" {
+			return fmt.Errorf("--%s is not supported for create-branch; its request body is assembled by the CLI and shown in full", names.Field)
 		}
 		return openapi.EmitSchemaDoc(c, createBranchSchemaDoc())
 	})

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // schemaTestSpec exercises the body-schema describer: allOf composition,
@@ -776,6 +778,274 @@ func TestSchema_BodyOperationStaysBackwardCompatible(t *testing.T) {
 	if doc.Response == nil || doc.Response.Status != "200" {
 		t.Errorf("response = %+v, want the declared 200", doc.Response)
 	}
+}
+
+// collidingParamsSpec declares query params literally named schema, field and
+// depth — all three preferred discovery flag names. The params must keep their
+// own flags (they are the endpoint's contract) and discovery must still be
+// reachable, under its fallback names.
+const collidingParamsSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/things": {
+      "get": {
+        "operationId": "thingsList",
+        "tags": ["things"],
+        "parameters": [
+          {"name": "schema", "in": "query", "description": "Database schema to inspect", "schema": {"type": "string"}},
+          {"name": "field", "in": "query", "description": "Field to group by", "schema": {"type": "string"}},
+          {"name": "depth", "in": "query", "description": "Traversal depth", "schema": {"type": "integer"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Things",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"a": {"type": "object", "properties": {"b": {"type": "string"}}}}}}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+// A spec param owning a discovery flag name must not disable discovery: the
+// flags move to deterministic fallbacks, and the document reports where they
+// went.
+func TestSchema_ParamNameCollisionFallsBackToPrefixedFlags(t *testing.T) {
+	doc, err := runSchemaCmdFlag(t, collidingParamsSpec, "list", "schema-doc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Method != "GET" || doc.Path != "/api/v1/things" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if doc.SchemaFlags == nil {
+		t.Fatal("schemaFlags section missing; agents can't discover the renamed flags")
+	}
+	want := SchemaFlags{Schema: "schema-doc", Field: "schema-field", Depth: "schema-depth"}
+	if *doc.SchemaFlags != want {
+		t.Errorf("schemaFlags = %+v, want %+v", *doc.SchemaFlags, want)
+	}
+	// The colliding query params are still described as query params.
+	flags := map[string]bool{}
+	for _, q := range doc.QueryParams {
+		flags[q.Flag] = true
+	}
+	for _, f := range []string{"--schema", "--field", "--depth"} {
+		if !flags[f] {
+			t.Errorf("query param %s missing from the document", f)
+		}
+	}
+}
+
+// The renamed refinement flags must work, and the renaming must be visible in
+// --help so a reader can find them.
+func TestSchema_RenamedRefinementFlagsWork(t *testing.T) {
+	doc, err := runSchemaCmdFlag(t, collidingParamsSpec, "list", "schema-doc", "--schema-depth", "0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := json.Marshal(doc.Response)
+	if !strings.Contains(string(raw), "max depth reached") {
+		t.Errorf("--schema-depth 0 did not bound the response: %s", raw)
+	}
+
+	sub := subcommand(t, collidingParamsSpec, "list")
+	help := sub.LocalFlags().FlagUsages()
+	for _, want := range []string{"--schema-doc", "--schema-field", "--schema-depth", "because --schema is a parameter"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("flag help does not mention %q:\n%s", want, help)
+		}
+	}
+}
+
+// A colliding param must still be sent as a query param — never swallowed as a
+// discovery control.
+func TestSchema_CollidingParamsStillReachTheRequest(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+	cmds, err := GenerateCommands([]byte(collidingParamsSpec), exec)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	group.SetArgs([]string{"list", "--schema", "public", "--field", "name", "--depth", "3"})
+	if err := group.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"schema=public", "field=name", "depth=3"} {
+		if !strings.Contains(captured.Path, want) {
+			t.Errorf("path %q missing %s", captured.Path, want)
+		}
+	}
+}
+
+// wildcardResponseSpec exercises response declarations that are easy to lose:
+// an operation whose only success status is the "2XX" range key, one where a
+// specific code must beat the range key, and one whose media type declares no
+// schema.
+const wildcardResponseSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/ranged": {
+      "get": {
+        "operationId": "rangedOnly",
+        "tags": ["resp"],
+        "responses": {
+          "2XX": {"description": "Ranged success", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}}},
+          "4XX": {"description": "Ranged failure"}
+        }
+      }
+    },
+    "/api/v1/both": {
+      "get": {
+        "operationId": "rangedAndSpecific",
+        "tags": ["resp"],
+        "responses": {
+          "2XX": {"description": "Ranged success", "content": {"application/json": {"schema": {"type": "string"}}}},
+          "201": {"description": "Created", "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}}}}}
+        }
+      }
+    },
+    "/api/v1/schemaless": {
+      "get": {
+        "operationId": "schemalessMedia",
+        "tags": ["resp"],
+        "responses": {
+          "200": {"description": "A file", "content": {"text/csv": {}}}
+        }
+      }
+    },
+    "/api/v1/mixed": {
+      "get": {
+        "operationId": "mixedMedia",
+        "tags": ["resp"],
+        "responses": {
+          "200": {
+            "description": "Mixed",
+            "content": {"application/json": {}, "text/ndjson": {"schema": {"type": "object", "properties": {"row": {"type": "string"}}}}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+// A success response declared only under the "2XX" range key must still be
+// reported rather than dropped.
+func TestSchema_ResponseAcceptsRangeWildcard(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "ranged-only")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing for a 2XX-only operation")
+	}
+	if doc.Response.Status != "2XX" {
+		t.Errorf("response.status = %q, want 2XX", doc.Response.Status)
+	}
+	schema, ok := doc.Response.Schema.(map[string]interface{})
+	if !ok || schema["type"] != "object" {
+		t.Errorf("response.schema = %v, want the declared object", doc.Response.Schema)
+	}
+}
+
+// A specific 2xx code beats the range wildcard.
+func TestSchema_SpecificCodeBeatsRangeWildcard(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "ranged-and-specific")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil || doc.Response.Status != "201" {
+		t.Fatalf("response = %+v, want the specific 201 to win over 2XX", doc.Response)
+	}
+	schema, ok := doc.Response.Schema.(map[string]interface{})
+	if !ok || schema["type"] != "object" {
+		t.Errorf("response.schema = %v, want the 201 object, not the 2XX string", doc.Response.Schema)
+	}
+}
+
+// A media type declared without a schema must still be reported by name —
+// "text/csv, shape undocumented" beats implying an empty response.
+func TestSchema_ResponseMediaTypeWithoutSchema(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "schemaless-media")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.ContentType != "text/csv" {
+		t.Errorf("response.contentType = %q, want text/csv (the declared media type was dropped)", doc.Response.ContentType)
+	}
+	if doc.Response.Schema != nil {
+		t.Errorf("response.schema = %v, want null for an undocumented media type", doc.Response.Schema)
+	}
+}
+
+// When application/json declares no schema but another media type does, report
+// the one that actually carries a shape.
+func TestSchema_ResponsePrefersMediaTypeThatHasASchema(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "mixed-media")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.ContentType != "text/ndjson" {
+		t.Errorf("response.contentType = %q, want text/ndjson (the only type with a schema)", doc.Response.ContentType)
+	}
+	if doc.Response.Schema == nil {
+		t.Error("response.schema is null; the declared ndjson schema was dropped")
+	}
+}
+
+// subcommand generates commands from a spec and returns the named subcommand of
+// the first group.
+func subcommand(t *testing.T, spec, name string) *cobra.Command {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(spec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == name {
+			return sub
+		}
+	}
+	t.Fatalf("subcommand %q not found", name)
+	return nil
+}
+
+// runSchemaCmdFlag is runSchemaCmd for commands whose discovery flag was
+// renamed by a parameter collision.
+func runSchemaCmdFlag(t *testing.T, spec, name, schemaFlag string, extra ...string) (SchemaDoc, error) {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(spec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	var buf bytes.Buffer
+	group.SetOut(&buf)
+	group.SetErr(&buf)
+	group.SetArgs(append([]string{name, "--" + schemaFlag}, extra...))
+	if execErr := group.Execute(); execErr != nil {
+		return SchemaDoc{}, execErr
+	}
+	var doc SchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc, nil
 }
 
 // Without --schema, the command must still enforce normal behavior (here, that

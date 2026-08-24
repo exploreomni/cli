@@ -50,10 +50,12 @@ type SchemaResponse struct {
 // (authoritative shape plus a copy-pasteable Example) and the success response
 // shape. Body is explicitly null for operations that take no request body, so
 // "no body" is unambiguous rather than merely absent. Response is always present
-// (null when the spec declares no 2xx status).
+// (null when the spec declares no 2xx status). SchemaFlags appears only when a
+// spec parameter forced a discovery flag off its preferred name.
 type SchemaDoc struct {
 	Method      string             `json:"method"`
 	Path        string             `json:"path"`
+	SchemaFlags *SchemaFlags       `json:"schemaFlags,omitempty"`
 	Field       string             `json:"field,omitempty"`
 	Args        []SchemaArg        `json:"args,omitempty"`
 	QueryParams []SchemaQueryParam `json:"queryParams,omitempty"`
@@ -70,34 +72,57 @@ type describer struct {
 	maxDepth int
 }
 
+// SchemaFlags carries the flag names the discovery flags were actually
+// registered under. They are the preferred names (schema/field/depth) unless a
+// spec parameter already owns one, in which case the discovery flag falls back
+// to a prefixed name. The emit callback must read the flags through these names
+// rather than hardcoding them.
+type SchemaFlags struct {
+	Schema string `json:"schema"`
+	Field  string `json:"field"`
+	Depth  string `json:"depth"`
+}
+
+// Renamed reports whether any discovery flag had to fall back off its preferred
+// name because a spec parameter owns it.
+func (f SchemaFlags) Renamed() bool {
+	return f.Schema != "schema" || f.Field != "field" || f.Depth != "depth"
+}
+
 // RegisterSchemaFlag adds the --schema discovery flag (plus its --field and
 // --depth refinements) to cmd and wraps arg validation and RunE so --schema
 // short-circuits before any positional-arg check, body assembly, auth, or
 // network call. That lets `omni <cmd> --schema` work with no args and no token.
-// emit is called to produce the document when --schema is set.
+// emit is called with the resolved flag names to produce the document.
 //
 // Every command registers this, including bodyless GET/DELETE operations: agents
 // reach for --schema first, and "unknown flag: --schema" wastes a whole call.
-func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command) error) {
-	// A spec parameter that already claims this flag name wins; re-registering
-	// would panic at startup, and every generated command now comes through here.
-	if cmd.Flags().Lookup("schema") != nil {
-		return
+//
+// Collision policy: a spec parameter always keeps its own flag name — it is the
+// operation's contract, and silently reinterpreting e.g. an endpoint's --depth
+// query param as a discovery control would corrupt requests. When a parameter
+// owns one of these names, that discovery flag is registered under a
+// deterministic "schema-" prefixed fallback (--schema-doc / --schema-field /
+// --schema-depth, and -2, -3… if those are taken too) and its help text says so.
+// Discovery is therefore never unavailable, just occasionally renamed.
+func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlags) error) SchemaFlags {
+	names := SchemaFlags{
+		Schema: freeFlagName(cmd, "schema", "schema-doc"),
+		Field:  freeFlagName(cmd, "field", "schema-field"),
+		Depth:  freeFlagName(cmd, "depth", "schema-depth"),
 	}
-	cmd.Flags().Bool("schema", false, "print this command's args, flags, request body and response shape, then exit (no API call)")
+
+	cmd.Flags().Bool(names.Schema, false,
+		renameNote("print this command's args, flags, request body and response shape, then exit (no API call)", "schema", names.Schema))
 	// --field / --depth refine the --schema output for deeply nested shapes.
-	// Guarded so a query/path param of the same name can't panic the flag
-	// registration.
-	if cmd.Flags().Lookup("field") == nil {
-		cmd.Flags().String("field", "", "with --schema: drill into a dotted field path of the request body (e.g. queryPresentations.data.query); auto-descends arrays and maps; does not affect the response section")
-	}
-	if cmd.Flags().Lookup("depth") == nil {
-		cmd.Flags().Int("depth", maxSchemaDepth, "with --schema: max nesting depth to expand (request body and response); lower for a compact overview")
-	}
+	cmd.Flags().String(names.Field, "",
+		renameNote(fmt.Sprintf("with --%s: drill into a dotted field path of the request body (e.g. queryPresentations.data.query); auto-descends arrays and maps; does not affect the response section", names.Schema), "field", names.Field))
+	cmd.Flags().Int(names.Depth, maxSchemaDepth,
+		renameNote(fmt.Sprintf("with --%s: max nesting depth to expand (request body and response); lower for a compact overview", names.Schema), "depth", names.Depth))
 
 	innerArgs := cmd.Args
 	cmd.Args = func(c *cobra.Command, args []string) error {
-		if schemaRequested(c) || innerArgs == nil {
+		if schemaRequested(c, names.Schema) || innerArgs == nil {
 			return nil
 		}
 		return innerArgs(c, args)
@@ -105,27 +130,57 @@ func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command) error) {
 
 	innerRun := cmd.RunE
 	cmd.RunE = func(c *cobra.Command, args []string) error {
-		if schemaRequested(c) {
+		if schemaRequested(c, names.Schema) {
 			// A schema error (e.g. a bad --field path) should print just the
 			// helpful message, not the full usage block.
 			c.SilenceUsage = true
-			return emit(c)
+			return emit(c, names)
 		}
 		if innerRun == nil {
 			return nil
 		}
 		return innerRun(c, args)
 	}
+
+	return names
+}
+
+// freeFlagName returns preferred if no flag owns it, otherwise fallback, and
+// otherwise fallback with the lowest "-N" suffix that is free. Registration
+// therefore always succeeds — a discovery flag never silently disappears, and a
+// spec parameter is never shadowed.
+func freeFlagName(cmd *cobra.Command, preferred, fallback string) string {
+	if cmd.Flags().Lookup(preferred) == nil {
+		return preferred
+	}
+	if cmd.Flags().Lookup(fallback) == nil {
+		return fallback
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", fallback, n)
+		if cmd.Flags().Lookup(candidate) == nil {
+			return candidate
+		}
+	}
+}
+
+// renameNote appends an explanation to a discovery flag's help when it had to
+// give up its preferred name, so `--help` still leads the reader to it.
+func renameNote(desc, preferred, actual string) string {
+	if preferred == actual {
+		return desc
+	}
+	return fmt.Sprintf("%s (named --%s here because --%s is a parameter of this endpoint)", desc, actual, preferred)
 }
 
 // emitBodySchema writes a generated operation's schema document to the command's
 // stdout, honoring the global --compact flag. It makes no network call and needs
 // no auth. The optional --field flag drills into a dotted sub-path of the request
 // body; --depth caps how deep nested objects expand.
-func emitBodySchema(cmd *cobra.Command, op *operationInfo) error {
-	field, _ := cmd.Flags().GetString("field")
+func emitBodySchema(cmd *cobra.Command, op *operationInfo, names SchemaFlags) error {
+	field, _ := cmd.Flags().GetString(names.Field)
 
-	doc, err := describeBody(op, field, schemaDepth(cmd))
+	doc, err := describeBody(op, field, schemaDepth(cmd, names.Depth), names)
 	if err != nil {
 		return err
 	}
@@ -153,10 +208,10 @@ func EmitSchemaDoc(cmd *cobra.Command, doc SchemaDoc) error {
 	return nil
 }
 
-// schemaDepth reads the --depth flag, falling back to the default cap when it is
+// schemaDepth reads the depth flag, falling back to the default cap when it is
 // unset or nonsensical.
-func schemaDepth(cmd *cobra.Command) int {
-	depth, err := cmd.Flags().GetInt("depth")
+func schemaDepth(cmd *cobra.Command, name string) int {
+	depth, err := cmd.Flags().GetInt(name)
 	if err != nil || depth < 0 {
 		return maxSchemaDepth
 	}
@@ -168,8 +223,14 @@ func schemaDepth(cmd *cobra.Command) int {
 // drills to that dotted sub-path of the request body; maxDepth caps nested
 // expansion. Drilling restarts the depth budget from the resolved node, so a deep
 // field still expands fully.
-func describeBody(op *operationInfo, field string, maxDepth int) (SchemaDoc, error) {
+func describeBody(op *operationInfo, field string, maxDepth int, names SchemaFlags) (SchemaDoc, error) {
 	doc := SchemaDoc{Method: op.Method, Path: op.Path, Field: field}
+	if names.Renamed() {
+		// Surface the fallback names in the document too, so an agent that got
+		// here via --schema-doc learns what to pass for the refinements.
+		renamed := names
+		doc.SchemaFlags = &renamed
+	}
 	d := &describer{maxDepth: maxDepth}
 
 	for _, p := range op.PathParams {
@@ -201,16 +262,16 @@ func describeBody(op *operationInfo, field string, maxDepth int) (SchemaDoc, err
 				"note": "this operation takes a request body, but the spec declares no schema for it",
 			}
 		}
-		// Either way there is nothing for --field to drill into.
+		// Either way there is nothing for the field flag to drill into.
 		if field != "" {
-			return doc, fmt.Errorf("--field is only meaningful for operations with a request body schema; %s %s has none", op.Method, op.Path)
+			return doc, fmt.Errorf("--%s is only meaningful for operations with a request body schema; %s %s has none", names.Field, op.Method, op.Path)
 		}
 		return doc, nil
 	}
 
 	root := op.BodySchema
 	if field != "" {
-		resolved, err := resolveField(root, field)
+		resolved, err := resolveField(root, field, names.Field)
 		if err != nil {
 			return doc, err
 		}
@@ -253,17 +314,17 @@ func describeResponse(d *describer, resp *responseInfo) *SchemaResponse {
 // "queryPresentations.data.query" without knowing data is a map keyed by tab
 // ID. It returns the resolved proxy, or an error naming the failing segment and
 // listing the fields available there.
-func resolveField(root *base.SchemaProxy, path string) (*base.SchemaProxy, error) {
+func resolveField(root *base.SchemaProxy, path, flagName string) (*base.SchemaProxy, error) {
 	cur := root
 	segs := strings.Split(path, ".")
 	for i, seg := range segs {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
-			return nil, fmt.Errorf("--field %q has an empty path segment", path)
+			return nil, fmt.Errorf("--%s %q has an empty path segment", flagName, path)
 		}
 		next, err := descendTo(cur, seg)
 		if err != nil {
-			return nil, fmt.Errorf("--field %q: %v", strings.Join(segs[:i+1], "."), err)
+			return nil, fmt.Errorf("--%s %q: %v", flagName, strings.Join(segs[:i+1], "."), err)
 		}
 		cur = next
 	}

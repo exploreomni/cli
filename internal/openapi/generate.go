@@ -15,6 +15,7 @@ import (
 	"github.com/pb33f/libopenapi"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/pb33f/libopenapi/orderedmap"
 	"github.com/spf13/cobra"
 )
 
@@ -288,46 +289,36 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// Args/RunE, so the short-circuit wraps the final versions. Registered for
 	// every operation — bodyless ones still describe their args, query flags and
 	// response shape.
-	RegisterSchemaFlag(cmd, func(c *cobra.Command) error {
-		return emitBodySchema(c, op)
+	RegisterSchemaFlag(cmd, func(c *cobra.Command, names SchemaFlags) error {
+		return emitBodySchema(c, op, names)
 	})
 
 	return cmd
 }
 
-// schemaRequested reports whether the --schema discovery flag is set.
-func schemaRequested(cmd *cobra.Command) bool {
-	v, err := cmd.Flags().GetBool("schema")
+// schemaRequested reports whether the schema discovery flag — registered under
+// name, which is not always "schema" (see RegisterSchemaFlag) — is set.
+func schemaRequested(cmd *cobra.Command, name string) bool {
+	v, err := cmd.Flags().GetBool(name)
 	return err == nil && v
 }
 
 // requestBodySchema returns the schema for a request body, preferring the
 // application/json media type and falling back to the first declared one.
 func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
-	if rb == nil || rb.Content == nil {
+	if rb == nil {
 		return nil
 	}
-	var first *base.SchemaProxy
-	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
-		mt := pair.Value()
-		if mt == nil || mt.Schema == nil {
-			continue
-		}
-		if pair.Key() == "application/json" {
-			return mt.Schema
-		}
-		if first == nil {
-			first = mt.Schema
-		}
-	}
-	return first
+	_, schema := pickMediaType(rb.Content)
+	return schema
 }
 
 // successResponse returns the operation's success response: the lowest declared
 // 2xx status (the happy path; a lower code wins so 200 beats a 202 fallback),
-// preferring the application/json media type and falling back to the first
-// declared one. It returns nil when no 2xx status is declared, and a
-// schema-less responseInfo when the status carries no body (e.g. 204).
+// falling back to an OpenAPI range key ("2XX") when only that is declared — a
+// specific code always beats the wildcard. It returns nil when no success status
+// is declared at all, and a schema-less responseInfo when the status carries no
+// body (e.g. 204).
 func successResponse(resps *v3.Responses) *responseInfo {
 	if resps == nil || resps.Codes == nil {
 		return nil
@@ -336,39 +327,88 @@ func successResponse(resps *v3.Responses) *responseInfo {
 	best := 0
 	var bestResp *v3.Response
 	var bestCode string
+	var wildcardResp *v3.Response
+	var wildcardCode string
+
 	for pair := resps.Codes.First(); pair != nil; pair = pair.Next() {
-		code, err := strconv.Atoi(pair.Key())
+		key := pair.Key()
+		if isSuccessRange(key) {
+			if wildcardResp == nil {
+				wildcardCode, wildcardResp = key, pair.Value()
+			}
+			continue
+		}
+		code, err := strconv.Atoi(key)
 		if err != nil || code < 200 || code > 299 {
 			continue
 		}
 		if bestResp == nil || code < best {
-			best, bestCode, bestResp = code, pair.Key(), pair.Value()
+			best, bestCode, bestResp = code, key, pair.Value()
 		}
+	}
+	if bestResp == nil {
+		bestCode, bestResp = wildcardCode, wildcardResp
 	}
 	if bestResp == nil {
 		return nil
 	}
 
 	info := &responseInfo{Status: bestCode, Description: bestResp.Description}
-	if bestResp.Content == nil {
-		return info
-	}
-	for pair := bestResp.Content.First(); pair != nil; pair = pair.Next() {
-		mt := pair.Value()
-		if mt == nil || mt.Schema == nil {
-			continue
-		}
-		if pair.Key() == "application/json" {
-			info.ContentType = pair.Key()
-			info.Schema = mt.Schema
-			return info
-		}
-		if info.Schema == nil {
-			info.ContentType = pair.Key()
-			info.Schema = mt.Schema
-		}
-	}
+	info.ContentType, info.Schema = pickMediaType(bestResp.Content)
 	return info
+}
+
+// isSuccessRange reports whether a response key is the OpenAPI 2xx range
+// wildcard. The spec writes ranges uppercase ("2XX"), but tolerate any casing.
+func isSuccessRange(key string) bool {
+	return len(key) == 3 && key[0] == '2' && (key[1] == 'X' || key[1] == 'x') && (key[2] == 'X' || key[2] == 'x')
+}
+
+// pickMediaType chooses which declared media type to report, preferring
+// application/json and then the first type carrying a schema. A media type that
+// declares no schema is still reported by name with a nil schema: "this comes
+// back as text/csv, shape undocumented" beats implying the response is empty.
+func pickMediaType(content *orderedmap.Map[string, *v3.MediaType]) (string, *base.SchemaProxy) {
+	if content == nil {
+		return "", nil
+	}
+
+	var jsonType string
+	var jsonSchema *base.SchemaProxy
+	var firstWithSchema string
+	var firstSchema *base.SchemaProxy
+	var firstAny string
+
+	for pair := content.First(); pair != nil; pair = pair.Next() {
+		key := pair.Key()
+		var schema *base.SchemaProxy
+		if mt := pair.Value(); mt != nil {
+			schema = mt.Schema
+		}
+		if key == "application/json" {
+			if schema != nil {
+				return key, schema
+			}
+			if jsonType == "" {
+				jsonType, jsonSchema = key, schema
+			}
+		}
+		if schema != nil && firstWithSchema == "" {
+			firstWithSchema, firstSchema = key, schema
+		}
+		if firstAny == "" {
+			firstAny = key
+		}
+	}
+
+	switch {
+	case firstWithSchema != "":
+		return firstWithSchema, firstSchema
+	case jsonType != "":
+		return jsonType, jsonSchema
+	default:
+		return firstAny, nil
+	}
 }
 
 // commandName derives a CLI subcommand name from the operationId or method+path.

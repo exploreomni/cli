@@ -100,9 +100,9 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 	// SCIM PATCH body it assembles so the flag works here too. That body is built
 	// from --attr/--attr-json rather than passed through, so --field has nothing
 	// to drill into.
-	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command) error {
-		if field, _ := c.Flags().GetString("field"); field != "" {
-			return fmt.Errorf("--field is not supported for set-attributes; its request body is assembled by the CLI and shown in full")
+	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command, names openapi.SchemaFlags) error {
+		if field, _ := c.Flags().GetString(names.Field); field != "" {
+			return fmt.Errorf("--%s is not supported for set-attributes; its request body is assembled by the CLI and shown in full", names.Field)
 		}
 		return openapi.EmitSchemaDoc(c, setAttributesSchemaDoc())
 	})

@@ -9,6 +9,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -416,12 +417,16 @@ func TestGenerateCommands_SchemaFlagOnEveryCommand(t *testing.T) {
 		t.Fatalf("GenerateCommands: %v", err)
 	}
 
+	// A spec param may legitimately own one of these names, in which case the
+	// discovery flag lives under its fallback — but it must exist either way.
+	fallbacks := map[string]string{"schema": "schema-doc", "field": "schema-field", "depth": "schema-depth"}
+
 	checked := 0
 	for _, tagCmd := range cmds {
 		for _, sub := range tagCmd.Commands() {
-			for _, flag := range []string{"schema", "field", "depth"} {
-				if sub.Flags().Lookup(flag) == nil {
-					t.Errorf("%s %s: missing --%s", tagCmd.Name(), sub.Name(), flag)
+			for flag, fallback := range fallbacks {
+				if sub.Flags().Lookup(flag) == nil && sub.Flags().Lookup(fallback) == nil {
+					t.Errorf("%s %s: neither --%s nor --%s registered", tagCmd.Name(), sub.Name(), flag, fallback)
 				}
 			}
 			checked++
@@ -431,6 +436,26 @@ func TestGenerateCommands_SchemaFlagOnEveryCommand(t *testing.T) {
 		t.Fatal("no subcommands were checked")
 	}
 	t.Logf("checked --schema registration on %d subcommands", checked)
+}
+
+// freeFlagName must never give up: when both the preferred name and its
+// fallback are taken it keeps suffixing until it finds a free one, so the
+// discovery flag is always registered somewhere.
+func TestFreeFlagName(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema" {
+		t.Errorf("freeFlagName on an empty command = %q, want schema", got)
+	}
+
+	cmd.Flags().String("schema", "", "a spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc" {
+		t.Errorf("freeFlagName with schema taken = %q, want schema-doc", got)
+	}
+
+	cmd.Flags().String("schema-doc", "", "another spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc-2" {
+		t.Errorf("freeFlagName with both taken = %q, want schema-doc-2", got)
+	}
 }
 
 // --schema must short-circuit before positional-arg validation, so a command
