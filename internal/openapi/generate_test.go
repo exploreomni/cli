@@ -9,6 +9,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -636,5 +637,125 @@ func TestSpecCoverage(t *testing.T) {
 
 	if len(uncovered) > 0 {
 		t.Errorf("%d/%d operations uncovered", len(uncovered), totalOps)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Arguments help section tests
+//
+// Cobra's usage line only shows placeholders like "<branchname>", which is how
+// an agent ends up passing a branch UUID to a command that wants a branch NAME.
+// buildCommand therefore renders the spec's param descriptions into an
+// "Arguments:" block in the command's long help.
+// ---------------------------------------------------------------------------
+
+func TestBuildCommand_ArgumentsSection(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "Models",
+		OperationID: "modelsMergeBranch",
+		Summary:     "Merge branch",
+		Method:      "POST",
+		Path:        "/api/v1/models/{modelId}/branch/{branchName}/merge",
+		PathParams: []paramInfo{
+			{Name: "modelId", In: "path", Description: "Model UUID"},
+			{Name: "branchName", In: "path", Description: "Branch name"},
+		},
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	if !strings.Contains(cmd.Long, "Arguments:") {
+		t.Fatalf("Long = %q, expected an Arguments section", cmd.Long)
+	}
+	for _, want := range []string{"<modelid>", "Model UUID", "<branchname>", "Branch name"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
+		}
+	}
+	// With no Description on the operation, the Short still has to survive.
+	if !strings.Contains(cmd.Long, "Merge branch") {
+		t.Errorf("Long = %q, expected the summary to be preserved", cmd.Long)
+	}
+}
+
+// Shorthand positional args are part of the same positional list, so they
+// belong in the same block as the path params.
+func TestBuildCommand_ArgumentsSectionIncludesShorthandArgs(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "AI",
+		OperationID: "aiGenerateQuery",
+		Method:      "POST",
+		Path:        "/api/v1/ai/generate-query",
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	for _, want := range []string{"Arguments:", "<model-id>", "UUID of the shared model", "<prompt>", "natural language query prompt"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
+		}
+	}
+}
+
+// Commands with no positionals must not grow an empty Arguments block.
+func TestBuildCommand_NoArgumentsSectionWithoutPositionals(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "Models",
+		OperationID: "modelsList",
+		Summary:     "List models",
+		Method:      "GET",
+		Path:        "/api/v1/models",
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	if strings.Contains(cmd.Long, "Arguments:") {
+		t.Errorf("Long = %q, expected no Arguments section", cmd.Long)
+	}
+}
+
+// End-to-end against the real spec: the description the spec gives for a path
+// param has to reach the generated command's help.
+func TestGenerateCommands_ArgumentsSectionFromSpec(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	var merge *cobra.Command
+	for _, tagCmd := range cmds {
+		if tagCmd.Use != "models" {
+			continue
+		}
+		for _, sub := range tagCmd.Commands() {
+			if sub.Name() == "merge-branch" {
+				merge = sub
+			}
+		}
+	}
+	if merge == nil {
+		t.Fatal("models merge-branch not found in generated commands")
+	}
+
+	// The second positional is a branch NAME, not a branch UUID — that
+	// distinction is exactly what the Arguments section exists to convey.
+	if !strings.Contains(merge.Long, "Arguments:") {
+		t.Fatalf("Long = %q, expected an Arguments section", merge.Long)
+	}
+	if !strings.Contains(merge.Long, "Branch name") {
+		t.Errorf("Long = %q, expected the spec's branchName description", merge.Long)
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Model UUID", "Model UUID"},
+		{"  padded  ", "padded"},
+		{"first line\nsecond line", "first line"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := firstLine(c.in); got != c.want {
+			t.Errorf("firstLine(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

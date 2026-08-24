@@ -900,6 +900,77 @@ func TestShorthand_HelpContainsExamples(t *testing.T) {
 	}
 }
 
+// Promoted flags are rejected at runtime when --body is also given (see
+// TestShorthand_BodyWithShorthandFlagErrors). The help text has to say so, from
+// both sides: on every promoted flag, and on --body itself.
+func TestShorthand_PromotedFlagsDeclareBodyExclusivity(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	op := &operationInfo{
+		Tag:         "Documents",
+		OperationID: "documentsV2PatchDraft",
+		Method:      "PATCH",
+		Path:        "/api/v2/documents/{identifier}/draft",
+		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, exec)
+	sh := GetBodyShorthand(op.OperationID)
+
+	for _, f := range sh.Flags {
+		flag := cmd.Flags().Lookup(f.FlagName)
+		if flag == nil {
+			t.Fatalf("missing promoted flag --%s", f.FlagName)
+		}
+		if !strings.HasSuffix(flag.Usage, "(cannot be combined with --body)") {
+			t.Errorf("--%s usage = %q, want the --body exclusivity note", f.FlagName, flag.Usage)
+		}
+		if !strings.Contains(flag.Usage, f.Description) {
+			t.Errorf("--%s usage = %q, want it to keep its description", f.FlagName, flag.Usage)
+		}
+	}
+
+	bodyFlag := cmd.Flags().Lookup("body")
+	if bodyFlag == nil {
+		t.Fatal("missing --body flag")
+	}
+	if !strings.Contains(bodyFlag.Usage, "cannot be combined") {
+		t.Errorf("--body usage = %q, want it to mention the promoted-flag conflict", bodyFlag.Usage)
+	}
+}
+
+// Every promoted flag on every registered shorthand carries the note, and
+// commands with no promoted flags leave --body's description alone.
+func TestShorthand_BodyExclusivityNoteEverywhere(t *testing.T) {
+	for opID, sh := range bodyShorthands {
+		op := &operationInfo{
+			Tag:         "test",
+			OperationID: opID,
+			Method:      "POST",
+			Path:        "/test",
+			HasBody:     true,
+		}
+		cmd := buildCommand(op, func(req APIRequest) error { return nil })
+
+		for _, f := range sh.Flags {
+			flag := cmd.Flags().Lookup(f.FlagName)
+			if flag == nil {
+				t.Errorf("%s: missing promoted flag --%s", opID, f.FlagName)
+				continue
+			}
+			if !strings.HasSuffix(flag.Usage, bodyExclusiveSuffix) {
+				t.Errorf("%s: --%s usage = %q, want suffix %q", opID, f.FlagName, flag.Usage, bodyExclusiveSuffix)
+			}
+		}
+
+		bodyUsage := cmd.Flags().Lookup("body").Usage
+		if len(sh.Flags) == 0 && strings.Contains(bodyUsage, "cannot be combined") {
+			t.Errorf("%s: --body usage = %q, want no conflict note (no promoted flags)", opID, bodyUsage)
+		}
+	}
+}
+
 func TestShorthand_UseStringContainsArgs(t *testing.T) {
 	exec := func(req APIRequest) error { return nil }
 
