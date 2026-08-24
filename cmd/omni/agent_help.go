@@ -129,8 +129,11 @@ name a leaf without knowing the container shape:
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
 - Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
-  Each command's --help has an "Arguments:" section saying what every positional
-  means — some take a NAME, not a UUID (e.g. models merge-branch <branch-name>).
+  Generated API commands describe every positional in an "Arguments:" section in
+  their --help. Read it — some positionals take a NAME, not a UUID:
+    omni models merge-branch <model-id> <branch-name>   # 2nd arg is the NAME
+  The few hand-written commands (config *, agent-help, models create-branch,
+  users set-attributes) have no Arguments section — read their Usage line.
 - Query parameters are flags: omni models list --pagesize 10
 - Promoted field flags (e.g. --name, --summary) are mutually exclusive with
   --body: using both is an error, not a merge. Pick one and put every field there.
