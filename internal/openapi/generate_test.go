@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -613,6 +614,48 @@ func TestValidateFlagNames(t *testing.T) {
 	}
 	if err := validateFlagNames(withShorthand); err == nil {
 		t.Error("expected shorthand flag collision to be reported")
+	}
+}
+
+// Promoted body-shorthand flags are registered with pflag's Var (their type
+// comes from the request schema), not String. Registration still goes through
+// the normalization function, so alternate spellings must reach them too — and
+// the schema-derived typing has to survive the trip.
+func TestShorthand_TypedFlagsAcceptAlternateSpellings(t *testing.T) {
+	op := operationFromRealSpec(t, "aiGenerateQuery")
+
+	// Sanity: the flag is boolean-typed from the spec, not a plain string.
+	probe := buildCommand(op, func(req APIRequest) error { return nil })
+	runQuery := probe.Flags().Lookup("run-query")
+	if runQuery == nil {
+		t.Fatal("expected a --run-query flag")
+	}
+	if runQuery.Value.Type() != "boolean" {
+		t.Fatalf("--run-query type = %q, want %q", runQuery.Value.Type(), "boolean")
+	}
+
+	for _, spelling := range []string{"--run-query", "--runquery", "--runQuery", "--run_query"} {
+		t.Run(spelling, func(t *testing.T) {
+			var captured APIRequest
+			cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+			cmd.SilenceUsage, cmd.SilenceErrors = true, true
+			cmd.SetArgs([]string{"m-1", "how many orders", spelling, "false", "--userid", "u-1"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute(%s): %v", spelling, err)
+			}
+
+			var body map[string]interface{}
+			if err := json.Unmarshal(captured.Body, &body); err != nil {
+				t.Fatalf("unmarshaling body: %v", err)
+			}
+			// Boolean typing survives: a JSON false, not the string "false".
+			if v, ok := body["runQuery"].(bool); !ok || v {
+				t.Errorf("body[runQuery] = %#v, want false (bool)", body["runQuery"])
+			}
+			if body["userId"] != "u-1" {
+				t.Errorf("body[userId] = %#v, want %q", body["userId"], "u-1")
+			}
+		})
 	}
 }
 
