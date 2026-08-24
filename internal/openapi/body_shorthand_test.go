@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pb33f/libopenapi"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,40 @@ func newMockCmd(flags map[string]string) *cobra.Command {
 	return cmd
 }
 
+func operationFromRealSpec(t *testing.T, operationID string) *operationInfo {
+	t.Helper()
+	ops := operationsFromRealSpec(t)
+	if op, ok := ops[operationID]; ok {
+		return op
+	}
+	t.Fatalf("operation %q not found in spec", operationID)
+	return nil
+}
+
+func operationsFromRealSpec(t *testing.T) map[string]*operationInfo {
+	t.Helper()
+	doc, err := libopenapi.NewDocument(loadSpec(t))
+	if err != nil {
+		t.Fatalf("parsing spec: %v", err)
+	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("building spec model: %v", err)
+	}
+
+	groups := map[string][]*operationInfo{}
+	for pair := model.Model.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		extractOperations(pair.Key(), pair.Value(), groups)
+	}
+	opsByID := map[string]*operationInfo{}
+	for _, ops := range groups {
+		for _, op := range ops {
+			opsByID[op.OperationID] = op
+		}
+	}
+	return opsByID
+}
+
 func TestAssembleBody_StringTransform(t *testing.T) {
 	sh := &BodyShorthand{
 		Args: []ArgMapping{
@@ -33,7 +68,7 @@ func TestAssembleBody_StringTransform(t *testing.T) {
 		},
 	}
 	cmd := newMockCmd(nil)
-	body, err := assembleBody(sh, []string{"How do I add a format?"}, 0, cmd)
+	body, err := assembleBody(sh, []string{"How do I add a format?"}, 0, cmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +87,7 @@ func TestAssembleBody_EmailListTransform(t *testing.T) {
 		},
 	}
 	cmd := newMockCmd(nil)
-	body, err := assembleBody(sh, []string{"a@co.com,b@co.com,c@co.com"}, 0, cmd)
+	body, err := assembleBody(sh, []string{"a@co.com,b@co.com,c@co.com"}, 0, cmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +118,7 @@ func TestAssembleBody_EmailListTrimsWhitespace(t *testing.T) {
 		},
 	}
 	cmd := newMockCmd(nil)
-	body, err := assembleBody(sh, []string{"a@co.com, b@co.com , c@co.com"}, 0, cmd)
+	body, err := assembleBody(sh, []string{"a@co.com, b@co.com , c@co.com"}, 0, cmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +143,7 @@ func TestAssembleBody_WithPathParams(t *testing.T) {
 	}
 	cmd := newMockCmd(nil)
 	// args[0] is a path param, args[1] is the shorthand arg
-	body, err := assembleBody(sh, []string{"doc-123", "user-456"}, 1, cmd)
+	body, err := assembleBody(sh, []string{"doc-123", "user-456"}, 1, cmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +169,7 @@ func TestAssembleBody_WithPromotedFlags(t *testing.T) {
 		},
 	}
 	cmd := newMockCmd(map[string]string{"color": "#ff0000", "description": ""})
-	body, err := assembleBody(sh, []string{"my-label"}, 0, cmd)
+	body, err := assembleBody(sh, []string{"my-label"}, 0, cmd, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -155,11 +190,12 @@ func TestAssembleBody_WithPromotedFlags(t *testing.T) {
 func TestAssembleBody_BoolFlag(t *testing.T) {
 	sh := &BodyShorthand{
 		Flags: []FlagMapping{
-			{FlagName: "run-query", FieldPath: "runQuery", IsBool: true},
+			{FlagName: "run-query", FieldPath: "runQuery"},
 		},
 	}
 	cmd := newMockCmd(map[string]string{"run-query": "true"})
-	body, err := assembleBody(sh, nil, 0, cmd)
+	op := operationFromRealSpec(t, "aiGenerateQuery")
+	body, err := assembleBody(sh, nil, 0, cmd, op.BodySchema)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,6 +204,48 @@ func TestAssembleBody_BoolFlag(t *testing.T) {
 	json.Unmarshal(body, &parsed)
 	if parsed["runQuery"] != true {
 		t.Errorf("runQuery = %v, want true", parsed["runQuery"])
+	}
+}
+
+func TestAssembleBody_InvalidBoolFlag(t *testing.T) {
+	sh := &BodyShorthand{
+		Flags: []FlagMapping{
+			{FlagName: "workbook-url", FieldPath: "workbookUrl"},
+		},
+	}
+	cmd := newMockCmd(map[string]string{"workbook-url": "not-a-bool"})
+	op := operationFromRealSpec(t, "aiGenerateQuery")
+	_, err := assembleBody(sh, nil, 0, cmd, op.BodySchema)
+	if err == nil {
+		t.Fatal("expected invalid boolean error")
+	}
+	if !strings.Contains(err.Error(), `invalid --workbook-url value "not-a-bool": expected a boolean`) {
+		t.Fatalf("error = %q, want invalid --workbook-url boolean error", err)
+	}
+}
+
+func TestShorthand_BooleanFlagTypesComeFromSpec(t *testing.T) {
+	tests := []struct {
+		operationID string
+		fieldPath   string
+	}{
+		{operationID: "aiGenerateQuery", fieldPath: "runQuery"},
+		{operationID: "aiGenerateQuery", fieldPath: "workbookUrl"},
+		{operationID: "aiJobSubmit", fieldPath: "progressWebhookEnabled"},
+		{operationID: "documentsUpdate", fieldPath: "clearExistingDraft"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.operationID+"/"+tt.fieldPath, func(t *testing.T) {
+			op := operationFromRealSpec(t, tt.operationID)
+			got, err := shorthandFieldType(op.BodySchema, tt.fieldPath)
+			if err != nil {
+				t.Fatalf("resolving field type: %v", err)
+			}
+			if got != "boolean" {
+				t.Fatalf("field type = %q, want boolean", got)
+			}
+		})
 	}
 }
 
@@ -314,16 +392,18 @@ func TestShorthand_AiGenerateQuery_WithFlags(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
 
-	op := &operationInfo{
-		Tag:         "AI",
-		OperationID: "aiGenerateQuery",
-		Method:      "POST",
-		Path:        "/api/v1/ai/generate-query",
-		HasBody:     true,
-	}
+	op := operationFromRealSpec(t, "aiGenerateQuery")
 
 	cmd := buildCommand(op, exec)
-	cmd.SetArgs([]string{"model-uuid", "Revenue query", "--run-query", "false", "--current-topic-name", "orders"})
+	if got := cmd.Flags().Lookup("workbook-url").Value.Type(); got != "boolean" {
+		t.Fatalf("--workbook-url help type = %q, want boolean", got)
+	}
+	cmd.SetArgs([]string{
+		"model-uuid", "Revenue query",
+		"--run-query", "false",
+		"--workbook-url", "true",
+		"--current-topic-name", "orders",
+	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -332,6 +412,9 @@ func TestShorthand_AiGenerateQuery_WithFlags(t *testing.T) {
 	json.Unmarshal(captured.Body, &body)
 	if body["runQuery"] != false {
 		t.Errorf("runQuery = %v, want false", body["runQuery"])
+	}
+	if body["workbookUrl"] != true {
+		t.Errorf("workbookUrl = %v, want true", body["workbookUrl"])
 	}
 	if body["currentTopicName"] != "orders" {
 		t.Errorf("currentTopicName = %v, want orders", body["currentTopicName"])
@@ -483,14 +566,7 @@ func TestShorthand_DocumentsUpdate_FlagsOnly(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
 
-	op := &operationInfo{
-		Tag:         "Documents",
-		OperationID: "documentsUpdate",
-		Method:      "PATCH",
-		Path:        "/api/v1/documents/{identifier}",
-		PathParams:  []paramInfo{{Name: "identifier", In: "path"}},
-		HasBody:     true,
-	}
+	op := operationFromRealSpec(t, "documentsUpdate")
 
 	cmd := buildCommand(op, exec)
 	cmd.SetArgs([]string{"doc-123", "--name", "New Name", "--clear-existing-draft", "true"})
@@ -904,6 +980,27 @@ func TestShorthand_AllEntriesBuildSuccessfully(t *testing.T) {
 		for _, f := range sh.Flags {
 			if cmd.Flags().Lookup(f.FlagName) == nil {
 				t.Errorf("%s: missing promoted flag --%s", opID, f.FlagName)
+			}
+		}
+	}
+}
+
+func TestShorthand_AllMappedFieldsExistInSpec(t *testing.T) {
+	ops := operationsFromRealSpec(t)
+	for opID, sh := range bodyShorthands {
+		op, ok := ops[opID]
+		if !ok {
+			t.Errorf("%s: operation is not present in the OpenAPI spec", opID)
+			continue
+		}
+		for _, arg := range sh.Args {
+			if _, err := resolveField(op.BodySchema, arg.FieldPath); err != nil {
+				t.Errorf("%s: positional field %q is not present in the request schema: %v", opID, arg.FieldPath, err)
+			}
+		}
+		for _, flag := range sh.Flags {
+			if _, err := shorthandFieldType(op.BodySchema, flag.FieldPath); err != nil {
+				t.Errorf("%s: flag --%s: %v", opID, flag.FlagName, err)
 			}
 		}
 	}
