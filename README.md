@@ -122,6 +122,11 @@ After installing, restart your shell and try: `omni <TAB>`, `omni ai <TAB>`, `om
 
 The CLI embeds the OpenAPI spec (`api/openapi.json`) into the binary. At startup it parses the spec and generates cobra subcommands for every operation. Each API tag becomes a command group, path params become positional args, query params become flags, and request bodies are passed via `--body` or stdin.
 
+A request body can be given three ways: inline JSON (`--body '{"name":"x"}'`), a file
+(`--body @path/to/body.json`), or stdin (`--body - < path/to/body.json`). The body is
+checked as JSON before the request is sent, so a typo fails locally instead of coming
+back as a generic API 400.
+
 Adding a new API endpoint requires no code changes — update `api/openapi.json` (or run `make sync-spec`) and rebuild.
 
 ## Auth

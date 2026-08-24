@@ -92,6 +92,7 @@ type operationInfo struct {
 	QueryParams []paramInfo
 	HasBody     bool
 	BodySchema  *base.SchemaProxy // request body schema, when HasBody
+	BodyNonJSON bool              // request body uses a non-JSON media type (e.g. multipart)
 	Deprecated  bool
 }
 
@@ -159,6 +160,7 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 		if op.RequestBody != nil {
 			info.HasBody = true
 			info.BodySchema = requestBodySchema(op.RequestBody)
+			info.BodyNonJSON = !requestBodyIsJSON(op.RequestBody)
 		}
 
 		groups[tag] = append(groups[tag], info)
@@ -212,7 +214,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				path += "?" + query.Encode()
 			}
 
-			// Read body from stdin or flags
+			// Read body from stdin, a file, or the flag value itself
 			var body []byte
 			if op.HasBody {
 				bodyFlag, _ := cmd.Flags().GetString("body")
@@ -222,21 +224,20 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 					return fmt.Errorf("cannot use both --body and --json-body; use one or the other")
 				}
 
-				effectiveBody := bodyFlag
+				effectiveBody, flagName := bodyFlag, "body"
 				if jsonBodyFlag != "" {
-					effectiveBody = jsonBodyFlag
+					effectiveBody, flagName = jsonBodyFlag, "json-body"
 				}
 
-				if effectiveBody == "-" || effectiveBody == "" {
-					if effectiveBody == "-" {
-						var err error
-						body, err = readStdin()
-						if err != nil {
-							return fmt.Errorf("reading stdin: %w", err)
-						}
+				if effectiveBody != "" {
+					var err error
+					body, err = resolveBody(effectiveBody, flagName, !op.BodyNonJSON)
+					if err != nil {
+						// A body input error is self-explanatory; the usage
+						// block would bury the hint.
+						cmd.SilenceUsage = true
+						return err
 					}
-				} else if effectiveBody != "" {
-					body = []byte(effectiveBody)
 				}
 			}
 
@@ -261,8 +262,8 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 
 	// If the operation accepts a body, add --body and --json-body flags
 	if op.HasBody {
-		cmd.Flags().String("body", "", `request body as JSON string, or "-" for stdin (run with --schema to see its shape)`)
-		cmd.Flags().String("json-body", "", `request body as JSON string, or "-" for stdin (alias for --body)`)
+		cmd.Flags().String("body", "", `request body as JSON string, "@path/to/file.json" to read a file, or "-" for stdin (run with --schema to see its shape)`)
+		cmd.Flags().String("json-body", "", `request body as JSON string, "@path/to/file.json", or "-" for stdin (alias for --body)`)
 		cmd.Flags().MarkHidden("json-body")
 	}
 
@@ -335,6 +336,23 @@ func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
 		}
 	}
 	return first
+}
+
+// requestBodyIsJSON reports whether a request body is sent as JSON. Bodies with
+// no declared content default to JSON — that's what the CLI sends. Only the
+// media types the spec actually declares (today: multipart/form-data uploads)
+// opt out of client-side JSON validation.
+func requestBodyIsJSON(rb *v3.RequestBody) bool {
+	if rb == nil || rb.Content == nil || rb.Content.Len() == 0 {
+		return true
+	}
+	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
+		mt := pair.Key()
+		if mt == "application/json" || strings.HasSuffix(mt, "+json") {
+			return true
+		}
+	}
+	return false
 }
 
 // commandName derives a CLI subcommand name from the operationId or method+path.

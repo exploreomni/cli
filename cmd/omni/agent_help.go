@@ -99,7 +99,8 @@ name a leaf without knowing the container shape:
   --token TOKEN   API token (overrides env/config)
   --base-url URL  API base URL (overrides config)
   --profile NAME  Config profile to use
-  --body JSON     Request body (JSON string or "-" for stdin)
+  --body JSON     Request body: JSON string, @path/to/file.json, or "-" for stdin
+                  (a bare path is rejected client-side — prefix it with @)
   --schema        Print the request body's schema + example, then exit
   --field PATH    With --schema: drill into a dotted field path
   --depth N       With --schema: cap nesting depth (lower = smaller)
