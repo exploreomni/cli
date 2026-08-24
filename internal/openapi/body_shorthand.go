@@ -438,7 +438,7 @@ func shorthandFieldType(bodySchema *base.SchemaProxy, fieldPath string) (string,
 	if bodySchema == nil {
 		return "string", nil
 	}
-	fieldSchema, err := resolveField(bodySchema, fieldPath)
+	fieldSchema, err := resolveField(bodySchema, fieldPath, "field")
 	if err != nil {
 		return "", fmt.Errorf("field %q is not present in the request schema: %w", fieldPath, err)
 	}
