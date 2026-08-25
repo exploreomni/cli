@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -189,6 +190,71 @@ func TestCreateBranchCmd_RequiresArg(t *testing.T) {
 	cmd.SetArgs([]string{})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when no model-id provided")
+	}
+}
+
+// TestCreateBranchCmd_Schema verifies the hand-written command answers --schema
+// with the same document shape as generated commands: no positional arg, no
+// token, no API call.
+func TestCreateBranchCmd_Schema(t *testing.T) {
+	var called bool
+	root := newTestRoot(func(req openapi.APIRequest) error { called = true; return nil })
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"models", "create-branch", "--schema"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
+	}
+	if called {
+		t.Error("executor was called on a --schema run")
+	}
+
+	var doc openapi.SchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	if doc.Method != "POST" || doc.Path != "/api/v1/models" {
+		t.Errorf("method/path = %q %q, want POST /api/v1/models", doc.Method, doc.Path)
+	}
+	if len(doc.Args) != 1 || doc.Args[0].Placeholder != "<model-id>" {
+		t.Errorf("args = %+v, want the <model-id> positional", doc.Args)
+	}
+	body, ok := doc.Body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is not an object: %T", doc.Body)
+	}
+	props, ok := body["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("body.properties missing: %v", body)
+	}
+	for _, key := range []string{"modelKind", "baseModelId", "connectionId", "modelName"} {
+		if _, ok := props[key]; !ok {
+			t.Errorf("body properties missing %q", key)
+		}
+	}
+	if doc.Response == nil || doc.Response.Status != "200" || doc.Response.Schema == nil {
+		t.Errorf("response = %+v, want the 200 model-create shape", doc.Response)
+	}
+}
+
+// --field has nothing to drill into here (the body is assembled by the CLI), so
+// it must fail with an explanation rather than being silently ignored.
+func TestCreateBranchCmd_SchemaFieldUnsupported(t *testing.T) {
+	root := newTestRoot(func(req openapi.APIRequest) error { return nil })
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	root.SetArgs([]string{"models", "create-branch", "--schema", "--field", "modelKind"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected an error for --field on create-branch")
+	}
+	if !strings.Contains(err.Error(), "--field is not supported") {
+		t.Errorf("error = %q, want it to explain --field is unsupported here", err.Error())
 	}
 }
 
