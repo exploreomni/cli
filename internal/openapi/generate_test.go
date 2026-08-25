@@ -652,15 +652,25 @@ func TestValidateFlagNames(t *testing.T) {
 		t.Errorf("unexpected error for a reserved-name param: %v", err)
 	}
 
-	// A param colliding with a promoted body-shorthand flag is reported —
-	// labelsCreate promotes "color" and "description".
+	// A param colliding with a promoted body-shorthand flag is renamed too —
+	// labelsCreate promotes "color" and "description" — so nothing is reported.
 	withShorthand := &operationInfo{
 		OperationID: "labelsCreate",
 		QueryParams: []paramInfo{{Name: "Color"}},
 		HasBody:     true,
 	}
+	if err := validateFlagNames(withShorthand); err != nil {
+		t.Errorf("unexpected error for a param colliding with a shorthand: %v", err)
+	}
+
+	// Only hand-written shorthands are reported: one that took a built-in
+	// flag's name could not be registered at all.
+	sh := GetBodyShorthand("labelsCreate")
+	original := sh.Flags
+	sh.Flags = append([]FlagMapping{{FlagName: "body", FieldPath: "name"}}, original...)
+	defer func() { sh.Flags = original }()
 	if err := validateFlagNames(withShorthand); err == nil {
-		t.Error("expected shorthand flag collision to be reported")
+		t.Error("expected a shorthand named after a built-in flag to be reported")
 	}
 }
 
@@ -717,7 +727,7 @@ func TestShorthand_TypedFlagsAcceptAlternateSpellings(t *testing.T) {
 // value both filter the request and choose the host it goes to.
 // ---------------------------------------------------------------------------
 
-func TestQueryFlagName_ReservedNamesArePrefixed(t *testing.T) {
+func TestResolveQueryFlags_ReservedNamesArePrefixed(t *testing.T) {
 	cases := []struct {
 		in      string
 		hasBody bool
@@ -749,9 +759,117 @@ func TestQueryFlagName_ReservedNamesArePrefixed(t *testing.T) {
 		{"tokenId", false, "token-id"},
 	}
 	for _, c := range cases {
-		if got := queryFlagName(c.in, c.hasBody); got != c.want {
-			t.Errorf("queryFlagName(%q, hasBody=%v) = %q, want %q", c.in, c.hasBody, got, c.want)
+		op := &operationInfo{
+			OperationID: "thingsList",
+			QueryParams: []paramInfo{{Name: c.in, In: "query"}},
+			HasBody:     c.hasBody,
 		}
+		if got := resolveQueryFlags(op)[0].Name; got != c.want {
+			t.Errorf("param %q (hasBody=%v) registered as --%s, want --%s", c.in, c.hasBody, got, c.want)
+		}
+	}
+}
+
+// A body shorthand is our hand-written UX sugar; the query param is the
+// endpoint's contract. When a synced spec adds a param that lands on a
+// shorthand's flag name, the param moves aside — generation must not fail, that
+// would take down the whole CLI.
+func TestResolveQueryFlags_ShorthandNamesAreReservedPerOperation(t *testing.T) {
+	// labelsCreate promotes "color" and "description" as shorthand flags.
+	collides := &operationInfo{
+		OperationID: "labelsCreate",
+		QueryParams: []paramInfo{{Name: "color", In: "query"}},
+		HasBody:     true,
+	}
+	got := resolveQueryFlags(collides)[0]
+	if got.Name != "param-color" {
+		t.Errorf("param %q registered as --%s, want --param-color", "color", got.Name)
+	}
+	if !strings.Contains(got.Note, "shorthand") {
+		t.Errorf("help note should explain the shorthand collision, got %q", got.Note)
+	}
+
+	// The same param name on an operation with no shorthand is left alone.
+	free := &operationInfo{
+		OperationID: "thingsList",
+		QueryParams: []paramInfo{{Name: "color", In: "query"}},
+	}
+	if name := resolveQueryFlags(free)[0].Name; name != "color" {
+		t.Errorf("without a shorthand the param should keep --color, got --%s", name)
+	}
+}
+
+// End to end: a synced spec that adds a query param named after one of our
+// shorthand flags still generates, both flags work, and the param goes out
+// under its spec spelling.
+func TestGenerateCommands_QueryParamCollidingWithShorthand(t *testing.T) {
+	// labelsCreate promotes --color as a body shorthand; the spec here also
+	// declares a "color" query param.
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/labels": {
+				"post": {
+					"operationId": "labelsCreate",
+					"tags": ["labels"],
+					"parameters": [{"name": "color", "in": "query", "schema": {"type": "string"}}],
+					"requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+						"name": {"type": "string"},
+						"color": {"type": "string"}
+					}}}}},
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	var captured APIRequest
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { captured = req; return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	var cmd *cobra.Command
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == "create" {
+			cmd = sub
+		}
+	}
+	if cmd == nil {
+		t.Fatal("expected a generated \"labels create\" command")
+	}
+
+	// The shorthand keeps --color; the query param moves to --param-color.
+	if f := cmd.Flags().Lookup("color"); f == nil || f.Usage != "hex color (e.g. #0366d6)" {
+		t.Fatalf("--color should still be the body shorthand, got %#v", f)
+	}
+	param := cmd.Flags().Lookup("param-color")
+	if param == nil {
+		t.Fatal("expected the query param to be registered as --param-color")
+	}
+	if !strings.Contains(param.Usage, "shorthand") {
+		t.Errorf("help should explain the rename, got %q", param.Usage)
+	}
+
+	tagCmd := cmds[0]
+	tagCmd.SilenceUsage, tagCmd.SilenceErrors = true, true
+	tagCmd.SetArgs([]string{"create", "important", "--color", "#0366d6", "--param-color", "red"})
+	if err := tagCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// The query param goes out under its spec spelling...
+	if captured.Path != "/api/v1/labels?color=red" {
+		t.Errorf("path = %q, want the param sent as color=red", captured.Path)
+	}
+	// ...and the shorthand still lands in the body.
+	var body map[string]interface{}
+	if err := json.Unmarshal(captured.Body, &body); err != nil {
+		t.Fatalf("unmarshaling body: %v", err)
+	}
+	if body["color"] != "#0366d6" || body["name"] != "important" {
+		t.Errorf("body = %#v, want name=important and color=#0366d6", body)
 	}
 }
 
