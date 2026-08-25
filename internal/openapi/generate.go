@@ -4,6 +4,7 @@
 package openapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -61,10 +62,7 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 
 	for _, tag := range tagNames {
 		ops := groups[tag]
-		tagCmd := &cobra.Command{
-			Use:   slugify(tag),
-			Short: fmt.Sprintf("%s commands", tag),
-		}
+		tagCmd := NewGroupCommand(slugify(tag), fmt.Sprintf("%s commands", tag))
 
 		for _, op := range ops {
 			if err := validateFlagNames(op); err != nil {
@@ -77,6 +75,146 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 	}
 
 	return cmds, nil
+}
+
+const (
+	// groupAnnotation marks a command as a subcommand group, so the shared
+	// help func knows which commands to apply unknown-subcommand handling to.
+	groupAnnotation = "omni/group"
+
+	// unknownSubcommandAnnotation records that a command printed an
+	// unknown-subcommand error instead of help. Cobra's help path always
+	// returns nil from Execute, so the caller has to read this to exit
+	// non-zero — see UnknownSubcommand.
+	unknownSubcommandAnnotation = "omni/unknown-subcommand"
+)
+
+// NewGroupCommand builds a command that only groups subcommands (e.g. `omni
+// models`), with the handling that keeps a mistyped or missing subcommand from
+// looking like success: an unknown subcommand is a cobra-style error with
+// suggestions, and a bare group prints its help to stderr — both exit non-zero
+// with nothing on stdout. That covers `omni models list-branches --help`, which
+// is a typo rather than a help request; plain `omni <group> --help` is
+// unaffected (help on stdout, exit 0).
+func NewGroupCommand(use, short string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:         use,
+		Short:       short,
+		Annotations: map[string]string{groupAnnotation: "true"},
+		RunE:        GroupRunE,
+	}
+	cmd.SetHelpFunc(groupHelpFunc)
+	return cmd
+}
+
+// GroupRunE is the RunE for a command built by NewGroupCommand.
+func GroupRunE(cmd *cobra.Command, args []string) error {
+	// Past flag parsing: from here on, errors are runtime errors, not usage
+	// errors, so don't bury the message under the usage block.
+	cmd.SilenceUsage = true
+
+	if len(args) == 0 {
+		// The group produced no data, so its help goes to stderr and stdout
+		// stays empty for the pipe. The help text is the whole error report:
+		// letting cobra append its own "Error: ..." line would state the same
+		// failure twice, so silence it and let the non-zero exit speak.
+		renderHelp(cmd.ErrOrStderr(), cmd)
+		cmd.SilenceErrors = true
+		return fmt.Errorf("%q requires a subcommand", cmd.CommandPath())
+	}
+
+	return errors.New(unknownSubcommandMessage(cmd, args[0]))
+}
+
+// groupHelpFunc backs --help for group commands and, by inheritance, for their
+// subcommands. It only diverges from cobra's default when a group is asked for
+// help with an unresolved positional argument left over — `omni models
+// list-branches --help` — which is a typo, not a help request.
+func groupHelpFunc(cmd *cobra.Command, _ []string) {
+	leftover := cmd.Flags().Args()
+	if !isGroup(cmd) || len(leftover) == 0 {
+		renderHelp(cmd.OutOrStdout(), cmd)
+		return
+	}
+
+	cmd.Annotations[unknownSubcommandAnnotation] = leftover[0]
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", cmd.ErrPrefix(), unknownSubcommandMessage(cmd, leftover[0]))
+}
+
+// UnknownSubcommand reports whether cmd's help output was really an
+// unknown-subcommand error. Cobra returns a nil error from Execute whenever it
+// handles the help flag, so main has to ask before choosing an exit code.
+func UnknownSubcommand(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd.Annotations[unknownSubcommandAnnotation]
+	return ok
+}
+
+func isGroup(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[groupAnnotation] == "true"
+}
+
+func unknownSubcommandMessage(cmd *cobra.Command, typed string) string {
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "unknown subcommand %q for %q", typed, cmd.CommandPath())
+	if names := subcommandSuggestions(cmd, typed); len(names) > 0 {
+		msg.WriteString("\n\nDid you mean this?")
+		for _, n := range names {
+			fmt.Fprintf(&msg, "\n\t%s", n)
+		}
+	}
+	fmt.Fprintf(&msg, "\n\nRun '%s --help' for a list of available subcommands", cmd.CommandPath())
+	return msg.String()
+}
+
+// renderHelp writes cobra's stock help text for cmd to w. It mirrors cobra's
+// defaultHelpFunc rather than calling cmd.Help(), which dispatches back through
+// HelpFunc — i.e. straight back into groupHelpFunc, forever.
+func renderHelp(w io.Writer, cmd *cobra.Command) {
+	desc := cmd.Long
+	if desc == "" {
+		desc = cmd.Short
+	}
+	if desc = strings.TrimRight(desc, " \t\n"); desc != "" {
+		fmt.Fprintf(w, "%s\n\n", desc)
+	}
+	if cmd.Runnable() || cmd.HasSubCommands() {
+		fmt.Fprint(w, cmd.UsageString())
+	}
+}
+
+// subcommandSuggestions returns close matches for a mistyped subcommand. It
+// extends cobra's Levenshtein/prefix matching with a reverse-prefix pass so an
+// over-specified guess like `models list-branches` still points at `list`
+// (the real answer being `list --model-kind BRANCH`).
+func subcommandSuggestions(cmd *cobra.Command, typed string) []string {
+	if cmd.DisableSuggestions {
+		return nil
+	}
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = 2
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	for _, s := range cmd.SuggestionsFor(typed) {
+		if !seen[s] {
+			seen[s] = true
+			names = append(names, s)
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		if !sub.IsAvailableCommand() || seen[sub.Name()] {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(typed), strings.ToLower(sub.Name())+"-") {
+			seen[sub.Name()] = true
+			names = append(names, sub.Name())
+		}
+	}
+	return names
 }
 
 type paramInfo struct {
@@ -210,6 +348,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		Deprecated: deprecatedMsg(op),
 		Args:       cobra.ExactArgs(len(op.PathParams)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags parsed and args validated: anything that fails from here on
+			// (bad body, HTTP 4xx/5xx) is a runtime error, and dumping the usage
+			// block after it just buries the message — and, when the caller is
+			// piping, mixes prose into the stream.
+			cmd.SilenceUsage = true
+
 			// Substitute path params
 			path := op.Path
 			for i, p := range op.PathParams {

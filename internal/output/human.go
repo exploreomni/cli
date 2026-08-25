@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,7 +27,14 @@ func HumanTo(w io.Writer, body io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
+	return HumanBytes(w, data)
+}
+
+// HumanBytes renders an already-read JSON body to w. Callers that have the
+// bytes in hand use this so a large payload isn't read — and allocated — a
+// second time.
+func HumanBytes(w io.Writer, data []byte) error {
+	if len(bytes.TrimSpace(data)) == 0 {
 		fmt.Fprintln(w, "✓ ok")
 		return nil
 	}

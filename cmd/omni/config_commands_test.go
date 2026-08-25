@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
 
@@ -78,6 +80,48 @@ func TestApplyOAuthToken_CopiesAllFields(t *testing.T) {
 	// APIEndpoint should be untouched — the helper only writes auth fields.
 	if p.APIEndpoint != "https://myorg.omniapp.co" {
 		t.Errorf("APIEndpoint mutated: got %q", p.APIEndpoint)
+	}
+}
+
+// Runtime failures in the hand-written config commands must not dump the usage
+// block: same contract the generated API commands follow, so an error message
+// isn't buried under a wall of flags.
+func TestConfigCommands_NoUsageOnRuntimeError(t *testing.T) {
+	// An empty (absent) config file makes every command that loads config fail.
+	withConfig(t, nil)
+
+	cases := []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"init", configInitCmd, []string{"--name", "prod", "--endpoint", "https://myorg.omniapp.co", "--auth", "magic"}},
+		{"show", configShowCmd, nil},
+		{"list", configListCmd, nil},
+		{"use", configUseCmd, []string{"ghost"}},
+		{"rename", configRenameCmd, []string{"ghost", "other"}},
+		{"delete", configDeleteCmd, []string{"ghost", "--yes"}},
+		{"login", configLoginCmd, []string{"ghost"}},
+		{"logout", configLogoutCmd, []string{"ghost"}},
+		{"set-format", configSetFormatCmd, []string{"yaml"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			cmd := tc.cmd()
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tc.args)
+
+			if err := cmd.Execute(); err == nil {
+				t.Fatalf("expected a runtime error for %s", tc.name)
+			}
+			if strings.Contains(out.String(), "Usage:") {
+				t.Errorf("output = %q, want no usage block after a runtime error", out.String())
+			}
+		})
 	}
 }
 

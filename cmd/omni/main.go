@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -81,7 +82,12 @@ func main() {
 	addBranchCommands(root, executeAPICall)
 	addUserCommands(root, executeAPICall)
 
-	if err := root.Execute(); err != nil {
+	// ExecuteC, not Execute: cobra returns a nil error whenever it answers the
+	// help flag, including for `omni models list-branches --help`, where the
+	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
+	// command that ran whether that's what happened.
+	cmd, err := root.ExecuteC()
+	if err != nil || openapi.UnknownSubcommand(cmd) {
 		os.Exit(1)
 	}
 }
@@ -124,7 +130,16 @@ func executeAPICall(req openapi.APIRequest) error {
 	}
 	defer resp.Body.Close()
 
-	return outputResponse(resp, format, compact)
+	err = outputResponse(resp, format, compact)
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		// outputResponse already wrote a complete error message to stderr —
+		// a JSON envelope carrying the status, or the human-mode one-liner.
+		// Letting cobra append its own line would say it twice, and would
+		// leave two documents on stderr for JSON consumers to trip over.
+		req.Cmd.SilenceErrors = true
+	}
+	return err
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.
