@@ -39,21 +39,42 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   omni dashboards download <dashboard-id>
 
 ### Read or edit a document (v2)
-  # Read live state. The response is a valid draft PATCH body (round-trip design).
+  # Read live state.
   omni documents v2-get <identifier> --compact
 
   # Edit metadata with flags (no JSON needed), then publish the draft:
   omni documents v2-patch-draft <identifier> --name "Q3 Revenue" --summary "rename"
   omni documents v2-publish-draft <identifier>
 
-  # Edit content by round-tripping the full state through a file:
+  # Edit content. A v2-get response is a STARTING POINT for a PATCH body, not a
+  # guaranteed round-trip — read the caveats below before doing this:
   omni documents v2-get <identifier> > doc.json
   # ...edit doc.json (containers, controls, queryPresentations, settings)...
   omni documents v2-patch-draft <identifier> --body - < doc.json
+  omni documents v2-get <identifier> --compact   # verify BEFORE publishing
   omni documents v2-publish-draft <identifier>
 
   # Create a brand-new document (published immediately):
   omni documents v2-create <model-id> "My Dashboard"
+
+#### v2 PATCH caveats (do not skip — these cost real debugging time)
+- A v2-get response is NOT accepted verbatim as a PATCH body. It carries
+  read-only/derived keys the validator rejects, so expect to strip fields and
+  retry: "hidden" on filter configs, and per-tile keys such as calculations,
+  column_totals, fill_fields, pivots, row_totals, userEditedSQL, chartType,
+  visType, fields, config. Read the error, drop the named key, retry.
+- Send only the sections you are changing. Patch the smallest subtree that
+  expresses the edit rather than replaying the whole document.
+- Tiles (queryPresentations.data.<n>) and controls (controls.data.<id>) are
+  REPLACE-WHOLE. Send the complete object for the entry you touch; a partial
+  entry is rejected or silently loses the omitted fields.
+- queryPresentations.order must enumerate EVERY presentation key, not just
+  the ones you moved or added.
+- A 200 does not mean the content survived. A successful patch can null out
+  visConfig on tiles you did not intend to touch. Always re-read with v2-get
+  and check the tiles you care about before v2-publish-draft.
+- Use "omni documents v2-patch-draft --schema --field <path>" to learn the
+  accepted shape of a subtree instead of guessing from the v2-get output.
 
 ### Search Omni documentation
   omni ai search-omni-docs --body '{"query":"how do I..."}'
@@ -108,10 +129,17 @@ name a leaf without knowing the container shape:
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
 - Set a user's attribute values: omni users set-attributes <user-id> --attr region=us-east
 - Path parameters are positional args: omni dashboards download <dashboard-id>
+  Generated API commands describe every positional in an "Arguments:" section in
+  their --help. Read it — some positionals take a NAME, not a UUID:
+    omni models merge-branch <model-id> <branch-name>   # 2nd arg is the NAME
+  The few hand-written commands (config *, agent-help, models create-branch,
+  users set-attributes) have no Arguments section — read their Usage line.
 - Query parameters are flags: omni models list --page-size 10
 - Flag names are kebab-case, and spelling is forgiving: case, dashes and
   underscores are ignored, so --branch-id, --branchId, --branch_id and
   --branchid all mean the same flag. --help always shows the canonical form.
+- Promoted field flags (e.g. --name, --summary) are mutually exclusive with
+  --body: using both is an error, not a merge. Pick one and put every field there.
 - Run "omni <group> --help" to see all commands in a group.
 - Run "omni <group> <command> --help" to see flags for a specific command.
 `

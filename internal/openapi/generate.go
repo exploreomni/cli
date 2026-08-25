@@ -292,8 +292,19 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	}
 
 	// Apply body shorthand if one exists for this operation
-	if sh := GetBodyShorthand(op.OperationID); sh != nil {
+	sh := GetBodyShorthand(op.OperationID)
+	if sh != nil {
 		applyBodyShorthand(cmd, op, sh)
+	}
+
+	// Describe the positional args in the long help. Cobra's usage line only
+	// shows the placeholders, so without this the spec's param descriptions
+	// (e.g. "branch name", not "branch UUID") never reach the reader.
+	if args := argumentsHelp(op, sh); args != "" {
+		if cmd.Long == "" {
+			cmd.Long = short
+		}
+		cmd.Long = strings.TrimRight(cmd.Long, "\n") + "\n\n" + args
 	}
 
 	// Add the --schema discovery flag last, wrapping arg validation and RunE so
@@ -332,6 +343,53 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// argumentsHelp renders an "Arguments:" block listing every positional the
+// command accepts — path params first (in URL order), then any body-shorthand
+// args — with the description the spec gives for each. Returns "" when the
+// command takes no positionals.
+func argumentsHelp(op *operationInfo, sh *BodyShorthand) string {
+	type argLine struct{ name, desc string }
+	var lines []argLine
+
+	for _, p := range op.PathParams {
+		lines = append(lines, argLine{"<" + slugify(p.Name) + ">", firstLine(p.Description)})
+	}
+	if sh != nil {
+		for _, a := range sh.Args {
+			lines = append(lines, argLine{"<" + a.Name + ">", firstLine(a.Description)})
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	width := 0
+	for _, l := range lines {
+		if len(l.name) > width {
+			width = len(l.name)
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("Arguments:")
+	for _, l := range lines {
+		b.WriteString("\n  " + l.name)
+		if l.desc != "" {
+			b.WriteString(strings.Repeat(" ", width-len(l.name)) + "  " + l.desc)
+		}
+	}
+	return b.String()
+}
+
+// firstLine keeps the Arguments block to one line per arg.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 // schemaRequested reports whether the --schema discovery flag is set.
