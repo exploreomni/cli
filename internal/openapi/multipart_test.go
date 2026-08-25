@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 const multipartTestSpec = `{
@@ -287,5 +289,141 @@ func TestGenerateCommands_MultipartBodyPathHint(t *testing.T) {
 	}
 	if called {
 		t.Fatal("executor called for a path-shaped --body")
+	}
+}
+
+// An explicitly empty --body is a body the caller asked for, so it gets the
+// "omit the flag" error rather than reaching buildMultipartBody as a bare EOF.
+func TestGenerateCommands_MultipartEmptyBodyFlag(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "people.csv")
+	if err := os.WriteFile(filePath, []byte("name\nAda\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	commands, err := GenerateCommands([]byte(multipartTestSpec), func(request APIRequest) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := commands[0].Commands()[0]
+	for flag, value := range map[string]string{"file": filePath, "model-id": "model-123", "body": ""} {
+		if err := command.Flags().Set(flag, value); err != nil {
+			t.Fatalf("set --%s: %v", flag, err)
+		}
+	}
+
+	err = command.RunE(command, nil)
+	if err == nil || !strings.Contains(err.Error(), "--body is empty") {
+		t.Fatalf("error = %v, want the empty --body message", err)
+	}
+	if called {
+		t.Fatal("executor called for an empty --body")
+	}
+}
+
+// Binary field values expand "~" the same way --body @path does; shells leave
+// it alone inside a flag value.
+func TestGenerateCommands_MultipartExpandsHomeInFilePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "people.csv"), []byte("name\nAda\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured APIRequest
+	commands, err := GenerateCommands([]byte(multipartTestSpec), func(request APIRequest) error {
+		captured = request
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := commands[0].Commands()[0]
+	for flag, value := range map[string]string{"file": "~/people.csv", "model-id": "model-123"} {
+		if err := command.Flags().Set(flag, value); err != nil {
+			t.Fatalf("set --%s: %v", flag, err)
+		}
+	}
+	if err := command.RunE(command, nil); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	parts := parseCapturedMultipart(t, captured)
+	if got := parts["file"]; got.fileName != "people.csv" || len(got.values) != 1 || got.values[0] != "name\nAda\n" {
+		t.Errorf("file part = %#v", got)
+	}
+}
+
+// JSON "null" decodes into a nil map, which the flag merge would panic on.
+func TestGenerateCommands_MultipartRejectsNullBody(t *testing.T) {
+	called := false
+	commands, err := GenerateCommands([]byte(multipartTestSpec), func(request APIRequest) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := commands[0].Commands()[0]
+	for flag, value := range map[string]string{"body": "null", "model-id": "model-123"} {
+		if err := command.Flags().Set(flag, value); err != nil {
+			t.Fatalf("set --%s: %v", flag, err)
+		}
+	}
+
+	err = command.RunE(command, nil)
+	if err == nil || !strings.Contains(err.Error(), "JSON object of field values") {
+		t.Fatalf("error = %v, want a non-object --body error", err)
+	}
+	if called {
+		t.Fatal("executor called for a null --body")
+	}
+}
+
+func TestParseMultipartFlagValue_ChecksTypeAndTrailingData(t *testing.T) {
+	array := multipartFieldInfo{Name: "labels", Type: "array"}
+	object := multipartFieldInfo{Name: "meta", Type: "object"}
+
+	if _, err := parseMultipartFlagValue(array, `{"x":1}`); err == nil {
+		t.Error("an object passed for an array field was accepted")
+	}
+	if _, err := parseMultipartFlagValue(object, `["a"]`); err == nil {
+		t.Error("an array passed for an object field was accepted")
+	}
+	if _, err := parseMultipartFlagValue(array, `["a"] trailing`); err == nil {
+		t.Error("trailing data after an array was accepted")
+	}
+	if _, err := parseMultipartFlagValue(array, `["a","b"]`); err != nil {
+		t.Errorf("valid array rejected: %v", err)
+	}
+}
+
+// Two fields whose flag names collide must not register the same pflag twice —
+// pflag panics on a redefinition, taking down the whole CLI at startup.
+func TestRegisterMultipartFlags_ResolvesCollisions(t *testing.T) {
+	command := &cobra.Command{Use: "upload"}
+	fields := []multipartFieldInfo{
+		{Name: "body", FlagName: "body"},
+		{Name: "Body", FlagName: "body"},
+		{Name: "body_", FlagName: "body"},
+	}
+
+	registerMultipartFlags(command, fields)
+
+	seen := map[string]bool{}
+	for _, field := range fields {
+		if field.FlagName == "body" {
+			t.Errorf("field %q kept the reserved --body name", field.Name)
+		}
+		if seen[field.FlagName] {
+			t.Errorf("duplicate flag name %q", field.FlagName)
+		}
+		seen[field.FlagName] = true
+		if command.Flags().Lookup(field.FlagName) == nil {
+			t.Errorf("flag --%s was not registered", field.FlagName)
+		}
 	}
 }

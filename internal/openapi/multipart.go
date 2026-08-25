@@ -106,11 +106,20 @@ func registerMultipartFlags(cmd *cobra.Command, fields []multipartFieldInfo) {
 		"body": true, "json-body": true, "schema": true, "field": true, "depth": true,
 		"profile": true, "token": true, "base-url": true, "compact": true, "format": true, "help": true,
 	}
+	taken := func(name string) bool {
+		return reserved[name] || cmd.Flags().Lookup(name) != nil
+	}
 	for i := range fields {
 		field := &fields[i]
 		flagName := field.FlagName
-		if reserved[flagName] || cmd.Flags().Lookup(flagName) != nil {
+		if taken(flagName) {
 			flagName = "form-" + flagName
+		}
+		// Two fields can collide on the same prefixed name. Registering a
+		// duplicate makes pflag panic, which would take down the whole CLI at
+		// startup, so keep suffixing until the name is free.
+		for suffix := 2; taken(flagName); suffix++ {
+			flagName = fmt.Sprintf("form-%s-%d", field.FlagName, suffix)
 		}
 		field.FlagName = flagName
 
@@ -135,6 +144,11 @@ func buildMultipartBody(cmd *cobra.Command, rawBody []byte, bodyProvided bool, f
 		decoder.UseNumber()
 		if err := decoder.Decode(&values); err != nil {
 			return nil, "", fmt.Errorf("invalid multipart --body JSON: %w", err)
+		}
+		// JSON "null" decodes into a nil map, which the flag merge below would
+		// panic on.
+		if values == nil {
+			return nil, "", fmt.Errorf("multipart --body must be a JSON object of field values")
 		}
 	}
 
@@ -213,16 +227,39 @@ func parseMultipartFlagValue(field multipartFieldInfo, value string) (interface{
 	case "number":
 		return strconv.ParseFloat(value, 64)
 	case "array", "object":
-		var parsed interface{}
-		decoder := json.NewDecoder(strings.NewReader(value))
-		decoder.UseNumber()
-		if err := decoder.Decode(&parsed); err != nil {
-			return nil, fmt.Errorf("expected JSON %s: %w", field.Type, err)
-		}
-		return parsed, nil
+		return decodeJSONFlagValue(field.Type, value)
 	default:
 		return value, nil
 	}
+}
+
+// decodeJSONFlagValue parses a JSON flag value against the field's declared
+// type. Decoding into interface{} would accept an object where the schema says
+// array and would silently ignore anything after the first value, so the type
+// is pinned and the input must end there.
+func decodeJSONFlagValue(fieldType, value string) (interface{}, error) {
+	decoder := json.NewDecoder(strings.NewReader(value))
+	decoder.UseNumber()
+
+	var parsed interface{}
+	if fieldType == "array" {
+		var typed []interface{}
+		if err := decoder.Decode(&typed); err != nil {
+			return nil, fmt.Errorf("expected JSON array: %w", err)
+		}
+		parsed = typed
+	} else {
+		var typed map[string]interface{}
+		if err := decoder.Decode(&typed); err != nil {
+			return nil, fmt.Errorf("expected JSON object: %w", err)
+		}
+		parsed = typed
+	}
+
+	if err := decoder.Decode(new(json.RawMessage)); err != io.EOF {
+		return nil, fmt.Errorf("expected a single JSON %s with no trailing data", fieldType)
+	}
+	return parsed, nil
 }
 
 func writeMultipartValue(writer *multipart.Writer, field multipartFieldInfo, value interface{}) error {
@@ -243,6 +280,8 @@ func writeMultipartSingleValue(writer *multipart.Writer, field multipartFieldInf
 		if !ok {
 			return fmt.Errorf("multipart file field %q must be a file path", field.Name)
 		}
+		// Match --body @path: shells don't expand "~" inside a flag value.
+		path = expandHome(path)
 		file, err := os.Open(path)
 		if err != nil {
 			return fmt.Errorf("opening multipart file %q for field %q: %w", path, field.Name, err)
