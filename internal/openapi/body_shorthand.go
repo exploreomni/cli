@@ -305,6 +305,11 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 	// exclusivity note is appended here, for every flag regardless of type,
 	// rather than baked into each Description literal so the help text can't
 	// drift from the runtime check below.
+	//
+	// FlagName is the canonical kebab-case spelling. Registration goes through
+	// the flag set's normalization function (installed in buildCommand), so
+	// --branchid / --branchId / --branch_id reach the same flag, as do the
+	// Lookup and Changed calls below.
 	for _, f := range sh.Flags {
 		fieldType, err := shorthandFieldType(op.BodySchema, f.FieldPath)
 		if err != nil {

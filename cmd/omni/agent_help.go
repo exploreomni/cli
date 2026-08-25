@@ -134,7 +134,10 @@ name a leaf without knowing the container shape:
     omni models merge-branch <model-id> <branch-name>   # 2nd arg is the NAME
   The few hand-written commands (config *, agent-help, models create-branch,
   users set-attributes) have no Arguments section — read their Usage line.
-- Query parameters are flags: omni models list --pagesize 10
+- Query parameters are flags: omni models list --page-size 10
+- Flag names are kebab-case, and spelling is forgiving: case, dashes and
+  underscores are ignored, so --branch-id, --branchId, --branch_id and
+  --branchid all mean the same flag. --help always shows the canonical form.
 - Promoted field flags (e.g. --name, --summary) are mutually exclusive with
   --body: using both is an error, not a merge. Pick one and put every field there.
 - Run "omni <group> --help" to see all commands in a group.
