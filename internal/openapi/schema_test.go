@@ -68,33 +68,45 @@ const schemaTestSpec = `{
   }
 }`
 
-// runSchema generates commands from a spec and runs the "widgets create"
-// command with --schema, returning the parsed JSON document. It dispatches
-// through the parent group with the full arg path, since cobra's Execute()
-// re-parses from the root regardless of the receiver.
-func runSchema(t *testing.T) SchemaDoc {
+// execSchema generates commands from spec and dispatches args through the first
+// command group, returning the parsed schema document or the execution error
+// (usage/errors silenced so an error carries only the message under test). It
+// dispatches through the parent group with the full arg path, since cobra's
+// Execute() re-parses from the root regardless of the receiver. Every schema
+// test runs through here.
+func execSchema(t *testing.T, spec string, args ...string) (SchemaDoc, error) {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(schemaTestSpec), noop)
+	cmds, err := GenerateCommands([]byte(spec), noop)
 	if err != nil {
 		t.Fatalf("GenerateCommands: %v", err)
 	}
-	if len(cmds) != 1 {
-		t.Fatalf("expected 1 group, got %d", len(cmds))
-	}
 	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
 
 	var buf bytes.Buffer
 	group.SetOut(&buf)
 	group.SetErr(&buf)
-	group.SetArgs([]string{"create", "--schema"})
-	if err := group.Execute(); err != nil {
-		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
+	group.SetArgs(args)
+	if execErr := group.Execute(); execErr != nil {
+		return SchemaDoc{}, execErr
 	}
 
 	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc, nil
+}
+
+// runSchema runs "create --schema" against schemaTestSpec, failing the test if
+// it errors.
+func runSchema(t *testing.T) SchemaDoc {
+	t.Helper()
+	doc, err := execSchema(t, schemaTestSpec, "create", "--schema")
+	if err != nil {
+		t.Fatalf("Execute --schema: %v", err)
 	}
 	return doc
 }
@@ -450,31 +462,10 @@ func TestSchema_DescribeOnRefFieldDrill(t *testing.T) {
 	}
 }
 
-// runSchemaWith runs "create --schema" plus extra flags against a spec. On
-// success it returns the parsed doc; on failure it returns the execution error
-// (usage/errors silenced so the error carries only the message under test).
+// runSchemaWith runs "create --schema" plus extra flags against a spec.
 func runSchemaWith(t *testing.T, spec string, extra ...string) (SchemaDoc, error) {
 	t.Helper()
-	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(spec), noop)
-	if err != nil {
-		t.Fatalf("GenerateCommands: %v", err)
-	}
-	group := cmds[0]
-	group.SilenceUsage = true
-	group.SilenceErrors = true
-	var buf bytes.Buffer
-	group.SetOut(&buf)
-	group.SetErr(&buf)
-	group.SetArgs(append([]string{"create", "--schema"}, extra...))
-	if execErr := group.Execute(); execErr != nil {
-		return SchemaDoc{}, execErr
-	}
-	var doc SchemaDoc
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
-	}
-	return doc, nil
+	return execSchema(t, spec, append([]string{"create", "--schema"}, extra...)...)
 }
 
 // --field drills to a nested property; the $ref ("child" → Node) is resolved
@@ -611,26 +602,7 @@ const bodylessTestSpec = `{
 // positional args — --schema must short-circuit before arg validation.
 func runSchemaCmd(t *testing.T, spec, name string, extra ...string) (SchemaDoc, error) {
 	t.Helper()
-	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(spec), noop)
-	if err != nil {
-		t.Fatalf("GenerateCommands: %v", err)
-	}
-	group := cmds[0]
-	group.SilenceUsage = true
-	group.SilenceErrors = true
-	var buf bytes.Buffer
-	group.SetOut(&buf)
-	group.SetErr(&buf)
-	group.SetArgs(append([]string{name, "--schema"}, extra...))
-	if execErr := group.Execute(); execErr != nil {
-		return SchemaDoc{}, execErr
-	}
-	var doc SchemaDoc
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
-	}
-	return doc, nil
+	return execSchema(t, spec, append([]string{name, "--schema"}, extra...)...)
 }
 
 // --schema on a bodyless GET works with no positional args and describes the
@@ -1026,26 +998,7 @@ func subcommand(t *testing.T, spec, name string) *cobra.Command {
 // renamed by a parameter collision.
 func runSchemaCmdFlag(t *testing.T, spec, name, schemaFlag string, extra ...string) (SchemaDoc, error) {
 	t.Helper()
-	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(spec), noop)
-	if err != nil {
-		t.Fatalf("GenerateCommands: %v", err)
-	}
-	group := cmds[0]
-	group.SilenceUsage = true
-	group.SilenceErrors = true
-	var buf bytes.Buffer
-	group.SetOut(&buf)
-	group.SetErr(&buf)
-	group.SetArgs(append([]string{name, "--" + schemaFlag}, extra...))
-	if execErr := group.Execute(); execErr != nil {
-		return SchemaDoc{}, execErr
-	}
-	var doc SchemaDoc
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
-	}
-	return doc, nil
+	return execSchema(t, spec, append([]string{name, "--" + schemaFlag}, extra...)...)
 }
 
 // Without --schema, the command must still enforce normal behavior (here, that
@@ -1066,5 +1019,116 @@ func TestSchema_FlagDoesNotAffectNormalRun(t *testing.T) {
 	}
 	if !called {
 		t.Error("executor was not called on a normal (non --schema) run")
+	}
+}
+
+// deprecatedTestSpec declares a deprecated operation, whose notice cobra would
+// print as plain text ahead of --schema's JSON if we left it to cobra.
+const deprecatedTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/legacy": {
+      "put": {
+        "operationId": "legacyUpdate",
+        "tags": ["legacy"],
+        "deprecated": true,
+        "requestBody": {
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        },
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  }
+}`
+
+// runDeprecated dispatches args against the deprecated spec's group, returning
+// stdout and stderr separately so the two streams can be asserted on
+// independently.
+func runDeprecated(t *testing.T, args ...string) (stdout, stderr string) {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(deprecatedTestSpec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	var out, errBuf bytes.Buffer
+	group.SetOut(&out)
+	group.SetErr(&errBuf)
+	group.SetArgs(args)
+	if execErr := group.Execute(); execErr != nil {
+		t.Fatalf("Execute %v: %v\n%s%s", args, execErr, out.String(), errBuf.String())
+	}
+	return out.String(), errBuf.String()
+}
+
+// --schema on a deprecated operation must emit JSON and nothing else: an agent
+// pipes this straight into a parser, and cobra's deprecation notice would
+// corrupt it.
+func TestSchema_DeprecatedOperationEmitsCleanJSON(t *testing.T) {
+	stdout, stderr := runDeprecated(t, "update", "--schema")
+	if strings.Contains(stdout, "deprecated") || !strings.HasPrefix(strings.TrimSpace(stdout), "{") {
+		t.Fatalf("stdout is not pure JSON: %q", stdout)
+	}
+	var doc SchemaDoc
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, stdout)
+	}
+	if doc.Method != "PUT" || doc.Path != "/api/v1/legacy" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing on a --schema run", stderr)
+	}
+}
+
+// A real (non --schema) run still warns that the operation is deprecated, on
+// stderr so it never mixes into the JSON response body on stdout.
+func TestSchema_DeprecatedOperationStillWarnsOnRealRun(t *testing.T) {
+	stdout, stderr := runDeprecated(t, "update", "--body", `{"name":"x"}`)
+	if !strings.Contains(stderr, "deprecated") {
+		t.Errorf("stderr = %q, want a deprecation notice", stderr)
+	}
+	if strings.Contains(stdout, "deprecated") {
+		t.Errorf("deprecation notice leaked to stdout: %q", stdout)
+	}
+}
+
+// Taking the notice over from cobra must not resurrect the command in help
+// listings: Deprecated hid it, so Hidden has to keep hiding it.
+func TestSchema_DeprecatedOperationStaysOutOfHelp(t *testing.T) {
+	cmd := subcommand(t, deprecatedTestSpec, "update")
+	if cmd.IsAvailableCommand() {
+		t.Error("deprecated command is listed in help; it was hidden before")
+	}
+}
+
+// limitDocDepth is how a hand-written command's static document honors --depth.
+// Its truncation must be indistinguishable from the describer's, so the
+// placeholder emitted at the same depth is identical.
+func TestSchema_StaticDepthLimitMatchesDescriber(t *testing.T) {
+	generated, err := runSchemaWith(t, schemaTestSpec, "--depth", "0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	genProps := generated.Body.(map[string]interface{})["properties"].(map[string]interface{})
+	wantPlaceholder := genProps["name"]
+
+	static := SchemaDoc{Body: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name": map[string]interface{}{"type": "string", "example": "my-widget"},
+		},
+	}}
+	limited := limitDocDepth(static, 0)
+	gotProps := limited.Body.(map[string]interface{})["properties"].(map[string]interface{})
+
+	got, _ := json.Marshal(gotProps["name"])
+	want, _ := json.Marshal(wantPlaceholder)
+	if string(got) != string(want) {
+		t.Errorf("static truncation = %s, describer truncation = %s", got, want)
 	}
 }

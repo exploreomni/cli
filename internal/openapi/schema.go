@@ -17,6 +17,11 @@ import (
 // recursing.
 const maxSchemaDepth = 8
 
+// depthNote replaces a schema node that sits past the expansion budget. Both the
+// spec describer and the depth limiter for hand-written commands' static
+// documents emit it, so truncation reads identically everywhere.
+const depthNote = "max depth reached; expansion omitted"
+
 // SchemaArg describes a positional argument, derived from a spec path param.
 type SchemaArg struct {
 	Name        string `json:"name"`
@@ -45,13 +50,12 @@ type SchemaResponse struct {
 	Schema      interface{} `json:"schema"`
 }
 
-// SchemaDoc is the JSON document emitted by `omni <cmd> --schema`. It gives an
-// agent the full call contract: positional args, query flags, the request body
-// (authoritative shape plus a copy-pasteable Example) and the success response
-// shape. Body is explicitly null for operations that take no request body, so
-// "no body" is unambiguous rather than merely absent. Response is always present
-// (null when the spec declares no 2xx status). SchemaFlags appears only when a
-// spec parameter forced a discovery flag off its preferred name.
+// SchemaDoc is the JSON document emitted by `omni <cmd> --schema`: the full call
+// contract — positional args, query flags, the request body (shape plus a
+// copy-pasteable Example) and the success response shape. Body and Response are
+// always present, explicitly null when the operation takes no body / the spec
+// declares no 2xx status, so absence is never ambiguous. SchemaFlags appears
+// only when a spec parameter forced a discovery flag off its preferred name.
 type SchemaDoc struct {
 	Method      string             `json:"method"`
 	Path        string             `json:"path"`
@@ -91,20 +95,17 @@ func (f SchemaFlags) Renamed() bool {
 
 // RegisterSchemaFlag adds the --schema discovery flag (plus its --field and
 // --depth refinements) to cmd and wraps arg validation and RunE so --schema
-// short-circuits before any positional-arg check, body assembly, auth, or
-// network call. That lets `omni <cmd> --schema` work with no args and no token.
-// emit is called with the resolved flag names to produce the document.
+// short-circuits before any positional-arg check, body assembly, auth or network
+// call, calling emit with the resolved flag names instead. Every command
+// registers it, bodyless ones included: agents reach for --schema first, and
+// "unknown flag: --schema" wastes a whole call.
 //
-// Every command registers this, including bodyless GET/DELETE operations: agents
-// reach for --schema first, and "unknown flag: --schema" wastes a whole call.
-//
-// Collision policy: a spec parameter always keeps its own flag name — it is the
-// operation's contract, and silently reinterpreting e.g. an endpoint's --depth
-// query param as a discovery control would corrupt requests. When a parameter
-// owns one of these names, that discovery flag is registered under a
-// deterministic "schema-" prefixed fallback (--schema-doc / --schema-field /
-// --schema-depth, and -2, -3… if those are taken too) and its help text says so.
-// Discovery is therefore never unavailable, just occasionally renamed.
+// Collision policy: a spec parameter always keeps its own flag name — silently
+// reinterpreting e.g. an endpoint's --depth query param as a discovery control
+// would corrupt requests. A colliding discovery flag is instead registered under
+// a deterministic "schema-" prefixed fallback (--schema-doc / --schema-field /
+// --schema-depth, and -2, -3… if those are taken too) which its help text and
+// the document's schemaFlags both name, so discovery is never unavailable.
 func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlags) error) SchemaFlags {
 	names := SchemaFlags{
 		Schema: freeFlagName(cmd, "schema", "schema-doc"),
@@ -119,6 +120,17 @@ func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlag
 		renameNote(fmt.Sprintf("with --%s: drill into a dotted field path of the request body (e.g. queryPresentations.data.query); auto-descends arrays and maps; does not affect the response section", names.Schema), "field", names.Field))
 	cmd.Flags().Int(names.Depth, maxSchemaDepth,
 		renameNote(fmt.Sprintf("with --%s: max nesting depth to expand (request body and response); lower for a compact overview", names.Schema), "depth", names.Depth))
+
+	// Cobra prints a Deprecated notice at the top of execute() — before flags are
+	// even parsed — which would put plain text ahead of --schema's JSON. Take
+	// ownership of the notice: clear the field so cobra stays quiet, keep the
+	// command out of help listings the way Deprecated did (via Hidden), and
+	// re-print the notice to stderr ourselves on real runs only.
+	deprecated := cmd.Deprecated
+	if deprecated != "" {
+		cmd.Deprecated = ""
+		cmd.Hidden = true
+	}
 
 	innerArgs := cmd.Args
 	cmd.Args = func(c *cobra.Command, args []string) error {
@@ -135,6 +147,9 @@ func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlag
 			// helpful message, not the full usage block.
 			c.SilenceUsage = true
 			return emit(c, names)
+		}
+		if deprecated != "" {
+			fmt.Fprintf(c.ErrOrStderr(), "Command %q is deprecated, %s\n", c.Name(), deprecated)
 		}
 		if innerRun == nil {
 			return nil
@@ -185,6 +200,109 @@ func emitBodySchema(cmd *cobra.Command, op *operationInfo, names SchemaFlags) er
 		return err
 	}
 	return EmitSchemaDoc(cmd, doc)
+}
+
+// StaticSchemaEmitter returns a RegisterSchemaFlag callback for a hand-written
+// command that documents itself with a static document (build). Such a command
+// assembles its request body from its own flags rather than passing JSON
+// through, so --field has nothing to drill into and is rejected by name; --depth
+// is applied to the document so it truncates exactly as it does on generated
+// commands.
+func StaticSchemaEmitter(cmdName string, build func() SchemaDoc) func(*cobra.Command, SchemaFlags) error {
+	return func(c *cobra.Command, names SchemaFlags) error {
+		if field, _ := c.Flags().GetString(names.Field); field != "" {
+			return fmt.Errorf("--%s is not supported for %s; its request body is assembled by the CLI and shown in full", names.Field, cmdName)
+		}
+		return EmitSchemaDoc(c, limitDocDepth(build(), schemaDepth(c, names.Depth)))
+	}
+}
+
+// limitDocDepth truncates an already-materialized schema document to maxDepth,
+// mirroring what the describer does while walking the spec. It is how a static
+// document honors --depth without a second implementation of the placeholder
+// convention.
+func limitDocDepth(doc SchemaDoc, maxDepth int) SchemaDoc {
+	doc.Body = limitSchemaDepth(doc.Body, 0, maxDepth)
+	doc.Example = limitValueDepth(doc.Example, 0, maxDepth)
+	if doc.Response != nil {
+		resp := *doc.Response
+		resp.Schema = limitSchemaDepth(resp.Schema, 0, maxDepth)
+		doc.Response = &resp
+	}
+	return doc
+}
+
+// limitSchemaDepth walks a plain-Go schema map the way simplify walks a spec
+// schema — properties, items, additionalProperties and union members each nest
+// one level — and replaces anything past maxDepth with the depthNote
+// placeholder, keeping the node's type and $ref like simplify does.
+func limitSchemaDepth(v interface{}, depth, maxDepth int) interface{} {
+	node, ok := v.(map[string]interface{})
+	if !ok {
+		return v
+	}
+	if depth > maxDepth {
+		out := map[string]interface{}{"note": depthNote}
+		if t, ok := node["type"]; ok {
+			out["type"] = t
+		}
+		if r, ok := node["$ref"]; ok {
+			out["$ref"] = r
+		}
+		return out
+	}
+
+	out := make(map[string]interface{}, len(node))
+	for k, val := range node {
+		switch k {
+		case "properties":
+			if props, ok := val.(map[string]interface{}); ok {
+				limited := make(map[string]interface{}, len(props))
+				for name, p := range props {
+					limited[name] = limitSchemaDepth(p, depth+1, maxDepth)
+				}
+				out[k] = limited
+				continue
+			}
+		case "items", "additionalProperties":
+			out[k] = limitSchemaDepth(val, depth+1, maxDepth)
+			continue
+		case "oneOf", "anyOf":
+			if members, ok := val.([]interface{}); ok {
+				limited := make([]interface{}, 0, len(members))
+				for _, m := range members {
+					limited = append(limited, limitSchemaDepth(m, depth+1, maxDepth))
+				}
+				out[k] = limited
+				continue
+			}
+		}
+		out[k] = val
+	}
+	return out
+}
+
+// limitValueDepth truncates an example value the way synth does: an object past
+// the budget collapses to {}, while scalars and array wrappers are kept.
+func limitValueDepth(v interface{}, depth, maxDepth int) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		if depth > maxDepth {
+			return map[string]interface{}{}
+		}
+		out := make(map[string]interface{}, len(val))
+		for k, item := range val {
+			out[k] = limitValueDepth(item, depth+1, maxDepth)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, limitValueDepth(item, depth+1, maxDepth))
+		}
+		return out
+	}
+	return v
 }
 
 // EmitSchemaDoc writes a schema document as JSON to the command's stdout,
@@ -251,9 +369,24 @@ func describeBody(op *operationInfo, field string, maxDepth int, names SchemaFla
 			Description: q.Description,
 		})
 	}
+	// Resolve --field before describing anything: an invalid path is an error, and
+	// the response schema alone can run to hundreds of kilobytes.
+	root := op.BodySchema
+	if root == nil {
+		if field != "" {
+			return doc, fmt.Errorf("--%s is only meaningful for operations with a request body schema; %s %s has none", names.Field, op.Method, op.Path)
+		}
+	} else if field != "" {
+		resolved, err := resolveField(root, field, names.Field)
+		if err != nil {
+			return doc, err
+		}
+		root = resolved
+	}
+
 	doc.Response = describeResponse(d, op.Response)
 
-	if op.BodySchema == nil {
+	if root == nil {
 		// Body stays nil (rendered as null) so a bodyless operation is explicit
 		// rather than ambiguous. An operation that declares a body but no schema
 		// says so instead, so null always means "sends nothing".
@@ -262,20 +395,7 @@ func describeBody(op *operationInfo, field string, maxDepth int, names SchemaFla
 				"note": "this operation takes a request body, but the spec declares no schema for it",
 			}
 		}
-		// Either way there is nothing for the field flag to drill into.
-		if field != "" {
-			return doc, fmt.Errorf("--%s is only meaningful for operations with a request body schema; %s %s has none", names.Field, op.Method, op.Path)
-		}
 		return doc, nil
-	}
-
-	root := op.BodySchema
-	if field != "" {
-		resolved, err := resolveField(root, field, names.Field)
-		if err != nil {
-			return doc, err
-		}
-		root = resolved
 	}
 
 	body := d.simplify(root, 0, nil)
@@ -423,7 +543,7 @@ func (d *describer) simplify(proxy *base.SchemaProxy, depth int, seen map[string
 	}
 
 	if depth > d.maxDepth {
-		out := map[string]interface{}{"note": "max depth reached; expansion omitted"}
+		out := map[string]interface{}{"note": depthNote}
 		if len(sch.Type) > 0 {
 			out["type"] = joinTypes(sch.Type)
 		}

@@ -97,15 +97,8 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 	cmd.Flags().String("attr-json", "", `JSON object of attributes for numeric/array values, e.g. '{"level":3,"regions":["us","eu"]}'`)
 
 	// Hand-written, but agents reach for --schema on any API command; describe the
-	// SCIM PATCH body it assembles so the flag works here too. That body is built
-	// from --attr/--attr-json rather than passed through, so --field has nothing
-	// to drill into.
-	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command, names openapi.SchemaFlags) error {
-		if field, _ := c.Flags().GetString(names.Field); field != "" {
-			return fmt.Errorf("--%s is not supported for set-attributes; its request body is assembled by the CLI and shown in full", names.Field)
-		}
-		return openapi.EmitSchemaDoc(c, setAttributesSchemaDoc())
-	})
+	// SCIM PATCH body it assembles so the flag works here too.
+	openapi.RegisterSchemaFlag(cmd, openapi.StaticSchemaEmitter("set-attributes", setAttributesSchemaDoc))
 
 	cmd.Example = `  # Set two string attributes (by user ID)
   omni users set-attributes 550e8400-e29b-41d4-a716-446655440000 --attr region=us-east --attr team=growth
@@ -126,10 +119,9 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 // the hand-written set-attributes command. The body shown is the SCIM PatchOp
 // the CLI assembles from --attr/--attr-json; the response is the SCIM user
 // representation returned by PATCH /api/scim/v2/Users/{id}.
+// Hand-transcribed, so TestStaticSchemaDocs_ResponseMatchesSpec checks it
+// against the spec and the body-assembly code — keep both in step.
 func setAttributesSchemaDoc() openapi.SchemaDoc {
-	str := func(desc string) map[string]interface{} {
-		return map[string]interface{}{"type": "string", "description": desc}
-	}
 	return openapi.SchemaDoc{
 		Method: "PATCH",
 		Path:   "/api/scim/v2/Users/{id}",
@@ -155,7 +147,7 @@ func setAttributesSchemaDoc() openapi.SchemaDoc {
 					"items": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
-							"op":    str(`always "replace"`),
+							"op":    schemaString(`always "replace"`),
 							"value": map[string]interface{}{"type": "object", "description": "attribute name → value; null clears the attribute"},
 						},
 						"required": []string{"op", "value"},
@@ -165,8 +157,8 @@ func setAttributesSchemaDoc() openapi.SchemaDoc {
 			"required": []string{"schemas", "Operations"},
 		},
 		Example: map[string]interface{}{
-			"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
-			"Operations": []map[string]interface{}{{
+			"schemas": []interface{}{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
+			"Operations": []interface{}{map[string]interface{}{
 				"op": "replace",
 				"value": map[string]interface{}{
 					userAttributePrefix: map[string]interface{}{"region": "us-east"},
@@ -181,7 +173,7 @@ func setAttributesSchemaDoc() openapi.SchemaDoc {
 				"type": "object",
 				"properties": map[string]interface{}{
 					"active":      map[string]interface{}{"type": "boolean", "description": "Whether the user is active"},
-					"displayName": str("Display name"),
+					"displayName": schemaString("Display name"),
 					"id":          map[string]interface{}{"type": "string", "format": "uuid", "description": "SCIM user ID"},
 					"schemas":     map[string]interface{}{"type": "array", "description": "SCIM schema URIs", "items": map[string]interface{}{"type": "string"}},
 					"userName":    map[string]interface{}{"type": "string", "format": "email", "description": "Username (email)"},

@@ -67,16 +67,7 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 
 			connectionID := modelResp.Records[0].ConnectionID
 
-			body := map[string]interface{}{
-				"modelKind":    "BRANCH",
-				"baseModelId":  baseModelID,
-				"connectionId": connectionID,
-			}
-			if name != "" {
-				body["modelName"] = name
-			}
-
-			bodyBytes, err := json.Marshal(body)
+			bodyBytes, err := json.Marshal(buildCreateBranchBody(baseModelID, connectionID, name))
 			if err != nil {
 				return fmt.Errorf("marshaling request body: %w", err)
 			}
@@ -94,26 +85,35 @@ func createBranchCmd(exec openapi.Executor) *cobra.Command {
 
 	// This command is hand-written rather than generated, but agents reach for
 	// --schema on any command; describe the body it assembles so the flag works
-	// here too. The body is static (the CLI fills modelKind and looks up
-	// connectionId itself), so --field has nothing to drill into.
-	openapi.RegisterSchemaFlag(cmd, func(c *cobra.Command, names openapi.SchemaFlags) error {
-		if field, _ := c.Flags().GetString(names.Field); field != "" {
-			return fmt.Errorf("--%s is not supported for create-branch; its request body is assembled by the CLI and shown in full", names.Field)
-		}
-		return openapi.EmitSchemaDoc(c, createBranchSchemaDoc())
-	})
+	// here too.
+	openapi.RegisterSchemaFlag(cmd, openapi.StaticSchemaEmitter("create-branch", createBranchSchemaDoc))
 
 	return cmd
+}
+
+// buildCreateBranchBody assembles the POST /api/v1/models body for a branch:
+// modelKind is fixed, baseModelId is the positional arg, connectionId is the one
+// resolved from the base model, and modelName (from --name) is omitted when
+// empty. createBranchSchemaDoc documents exactly these fields.
+func buildCreateBranchBody(baseModelID, connectionID, name string) map[string]interface{} {
+	body := map[string]interface{}{
+		"modelKind":    "BRANCH",
+		"baseModelId":  baseModelID,
+		"connectionId": connectionID,
+	}
+	if name != "" {
+		body["modelName"] = name
+	}
+	return body
 }
 
 // createBranchSchemaDoc mirrors the generated commands' --schema document for the
 // hand-written create-branch command. The body shown is what the CLI sends to
 // POST /api/v1/models: modelKind is fixed to BRANCH, connectionId is resolved
 // from the base model, and modelName comes from --name.
+// Hand-transcribed, so TestStaticSchemaDocs_ResponseMatchesSpec checks it
+// against the spec and the body-assembly code — keep both in step.
 func createBranchSchemaDoc() openapi.SchemaDoc {
-	str := func(desc string) map[string]interface{} {
-		return map[string]interface{}{"type": "string", "description": desc}
-	}
 	return openapi.SchemaDoc{
 		Method: "POST",
 		Path:   "/api/v1/models",
@@ -128,10 +128,10 @@ func createBranchSchemaDoc() openapi.SchemaDoc {
 			"type":        "object",
 			"description": "Assembled by the CLI from <model-id> and --name; not passed through as JSON.",
 			"properties": map[string]interface{}{
-				"modelKind":    str(`always "BRANCH" for this command`),
-				"baseModelId":  str("the <model-id> positional arg"),
-				"connectionId": str("looked up from the base model; not settable"),
-				"modelName":    str("the --name flag; omitted when --name is unset"),
+				"modelKind":    schemaString(`always "BRANCH" for this command`),
+				"baseModelId":  schemaString("the <model-id> positional arg"),
+				"connectionId": schemaString("looked up from the base model; not settable"),
+				"modelName":    schemaString("the --name flag; omitted when --name is unset"),
 			},
 			"required": []string{"modelKind", "baseModelId", "connectionId"},
 		},
@@ -146,17 +146,18 @@ func createBranchSchemaDoc() openapi.SchemaDoc {
 			ContentType: "application/json",
 			Description: "Model created successfully",
 			Schema: map[string]interface{}{
-				"type": "object",
+				"type":        "object",
+				"description": "Create model response",
 				"properties": map[string]interface{}{
 					"success": map[string]interface{}{"type": "boolean", "description": "Whether the operation succeeded"},
-					"error":   str("Error message if creation failed"),
-					"message": str("Additional message"),
+					"error":   schemaString("Error message if creation failed"),
+					"message": schemaString("Additional message"),
 					"model": map[string]interface{}{
 						"type":        "object",
 						"description": "Created model details",
 						"properties": map[string]interface{}{
 							"id":        map[string]interface{}{"type": "string", "format": "uuid", "description": "Created model ID"},
-							"modelKind": str("Kind of model created"),
+							"modelKind": schemaString("Kind of model created"),
 							"name":      map[string]interface{}{"type": "string | null", "description": "Model name"},
 						},
 						"required": []string{"id", "modelKind", "name"},
