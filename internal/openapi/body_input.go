@@ -15,21 +15,21 @@ import (
 //	"@path"    read from a file ("@-" is stdin too, curl-style)
 //	anything else is the literal body
 //
-// When validateJSON is set the result is checked with json.Valid before any
-// network call, because the API answers a non-JSON body with a generic
-// "Invalid JSON" 400 that reads like a body-shape problem. flagName is the flag
-// the value came from, so the error text names the flag the caller typed.
+// The result is checked with json.Valid before any network call, because the
+// API answers a non-JSON body with a generic "Invalid JSON" 400 that reads like
+// a body-shape problem. flagName is the flag the value came from, so the error
+// text names the flag the caller typed.
 //
 // The bytes are never re-serialized — what the caller supplied is what gets
 // sent.
-func resolveBody(raw, flagName string, validateJSON bool) ([]byte, error) {
+func resolveBody(raw, flagName string) ([]byte, error) {
 	switch {
 	case raw == "-":
 		data, err := readStdin()
 		if err != nil {
 			return nil, fmt.Errorf("reading stdin: %w", err)
 		}
-		return checkBody(data, raw, flagName, "stdin", validateJSON)
+		return checkBody(data, raw, flagName, "stdin")
 
 	case strings.HasPrefix(raw, "@"):
 		path := strings.TrimPrefix(raw, "@")
@@ -38,7 +38,7 @@ func resolveBody(raw, flagName string, validateJSON bool) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("reading stdin: %w", err)
 			}
-			return checkBody(data, raw, flagName, "stdin", validateJSON)
+			return checkBody(data, raw, flagName, "stdin")
 		}
 		if strings.TrimSpace(path) == "" {
 			return nil, fmt.Errorf("--%s: no file path after \"@\"; use --%s @path/to/body.json", flagName, flagName)
@@ -48,10 +48,10 @@ func resolveBody(raw, flagName string, validateJSON bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return checkBody(data, raw, flagName, fmt.Sprintf("file %s", path), validateJSON)
+		return checkBody(data, raw, flagName, fmt.Sprintf("file %s", path))
 
 	default:
-		return checkBody([]byte(raw), raw, flagName, "", validateJSON)
+		return checkBody([]byte(raw), raw, flagName, "")
 	}
 }
 
@@ -80,12 +80,7 @@ func readBodyFile(path string) ([]byte, error) {
 // the bytes came from ("stdin", "file X") or is empty when they came straight
 // from the flag value — only in that case can the raw value itself be a
 // mistyped file path.
-//
-// Transport checks (empty input, a path-shaped flag value) run for every
-// operation; only the JSON validity check is conditional, so the multipart
-// upload endpoints still get the "--body @path" hint they'd otherwise need
-// most.
-func checkBody(data []byte, raw, flagName, source string, validateJSON bool) ([]byte, error) {
+func checkBody(data []byte, raw, flagName, source string) ([]byte, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		if source != "" {
 			return nil, fmt.Errorf("no request body read from %s", source)
@@ -95,17 +90,13 @@ func checkBody(data []byte, raw, flagName, source string, validateJSON bool) ([]
 
 	// Valid JSON is never a path, so this test comes first: it stops a file
 	// that happens to be named "{}" from hijacking a legitimate body.
-	if validateJSON && json.Valid(data) {
+	if json.Valid(data) {
 		return data, nil
 	}
 
 	if source == "" && looksLikePath(raw) {
 		return nil, fmt.Errorf("--%s looks like a file path, not a request body: %s\nread the file instead: --%s %s   (or --%s - < %s)",
 			flagName, raw, flagName, shellQuote("@"+raw), flagName, shellQuote(raw))
-	}
-
-	if !validateJSON {
-		return data, nil
 	}
 
 	where := "--" + flagName

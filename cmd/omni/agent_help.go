@@ -72,7 +72,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   query         Execute and wait for semantic queries
   scim          SCIM user/group provisioning
   schedules     Manage delivery schedules
-  uploads       Upload and manage CSV files
+  uploads       List and delete CSV uploads (create/replace need multipart — use curl)
   unstable      Unstable/preview commands (document import/export)
   user-attributes  User attribute definitions
   users         User/group role management, set user attribute values
@@ -101,6 +101,9 @@ name a leaf without knowing the container shape:
   --profile NAME  Config profile to use
   --body JSON     Request body: JSON string, @path/to/file.json, or "-" for stdin
                   (a bare path is rejected client-side — prefix it with @)
+                  Endpoints whose body is multipart/form-data (uploads create,
+                  uploads replace-data) cannot be called by the CLI; it says so
+                  and prints the equivalent curl command.
   --schema        Print the request body's schema + example, then exit
   --field PATH    With --schema: drill into a dotted field path
   --depth N       With --schema: cap nesting depth (lower = smaller)

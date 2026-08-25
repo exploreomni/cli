@@ -433,6 +433,7 @@ type specOperation struct {
 	Path        string
 	PathParams  []string
 	HasBody     bool
+	BodyMedia   string
 }
 
 // parseSpecOperations reads the OpenAPI spec directly (bypassing our generator)
@@ -490,6 +491,7 @@ func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 				Path:        pathStr,
 				PathParams:  pathParams,
 				HasBody:     op.RequestBody != nil,
+				BodyMedia:   requestBodyMediaType(op.RequestBody),
 			})
 		}
 	}
@@ -562,6 +564,19 @@ func TestSpecCoverage(t *testing.T) {
 				failures = append(failures, fmt.Sprintf("%s: no RunE", key))
 				continue
 			}
+
+			// Media types the CLI can't build (multipart uploads) are covered
+			// by refusing client-side with a message that names the media type.
+			if sop.HasBody && !isJSONMediaType(sop.BodyMedia) {
+				err := sub.RunE(sub, args)
+				if err == nil || !strings.Contains(err.Error(), sop.BodyMedia) {
+					failures = append(failures, fmt.Sprintf("%s: want an unsupported-%s error, got %v", key, sop.BodyMedia, err))
+					continue
+				}
+				called[sop.OperationID] = true
+				continue
+			}
+
 			if err := sub.RunE(sub, args); err != nil {
 				failures = append(failures, fmt.Sprintf("%s: RunE: %v", key, err))
 				continue

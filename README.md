@@ -127,6 +127,12 @@ A request body can be given three ways: inline JSON (`--body '{"name":"x"}'`), a
 checked as JSON before the request is sent, so a typo fails locally instead of coming
 back as a generic API 400.
 
+The few endpoints whose request body is `multipart/form-data` (`uploads create`,
+`uploads replace-data`) cannot be called by the CLI yet — every request it sends is
+labelled `application/json` and it builds no multipart framing. Those commands fail
+client-side and print the equivalent `curl` command instead of sending something the
+API would reject.
+
 Adding a new API endpoint requires no code changes — update `api/openapi.json` (or run `make sync-spec`) and rebuild.
 
 ## Auth

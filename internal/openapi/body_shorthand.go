@@ -302,18 +302,11 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 	// Wrap the original RunE to assemble body from shorthand args
 	originalRunE := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		bodyFlag, _ := cmd.Flags().GetString("body")
-		jsonBodyFlag, _ := cmd.Flags().GetString("json-body")
-
-		rawBody := bodyFlag
-		if jsonBodyFlag != "" {
-			rawBody = jsonBodyFlag
-		}
-
-		// If --body/--json-body is provided, use existing behavior — but
-		// reject explicitly-set shorthand flags rather than silently
-		// dropping them from the request.
-		if rawBody != "" {
+		// Body mode goes by whether the flag was typed, not by its value: an
+		// explicitly empty --body is a typo, not an invitation to assemble one
+		// from shorthand input. The generated RunE reports it like every other
+		// command does.
+		if bodyFlagUsed(cmd) {
 			var conflicting []string
 			for _, f := range sh.Flags {
 				if cmd.Flags().Changed(f.FlagName) {
@@ -323,13 +316,6 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 			if len(conflicting) > 0 {
 				return fmt.Errorf("%s cannot be combined with --body; include the field(s) in the JSON body instead", strings.Join(conflicting, ", "))
 			}
-			return originalRunE(cmd, args)
-		}
-
-		// An explicitly empty --body/--json-body is a typo, not an invitation
-		// to assemble one from shorthand input. Hand it back to the generated
-		// RunE so it reports the same error every other command does.
-		if cmd.Flags().Changed("body") || cmd.Flags().Changed("json-body") {
 			return originalRunE(cmd, args[:numPathParams])
 		}
 
@@ -357,10 +343,7 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 // - numPathParams + numShorthandArgs args (when using shorthand mode)
 func flexibleArgs(numPathParams, numShorthandArgs int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		bodyFlag, _ := cmd.Flags().GetString("body")
-		jsonBodyFlag, _ := cmd.Flags().GetString("json-body")
-
-		if bodyFlag != "" || jsonBodyFlag != "" {
+		if bodyFlagUsed(cmd) {
 			if len(args) != numPathParams {
 				return fmt.Errorf("accepts %d arg(s) when --body is used, received %d", numPathParams, len(args))
 			}
@@ -381,6 +364,12 @@ func flexibleArgs(numPathParams, numShorthandArgs int) cobra.PositionalArgs {
 		}
 		return nil
 	}
+}
+
+// bodyFlagUsed reports whether the caller typed --body or --json-body, whatever
+// value they gave it.
+func bodyFlagUsed(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("body") || cmd.Flags().Changed("json-body")
 }
 
 // assembleBody builds a JSON body from shorthand positional args and promoted flags.

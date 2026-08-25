@@ -33,7 +33,7 @@ func TestResolveBody_AtFile(t *testing.T) {
 	content := `{"modelId":"abc","prompt":"hi"}`
 	path := writeTempBody(t, "body.json", content)
 
-	got, err := resolveBody("@"+path, "body", true)
+	got, err := resolveBody("@"+path, "body")
 	if err != nil {
 		t.Fatalf("resolveBody: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestResolveBody_AtFile(t *testing.T) {
 func TestResolveBody_AtFileMissing(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope.json")
 
-	_, err := resolveBody("@"+missing, "body", true)
+	_, err := resolveBody("@"+missing, "body")
 	if err == nil {
 		t.Fatal("expected an error for a missing body file, got nil")
 	}
@@ -62,7 +62,7 @@ func TestResolveBody_AtFileMissing(t *testing.T) {
 func TestResolveBody_AtFileTooLarge(t *testing.T) {
 	path := writeTempBody(t, "big.json", strings.Repeat("x", maxStdinSize+1))
 
-	_, err := resolveBody("@"+path, "body", true)
+	_, err := resolveBody("@"+path, "body")
 	if err == nil {
 		t.Fatal("expected an error for an oversized body file, got nil")
 	}
@@ -73,7 +73,7 @@ func TestResolveBody_AtFileTooLarge(t *testing.T) {
 
 // "@" with no path is a usage error, not a stat of the empty string.
 func TestResolveBody_AtWithoutPath(t *testing.T) {
-	if _, err := resolveBody("@", "body", true); err == nil {
+	if _, err := resolveBody("@", "body"); err == nil {
 		t.Fatal("expected an error for a bare @, got nil")
 	}
 }
@@ -82,7 +82,7 @@ func TestResolveBody_AtWithoutPath(t *testing.T) {
 func TestResolveBody_AtFileInvalidJSON(t *testing.T) {
 	path := writeTempBody(t, "body.json", "modelId: abc\n")
 
-	_, err := resolveBody("@"+path, "body", true)
+	_, err := resolveBody("@"+path, "body")
 	if err == nil {
 		t.Fatal("expected an error for a non-JSON body file, got nil")
 	}
@@ -101,7 +101,7 @@ func TestResolveBody_BareFilePathHint(t *testing.T) {
 	path := writeTempBody(t, "body.json", `{"a":1}`)
 
 	for _, raw := range []string{path, "/tmp/does-not-exist.json", "./body.json", "~/body.json"} {
-		_, err := resolveBody(raw, "body", true)
+		_, err := resolveBody(raw, "body")
 		if err == nil {
 			t.Fatalf("resolveBody(%q): expected an error, got nil", raw)
 		}
@@ -120,7 +120,7 @@ func TestResolveBody_BareFilePathHint(t *testing.T) {
 
 // Non-JSON that isn't path-shaped gets a plain parse error with a position.
 func TestResolveBody_InvalidJSONDiagnostic(t *testing.T) {
-	_, err := resolveBody(`{"a":1,}`, "body", true)
+	_, err := resolveBody(`{"a":1,}`, "body")
 	if err == nil {
 		t.Fatal("expected an error for malformed JSON, got nil")
 	}
@@ -138,7 +138,7 @@ func TestResolveBody_InvalidJSONDiagnostic(t *testing.T) {
 
 // The error names whichever flag the caller actually used.
 func TestResolveBody_NamesTheFlagUsed(t *testing.T) {
-	_, err := resolveBody("not json", "json-body", true)
+	_, err := resolveBody("not json", "json-body")
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -157,7 +157,7 @@ func TestResolveBody_ValidJSONPassthrough(t *testing.T) {
 		`null`,
 	}
 	for _, raw := range cases {
-		got, err := resolveBody(raw, "body", true)
+		got, err := resolveBody(raw, "body")
 		if err != nil {
 			t.Fatalf("resolveBody(%q): %v", raw, err)
 		}
@@ -172,7 +172,7 @@ func TestResolveBody_ValidJSONPassthrough(t *testing.T) {
 func TestResolveBody_PathWithSpacesHint(t *testing.T) {
 	path := writeTempBody(t, "request body.json", `{"a":1}`)
 
-	_, err := resolveBody(path, "body", true)
+	_, err := resolveBody(path, "body")
 	if err == nil {
 		t.Fatalf("resolveBody(%q): expected an error, got nil", path)
 	}
@@ -188,47 +188,10 @@ func TestResolveBody_PathWithSpacesHint(t *testing.T) {
 	}
 }
 
-// Non-JSON media types (the multipart upload endpoints) skip validation.
-func TestResolveBody_SkipsValidationForNonJSON(t *testing.T) {
-	raw := "--boundary\r\nnot json\r\n"
-	got, err := resolveBody(raw, "body", false)
-	if err != nil {
-		t.Fatalf("resolveBody: %v", err)
-	}
-	if string(got) != raw {
-		t.Errorf("body = %q, want it unchanged", string(got))
-	}
-}
-
-// Skipping JSON validation must not skip the transport diagnostics: a
-// multipart operation handed a bare path still gets the @file hint.
-func TestResolveBody_NonJSONStillGetsPathHint(t *testing.T) {
-	_, err := resolveBody("/tmp/request.multipart", "body", false)
-	if err == nil {
-		t.Fatal("expected the file-path hint for a non-JSON body, got nil")
-	}
-	if !strings.Contains(err.Error(), "--body @/tmp/request.multipart") {
-		t.Errorf("error = %q, want it to suggest --body @/tmp/request.multipart", err.Error())
-	}
-
-	// An existing file named as a bare path counts too, whatever its contents.
-	path := writeTempBody(t, "upload.bin", "\x00\x01binary")
-	if _, err := resolveBody(path, "body", false); err == nil {
-		t.Fatalf("resolveBody(%q): expected the file-path hint, got nil", path)
-	}
-}
-
-// The empty-body error is a transport check, so it applies to every media type.
-func TestResolveBody_EmptyNonJSON(t *testing.T) {
-	if _, err := resolveBody("", "body", false); err == nil {
-		t.Fatal("expected an error for an explicitly empty --body, got nil")
-	}
-}
-
 // "-" still reads stdin, and stdin is validated the same way.
 func TestResolveBody_Stdin(t *testing.T) {
 	withStdin(t, `{"from":"stdin"}`, func() {
-		got, err := resolveBody("-", "body", true)
+		got, err := resolveBody("-", "body")
 		if err != nil {
 			t.Fatalf("resolveBody: %v", err)
 		}
@@ -238,7 +201,7 @@ func TestResolveBody_Stdin(t *testing.T) {
 	})
 
 	withStdin(t, "not json", func() {
-		_, err := resolveBody("-", "body", true)
+		_, err := resolveBody("-", "body")
 		if err == nil {
 			t.Fatal("expected an error for non-JSON stdin, got nil")
 		}
@@ -251,7 +214,7 @@ func TestResolveBody_Stdin(t *testing.T) {
 // "@-" is the curl spelling of stdin.
 func TestResolveBody_AtDashIsStdin(t *testing.T) {
 	withStdin(t, `{"from":"stdin"}`, func() {
-		got, err := resolveBody("@-", "body", true)
+		got, err := resolveBody("@-", "body")
 		if err != nil {
 			t.Fatalf("resolveBody: %v", err)
 		}
@@ -264,13 +227,13 @@ func TestResolveBody_AtDashIsStdin(t *testing.T) {
 // An empty source is reported as empty rather than as a JSON syntax error.
 func TestResolveBody_EmptySources(t *testing.T) {
 	path := writeTempBody(t, "empty.json", "")
-	if _, err := resolveBody("@"+path, "body", true); err == nil {
+	if _, err := resolveBody("@"+path, "body"); err == nil {
 		t.Fatal("expected an error for an empty body file, got nil")
 	} else if !strings.Contains(err.Error(), "no request body") {
 		t.Errorf("error = %q, want it to report an empty body", err.Error())
 	}
 
-	if _, err := resolveBody("   ", "body", true); err == nil {
+	if _, err := resolveBody("   ", "body"); err == nil {
 		t.Fatal("expected an error for a whitespace-only --body, got nil")
 	}
 }
@@ -361,8 +324,9 @@ func TestBuildCommand_InvalidBodyMakesNoRequest(t *testing.T) {
 	}
 }
 
-// A multipart operation keeps the transport diagnostics but not the JSON
-// validity check.
+// A multipart operation cannot be sent at all: auth.Do labels every body
+// application/json and the CLI builds no part framing, so it fails client-side
+// instead of shipping bytes the API will reject.
 func TestBuildCommand_NonJSONBodyOperation(t *testing.T) {
 	op := &operationInfo{
 		Tag:         "uploads",
@@ -371,34 +335,86 @@ func TestBuildCommand_NonJSONBodyOperation(t *testing.T) {
 		Path:        "/api/v1/uploads",
 		HasBody:     true,
 		BodyNonJSON: true,
+		BodyMedia:   "multipart/form-data",
 	}
 
-	// Non-JSON content goes through untouched.
-	var captured APIRequest
-	cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
-	cmd.SilenceUsage, cmd.SilenceErrors = true, true
-	cmd.SetArgs([]string{"--body", "not json at all"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if string(captured.Body) != "not json at all" {
-		t.Errorf("body = %q, want it unchanged", string(captured.Body))
-	}
+	for _, args := range [][]string{
+		{"--body", "@/tmp/upload.csv"},
+		{"--body", `{"modelId":"m"}`},
+		{},
+	} {
+		called := false
+		cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
+		cmd.SilenceUsage, cmd.SilenceErrors = true, true
+		cmd.SetArgs(args)
 
-	// A bare path still gets caught before the request.
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("%v: expected an unsupported-body error, got nil", args)
+		}
+		if called {
+			t.Errorf("%v: executor ran for an unsendable media type", args)
+		}
+		if !strings.Contains(err.Error(), "multipart/form-data") {
+			t.Errorf("%v: error = %q, want it to name the media type", args, err.Error())
+		}
+	}
+}
+
+// The multipart error points at a curl command that names the required parts,
+// with the binary part shown as a file upload.
+func TestGenerateCommands_MultipartCurlHint(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/uploads": {
+				"post": {
+					"operationId": "uploadsCreate",
+					"tags": ["Uploads"],
+					"requestBody": {
+						"required": true,
+						"content": {
+							"multipart/form-data": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"file": {"type": "string", "format": "binary"},
+										"modelId": {"type": "string"}
+									},
+									"required": ["file", "modelId"]
+								}
+							}
+						}
+					},
+					"responses": {"201": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
 	called := false
-	cmd2 := buildCommand(op, func(req APIRequest) error { called = true; return nil })
-	cmd2.SilenceUsage, cmd2.SilenceErrors = true, true
-	cmd2.SetArgs([]string{"--body", "/tmp/upload.csv"})
-	err := cmd2.Execute()
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { called = true; return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	root := &cobra.Command{Use: "omni"}
+	root.AddCommand(cmds...)
+	root.SilenceUsage, root.SilenceErrors = true, true
+	root.SetArgs([]string{"uploads", "create", "--body", "@upload.csv"})
+
+	err = root.Execute()
 	if err == nil {
-		t.Fatal("expected the file-path hint, got nil")
+		t.Fatal("expected an unsupported-body error, got nil")
 	}
 	if called {
-		t.Error("executor ran with a path as the body")
+		t.Error("executor ran for a multipart operation")
 	}
-	if !strings.Contains(err.Error(), "--body @/tmp/upload.csv") {
-		t.Errorf("error = %q, want it to suggest --body @/tmp/upload.csv", err.Error())
+	for _, want := range []string{"multipart/form-data", "curl -X POST", "-F file=@path/to/file.csv", "-F modelId=MODELID"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
 	}
 }
 
@@ -438,30 +454,58 @@ func TestBuildCommand_ExplicitlyEmptyBody(t *testing.T) {
 	}
 }
 
-// The same holds on a shorthand command: an empty --body isn't shorthand input.
+// The same holds on a shorthand command: an empty --body isn't shorthand input,
+// and it must reach the empty-body diagnostic rather than an arg-count error —
+// the caller supplied no shorthand positional either.
 func TestBodyShorthand_ExplicitlyEmptyBody(t *testing.T) {
-	called := false
-	op := &operationInfo{
-		Tag:         "ai",
-		OperationID: "aiSearchOmniDocs",
-		Method:      "POST",
-		Path:        "/api/v1/ai/search-omni-docs",
-		HasBody:     true,
-	}
-	cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
-	cmd.SilenceUsage = true
-	cmd.SilenceErrors = true
-	cmd.SetArgs([]string{"--body", "", "some question"})
+	for _, flag := range []string{"--body", "--json-body"} {
+		called := false
+		op := &operationInfo{
+			Tag:         "ai",
+			OperationID: "aiSearchOmniDocs",
+			Method:      "POST",
+			Path:        "/api/v1/ai/search-omni-docs",
+			HasBody:     true,
+		}
+		cmd := buildCommand(op, func(req APIRequest) error { called = true; return nil })
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{flag, ""})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected an error for an empty --body, got nil")
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("%s '': expected an error, got nil", flag)
+		}
+		if called {
+			t.Errorf("%s '': executor ran despite an empty body", flag)
+		}
+		if !strings.Contains(err.Error(), flag+" is empty") {
+			t.Errorf("%s '': error = %q, want it to report the empty flag", flag, err.Error())
+		}
 	}
-	if called {
-		t.Error("executor ran despite an empty body")
-	}
-	if !strings.Contains(err.Error(), "--body is empty") {
-		t.Errorf("error = %q, want it to report the empty flag", err.Error())
+}
+
+// --body and --json-body conflict on being typed at all, not on their values.
+func TestBuildCommand_BodyAndJSONBodyConflict(t *testing.T) {
+	for _, args := range [][]string{
+		{"--body", `{"a":1}`, "--json-body", `{"b":2}`},
+		{"--body", "", "--json-body", `{"b":2}`},
+		{"--body", `{"a":1}`, "--json-body", ""},
+	} {
+		called := false
+		cmd := bodyCmd(t, func(req APIRequest) error { called = true; return nil })
+		cmd.SetArgs(args)
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("%v: expected a conflict error, got nil", args)
+		}
+		if called {
+			t.Errorf("%v: executor ran despite conflicting flags", args)
+		}
+		if !strings.Contains(err.Error(), "cannot use both --body and --json-body") {
+			t.Errorf("%v: error = %q, want the conflict message", args, err.Error())
+		}
 	}
 }
 
