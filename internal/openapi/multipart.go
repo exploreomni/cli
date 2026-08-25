@@ -64,7 +64,7 @@ func multipartFields(schemaProxy *base.SchemaProxy, encodings *orderedmap.Map[st
 			name := pair.Key()
 			property := pair.Value()
 			propertySchema := property.Schema()
-			field := multipartFieldInfo{Name: name, FlagName: cliFlagName(name), Type: "string", Explode: true}
+			field := multipartFieldInfo{Name: name, FlagName: canonicalName(name), Type: "string", Explode: true}
 			if propertySchema != nil {
 				field.Description = propertySchema.Description
 				field.Type = schemaType(property)

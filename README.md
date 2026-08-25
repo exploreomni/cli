@@ -152,6 +152,10 @@ values, checked locally and then framed into form parts, with binary fields give
 as file paths. Their schema fields are also exposed as flags — see
 [Upload a CSV](#upload-a-csv).
 
+Flag names are always kebab-case, whatever the spec calls the parameter (`branchId` and `branch_id` both become `--branch-id`). Spelling is forgiving: case, dashes and underscores are ignored when matching, so `--branch-id`, `--branchId`, `--branch_id` and `--branchid` all set the same flag. `--help` shows the canonical form.
+
+A query parameter whose name would collide with a global or built-in flag (`--token`, `--base-url`, `--body`, `--schema`, ...) is registered with a `param-` prefix instead — a spec parameter named `baseUrl` becomes `--param-base-url`, so `--base-url` keeps meaning the API endpoint. `--help` notes the rename, and the value is still sent under the spec's own parameter name.
+
 Adding a new API endpoint requires no code changes — update `api/openapi.json` (or run `make sync-spec`) and rebuild.
 
 ## Auth

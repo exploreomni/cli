@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -36,18 +38,20 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// camelToKebab converts operationIds like "aiJobStatus" into kebab-case
-// "ai-job-status" for use as CLI subcommand names.
-func TestCamelToKebab(t *testing.T) {
+// Command names come from the same slug renderer as flag names. Unifying them
+// was only safe because it changes no command name generated from the real spec
+// (TestRealSpec_CommandNamesAreStable) — command spellings have no
+// normalization fallback, so any change would break users.
+func TestCanonicalName_OperationIDs(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"ModelsList", "models-list"},
 		{"aiJobStatus", "ai-job-status"},
 		{"a", "a"},
-		{"ABC", "a-b-c"},
+		{"ABC", "abc"},
 	}
 	for _, c := range cases {
-		if got := camelToKebab(c.in); got != c.want {
-			t.Errorf("camelToKebab(%q) = %q, want %q", c.in, got, c.want)
+		if got := canonicalName(c.in); got != c.want {
+			t.Errorf("canonicalName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -354,63 +358,6 @@ func TestBuildCommand_QueryFlags(t *testing.T) {
 	}
 }
 
-func TestBuildCommand_CamelCaseQueryFlags(t *testing.T) {
-	op := &operationInfo{
-		Tag:         "test",
-		OperationID: "testListItems",
-		Method:      "GET",
-		Path:        "/api/v1/items",
-		QueryParams: []paramInfo{
-			{Name: "modelId", In: "query"},
-			{Name: "searchTerm", In: "query"},
-		},
-	}
-
-	t.Run("canonical kebab-case flags", func(t *testing.T) {
-		var captured APIRequest
-		cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
-		if cmd.Flags().Lookup("model-id") == nil || cmd.Flags().Lookup("search-term") == nil {
-			t.Fatal("missing canonical camelCase query flags")
-		}
-		legacy := cmd.Flags().Lookup("modelid")
-		if legacy == nil || legacy.Deprecated == "" || !legacy.Hidden {
-			t.Fatalf("legacy --modelid flag = %#v, want hidden and deprecated", legacy)
-		}
-		cmd.SetArgs([]string{"--model-id", "model-123", "--search-term", "people"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-		if !strings.Contains(captured.Path, "modelId=model-123") || !strings.Contains(captured.Path, "searchTerm=people") {
-			t.Errorf("path = %q, want original OpenAPI parameter names", captured.Path)
-		}
-	})
-
-	t.Run("legacy aliases remain compatible", func(t *testing.T) {
-		var captured APIRequest
-		cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
-		cmd.SetArgs([]string{"--modelid", "model-123", "--searchterm", "people"})
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("Execute: %v", err)
-		}
-		if !strings.Contains(captured.Path, "modelId=model-123") || !strings.Contains(captured.Path, "searchTerm=people") {
-			t.Errorf("path = %q, want legacy aliases to preserve parameter names", captured.Path)
-		}
-	})
-
-	t.Run("canonical and legacy conflict", func(t *testing.T) {
-		cmd := buildCommand(op, func(req APIRequest) error { return nil })
-		cmd.SilenceUsage = true
-		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"--model-id", "new", "--modelid", "old"})
-		err := cmd.Execute()
-		if err == nil || !strings.Contains(err.Error(), "cannot use both --model-id and deprecated --modelid") {
-			t.Fatalf("error = %v, want conflicting alias error", err)
-		}
-	})
-}
-
-// Verify that operations with a request body (POST/PUT/PATCH) get a --body
-// flag, and the JSON value passed to it ends up in APIRequest.Body.
 func TestBuildCommand_BodyFlag(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
@@ -458,6 +405,727 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 	if err := cmd.Execute(); err == nil {
 		t.Error("expected error for wrong arg count, got nil")
 	}
+}
+
+// Every generated command must accept --schema (and its --field/--depth
+// refinements), including bodyless GET/DELETE ones. Agents reach for --schema
+// first, so a command missing the flag costs a wasted call.
+func TestGenerateCommands_SchemaFlagOnEveryCommand(t *testing.T) {
+	specData := loadSpec(t)
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands(specData, noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	// A spec param may legitimately own one of these names, in which case the
+	// discovery flag lives under its fallback — but it must exist either way.
+	fallbacks := map[string]string{"schema": "schema-doc", "field": "schema-field", "depth": "schema-depth"}
+
+	checked := 0
+	for _, tagCmd := range cmds {
+		for _, sub := range tagCmd.Commands() {
+			for flag, fallback := range fallbacks {
+				if sub.Flags().Lookup(flag) == nil && sub.Flags().Lookup(fallback) == nil {
+					t.Errorf("%s %s: neither --%s nor --%s registered", tagCmd.Name(), sub.Name(), flag, fallback)
+				}
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no subcommands were checked")
+	}
+	t.Logf("checked --schema registration on %d subcommands", checked)
+}
+
+// freeFlagName must never give up: when both the preferred name and its
+// fallback are taken it keeps suffixing until it finds a free one, so the
+// discovery flag is always registered somewhere.
+func TestFreeFlagName(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema" {
+		t.Errorf("freeFlagName on an empty command = %q, want schema", got)
+	}
+
+	cmd.Flags().String("schema", "", "a spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc" {
+		t.Errorf("freeFlagName with schema taken = %q, want schema-doc", got)
+	}
+
+	cmd.Flags().String("schema-doc", "", "another spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc-2" {
+		t.Errorf("freeFlagName with both taken = %q, want schema-doc-2", got)
+	}
+}
+
+// --schema must short-circuit before positional-arg validation, so a command
+// with required path params still answers without them (and without a token).
+func TestBuildCommand_SchemaSkipsArgValidation(t *testing.T) {
+	var called bool
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testGetWidget",
+		Method:      "GET",
+		Path:        "/api/v1/widgets/{widgetId}",
+		PathParams:  []paramInfo{{Name: "widgetId", In: "path", Type: "string"}},
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--schema"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --schema with no args: %v", err)
+	}
+	if called {
+		t.Error("executor was called on a --schema run")
+	}
+	if !strings.Contains(buf.String(), `"body": null`) {
+		t.Errorf("schema output missing an explicit null body: %s", buf.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Flag-name normalization
+//
+// The spec spells the same concept differently across sibling operations
+// ("branchId" on models validate, "branch_id" on models list-topics). Flag
+// names are derived by splitting camelCase, so both become --branch-id, and
+// lookups ignore case and dash/underscore placement so older spellings keep
+// working.
+// ---------------------------------------------------------------------------
+
+// canonicalName turns an OpenAPI param name into the kebab-case flag name.
+func TestCanonicalName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"branchId", "branch-id"},
+		{"branch_id", "branch-id"},
+		{"branch-id", "branch-id"},
+		{"pageSize", "page-size"},
+		{"modelKind", "model-kind"},
+		{"baseModelId", "base-model-id"},
+		{"cursor", "cursor"},
+		{"id", "id"},
+		{"", ""},
+		// Acronym runs stay together rather than exploding letter by letter.
+		{"modelURL", "model-url"},
+		{"URLPrefix", "url-prefix"},
+		{"parseJSONBody", "parse-json-body"},
+		// A pluralized acronym stays one word instead of splitting on the "s".
+		{"URLs", "urls"},
+		{"IDs", "ids"},
+		{"apiURLs", "api-urls"},
+		{"modelIDs", "model-ids"},
+		{"IDsList", "ids-list"},
+		// Digits attach to the word they follow.
+		{"v2Identifier", "v2-identifier"},
+	}
+	for _, c := range cases {
+		if got := canonicalName(c.in); got != c.want {
+			t.Errorf("canonicalName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// flagLookupKey is the equivalence class used to match a typed flag name
+// against the registered one.
+func TestFlagLookupKey(t *testing.T) {
+	same := []string{"branch-id", "branchId", "branch_id", "branchid", "BRANCH-ID"}
+	want := flagLookupKey(same[0])
+	for _, s := range same {
+		if got := flagLookupKey(s); got != want {
+			t.Errorf("flagLookupKey(%q) = %q, want %q", s, got, want)
+		}
+	}
+	if flagLookupKey("branch-id") == flagLookupKey("branch-ids") {
+		t.Error("distinct flag names must not share a lookup key")
+	}
+}
+
+// A camelCase query param registers a kebab-case flag, and that canonical
+// spelling is the only one --help advertises.
+func TestBuildCommand_CamelCaseQueryParamBecomesKebabFlag(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "models",
+		OperationID: "modelsValidate",
+		Method:      "GET",
+		Path:        "/api/v1/models/validate",
+		QueryParams: []paramInfo{{Name: "branchId", In: "query"}},
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+
+	f := cmd.Flags().Lookup("branch-id")
+	if f == nil {
+		t.Fatal("expected a --branch-id flag to be registered")
+	}
+	if f.Name != "branch-id" {
+		t.Errorf("registered flag name = %q, want %q", f.Name, "branch-id")
+	}
+	if usage := cmd.Flags().FlagUsages(); !strings.Contains(usage, "--branch-id") || strings.Contains(usage, "--branchid") {
+		t.Errorf("help output should offer only the canonical spelling, got:\n%s", usage)
+	}
+}
+
+// Every spelling that differs only in case or separators resolves to the same
+// flag, and the value is sent under the param's ORIGINAL spec name.
+func TestBuildCommand_AlternateFlagSpellings(t *testing.T) {
+	for _, spelling := range []string{"--branch-id", "--branchid", "--branchId", "--branch_id", "--BranchID"} {
+		t.Run(spelling, func(t *testing.T) {
+			var captured APIRequest
+			op := &operationInfo{
+				Tag:         "models",
+				OperationID: "modelsValidate",
+				Method:      "GET",
+				Path:        "/api/v1/models/validate",
+				QueryParams: []paramInfo{{Name: "branchId", In: "query"}},
+			}
+			cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+			cmd.SilenceUsage, cmd.SilenceErrors = true, true
+			cmd.SetArgs([]string{spelling, "br-123"})
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute(%s): %v", spelling, err)
+			}
+			// The query string uses the spec's spelling, not the flag's.
+			if captured.Path != "/api/v1/models/validate?branchId=br-123" {
+				t.Errorf("path = %q, want branchId=br-123 in the query string", captured.Path)
+			}
+		})
+	}
+}
+
+// The drift this fixes: sibling commands whose spec params differ only in
+// naming style now answer to one flag spelling, in both directions.
+func TestGenerateCommands_SiblingParamsAgreeOnFlagName(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/models/validate": {
+				"get": {
+					"operationId": "modelsValidate",
+					"tags": ["models"],
+					"parameters": [{"name": "branchId", "in": "query", "schema": {"type": "string"}}],
+					"responses": {"200": {"description": "ok"}}
+				}
+			},
+			"/api/v1/models/topics": {
+				"get": {
+					"operationId": "modelsListTopics",
+					"tags": ["models"],
+					"parameters": [{"name": "branch_id", "in": "query", "schema": {"type": "string"}}],
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	for _, sub := range cmds[0].Commands() {
+		for _, spelling := range []string{"branch-id", "branchid", "branchId"} {
+			if sub.Flags().Lookup(spelling) == nil {
+				t.Errorf("%s: --%s does not resolve to a registered flag", sub.Name(), spelling)
+			}
+		}
+	}
+}
+
+// Two params on one operation that normalize identically cannot share a flag
+// (pflag panics on the second), but the spec is synced from upstream, so the
+// later one is renamed out of the way rather than failing generation — which
+// would take down every command in the CLI, not just this one.
+func TestGenerateCommands_DegradesOnFlagCollision(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/things": {
+				"get": {
+					"operationId": "thingsList",
+					"tags": ["things"],
+					"parameters": [
+						{"name": "branchId", "in": "query", "schema": {"type": "string"}},
+						{"name": "branch_id", "in": "query", "schema": {"type": "string"}}
+					],
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	var captured APIRequest
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { captured = req; return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	var cmd *cobra.Command
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == "list" {
+			cmd = sub
+		}
+	}
+	if cmd == nil {
+		t.Fatal("expected a generated \"things list\" command")
+	}
+	if cmd.Flags().Lookup("branch-id") == nil {
+		t.Fatal("the first param should keep the canonical --branch-id")
+	}
+	second := cmd.Flags().Lookup("branch-id-2")
+	if second == nil {
+		t.Fatal("the second param should be registered under a fallback name")
+	}
+	// The rename is announced, otherwise --branch-id-2 looks like a typo.
+	if !strings.Contains(second.Usage, `"branch_id"`) {
+		t.Errorf("fallback flag usage should name the original param, got %q", second.Usage)
+	}
+
+	// Both flags still reach the server under their own spec spellings.
+	tagCmd := cmds[0]
+	tagCmd.SilenceUsage, tagCmd.SilenceErrors = true, true
+	tagCmd.SetArgs([]string{"list", "--branch-id", "a", "--branch-id-2", "b"})
+	if err := tagCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "branchId=a") || !strings.Contains(captured.Path, "branch_id=b") {
+		t.Errorf("path = %q, want both branchId=a and branch_id=b", captured.Path)
+	}
+}
+
+func TestValidateFlagNames(t *testing.T) {
+	// Distinct params are fine, even when one is camelCase and one snake_case.
+	ok := &operationInfo{
+		OperationID: "thingsList",
+		QueryParams: []paramInfo{{Name: "branchId"}, {Name: "page_size"}, {Name: "cursor"}},
+	}
+	if err := validateFlagNames(ok); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Params that canonicalize alike are renamed by resolveQueryFlags, so they
+	// are not reported either.
+	colliding := &operationInfo{
+		OperationID: "thingsList",
+		QueryParams: []paramInfo{{Name: "branchId"}, {Name: "branch_id"}},
+	}
+	if err := validateFlagNames(colliding); err != nil {
+		t.Errorf("unexpected error for colliding params: %v", err)
+	}
+
+	// A param whose name matches a built-in flag is renamed out of the way
+	// rather than reported, so it is not a collision.
+	withBody := &operationInfo{
+		OperationID: "thingsCreate",
+		QueryParams: []paramInfo{{Name: "Body"}},
+		HasBody:     true,
+	}
+	if err := validateFlagNames(withBody); err != nil {
+		t.Errorf("unexpected error for a reserved-name param: %v", err)
+	}
+
+	// A param colliding with a promoted body-shorthand flag is renamed too —
+	// labelsCreate promotes "color" and "description" — so nothing is reported.
+	withShorthand := &operationInfo{
+		OperationID: "labelsCreate",
+		QueryParams: []paramInfo{{Name: "Color"}},
+		HasBody:     true,
+	}
+	if err := validateFlagNames(withShorthand); err != nil {
+		t.Errorf("unexpected error for a param colliding with a shorthand: %v", err)
+	}
+
+	// Only hand-written shorthands are reported: one that took a built-in
+	// flag's name could not be registered at all.
+	sh := GetBodyShorthand("labelsCreate")
+	original := sh.Flags
+	sh.Flags = append([]FlagMapping{{FlagName: "body", FieldPath: "name"}}, original...)
+	defer func() { sh.Flags = original }()
+	if err := validateFlagNames(withShorthand); err == nil {
+		t.Error("expected a shorthand named after a built-in flag to be reported")
+	}
+}
+
+// Promoted body-shorthand flags are registered with pflag's Var (their type
+// comes from the request schema), not String. Registration still goes through
+// the normalization function, so alternate spellings must reach them too — and
+// the schema-derived typing has to survive the trip.
+func TestShorthand_TypedFlagsAcceptAlternateSpellings(t *testing.T) {
+	op := operationFromRealSpec(t, "aiGenerateQuery")
+
+	// Sanity: the flag is boolean-typed from the spec, not a plain string.
+	probe := buildCommand(op, func(req APIRequest) error { return nil })
+	runQuery := probe.Flags().Lookup("run-query")
+	if runQuery == nil {
+		t.Fatal("expected a --run-query flag")
+	}
+	if runQuery.Value.Type() != "boolean" {
+		t.Fatalf("--run-query type = %q, want %q", runQuery.Value.Type(), "boolean")
+	}
+
+	for _, spelling := range []string{"--run-query", "--runquery", "--runQuery", "--run_query"} {
+		t.Run(spelling, func(t *testing.T) {
+			var captured APIRequest
+			cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+			cmd.SilenceUsage, cmd.SilenceErrors = true, true
+			cmd.SetArgs([]string{"m-1", "how many orders", spelling, "false", "--userid", "u-1"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute(%s): %v", spelling, err)
+			}
+
+			var body map[string]interface{}
+			if err := json.Unmarshal(captured.Body, &body); err != nil {
+				t.Fatalf("unmarshaling body: %v", err)
+			}
+			// Boolean typing survives: a JSON false, not the string "false".
+			if v, ok := body["runQuery"].(bool); !ok || v {
+				t.Errorf("body[runQuery] = %#v, want false (bool)", body["runQuery"])
+			}
+			if body["userId"] != "u-1" {
+				t.Errorf("body[userId] = %#v, want %q", body["userId"], "u-1")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Reserved (global / built-in) flag names
+//
+// Normalization widened what counts as a collision: a spec param named
+// "baseUrl" used to slugify to the harmless --baseurl, but canonicalizes to
+// --base-url. Registered locally it would win the name — pflag's AddFlagSet
+// skips a persistent flag whose name is already taken — and resolveConfig's
+// GetString("base-url") would then read the query param's value, letting one
+// value both filter the request and choose the host it goes to.
+// ---------------------------------------------------------------------------
+
+func TestResolveQueryFlags_ReservedNamesArePrefixed(t *testing.T) {
+	cases := []struct {
+		in      string
+		hasBody bool
+		want    string
+	}{
+		// Global flags: reserved on every command.
+		{"baseUrl", false, "param-base-url"},
+		{"base_url", false, "param-base-url"},
+		{"token", false, "param-token"},
+		{"profile", false, "param-profile"},
+		{"compact", false, "param-compact"},
+		{"format", false, "param-format"},
+		{"help", false, "param-help"},
+		// Body flags: only registered — and so only reserved — on operations
+		// that take a request body.
+		{"body", true, "param-body"},
+		{"schema", true, "param-schema"},
+		{"field", true, "param-field"},
+		{"depth", true, "param-depth"},
+		{"body", false, "body"},
+		{"schema", false, "schema"},
+		{"field", false, "field"},
+		{"depth", false, "depth"},
+		// Everything else keeps its canonical name.
+		{"branchId", true, "branch-id"},
+		{"pageSize", false, "page-size"},
+		{"baseModelId", false, "base-model-id"},
+		{"formatting", false, "formatting"},
+		{"tokenId", false, "token-id"},
+	}
+	for _, c := range cases {
+		op := &operationInfo{
+			OperationID: "thingsList",
+			QueryParams: []paramInfo{{Name: c.in, In: "query"}},
+			HasBody:     c.hasBody,
+		}
+		if got := resolveQueryFlags(op)[0].Name; got != c.want {
+			t.Errorf("param %q (hasBody=%v) registered as --%s, want --%s", c.in, c.hasBody, got, c.want)
+		}
+	}
+}
+
+// A body shorthand is our hand-written UX sugar; the query param is the
+// endpoint's contract. When a synced spec adds a param that lands on a
+// shorthand's flag name, the param moves aside — generation must not fail, that
+// would take down the whole CLI.
+func TestResolveQueryFlags_ShorthandNamesAreReservedPerOperation(t *testing.T) {
+	// labelsCreate promotes "color" and "description" as shorthand flags.
+	collides := &operationInfo{
+		OperationID: "labelsCreate",
+		QueryParams: []paramInfo{{Name: "color", In: "query"}},
+		HasBody:     true,
+	}
+	got := resolveQueryFlags(collides)[0]
+	if got.Name != "param-color" {
+		t.Errorf("param %q registered as --%s, want --param-color", "color", got.Name)
+	}
+	if !strings.Contains(got.Note, "shorthand") {
+		t.Errorf("help note should explain the shorthand collision, got %q", got.Note)
+	}
+
+	// The same param name on an operation with no shorthand is left alone.
+	free := &operationInfo{
+		OperationID: "thingsList",
+		QueryParams: []paramInfo{{Name: "color", In: "query"}},
+	}
+	if name := resolveQueryFlags(free)[0].Name; name != "color" {
+		t.Errorf("without a shorthand the param should keep --color, got --%s", name)
+	}
+}
+
+// End to end: a synced spec that adds a query param named after one of our
+// shorthand flags still generates, both flags work, and the param goes out
+// under its spec spelling.
+func TestGenerateCommands_QueryParamCollidingWithShorthand(t *testing.T) {
+	// labelsCreate promotes --color as a body shorthand; the spec here also
+	// declares a "color" query param.
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/labels": {
+				"post": {
+					"operationId": "labelsCreate",
+					"tags": ["labels"],
+					"parameters": [{"name": "color", "in": "query", "schema": {"type": "string"}}],
+					"requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+						"name": {"type": "string"},
+						"color": {"type": "string"}
+					}}}}},
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	var captured APIRequest
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { captured = req; return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	var cmd *cobra.Command
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == "create" {
+			cmd = sub
+		}
+	}
+	if cmd == nil {
+		t.Fatal("expected a generated \"labels create\" command")
+	}
+
+	// The shorthand keeps --color; the query param moves to --param-color.
+	if f := cmd.Flags().Lookup("color"); f == nil || f.Usage != "hex color (e.g. #0366d6)"+bodyExclusiveSuffix {
+		t.Fatalf("--color should still be the body shorthand, got %#v", f)
+	}
+	param := cmd.Flags().Lookup("param-color")
+	if param == nil {
+		t.Fatal("expected the query param to be registered as --param-color")
+	}
+	if !strings.Contains(param.Usage, "shorthand") {
+		t.Errorf("help should explain the rename, got %q", param.Usage)
+	}
+
+	tagCmd := cmds[0]
+	tagCmd.SilenceUsage, tagCmd.SilenceErrors = true, true
+	tagCmd.SetArgs([]string{"create", "important", "--color", "#0366d6", "--param-color", "red"})
+	if err := tagCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// The query param goes out under its spec spelling...
+	if captured.Path != "/api/v1/labels?color=red" {
+		t.Errorf("path = %q, want the param sent as color=red", captured.Path)
+	}
+	// ...and the shorthand still lands in the body.
+	var body map[string]interface{}
+	if err := json.Unmarshal(captured.Body, &body); err != nil {
+		t.Fatalf("unmarshaling body: %v", err)
+	}
+	if body["color"] != "#0366d6" || body["name"] != "important" {
+		t.Errorf("body = %#v, want name=important and color=#0366d6", body)
+	}
+}
+
+// A bodyless operation registers no --field, so a param of that name keeps it
+// instead of being renamed on the strength of a flag that is not there.
+func TestBuildCommand_BodylessOperationDoesNotReserveBodyFlags(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "things",
+		OperationID: "thingsList",
+		Method:      "GET",
+		Path:        "/api/v1/things",
+		QueryParams: []paramInfo{{Name: "field", In: "query"}},
+	}
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+
+	f := cmd.Flags().Lookup("field")
+	if f == nil {
+		t.Fatal("expected the param to keep --field on a bodyless command")
+	}
+	if strings.Contains(f.Usage, "renamed") {
+		t.Errorf("help should not claim a rename, got %q", f.Usage)
+	}
+	if cmd.Flags().Lookup("param-field") != nil {
+		t.Error("--param-field should not exist on a bodyless command")
+	}
+}
+
+func TestIsReservedFlagName_IgnoresSpelling(t *testing.T) {
+	for _, name := range []string{"base-url", "baseUrl", "base_url", "BASEURL", "help", "FORMAT"} {
+		if !IsReservedFlagName(name) {
+			t.Errorf("IsReservedFlagName(%q) = false, want true", name)
+		}
+	}
+	// Flags only some commands register are not globally reserved.
+	for _, name := range []string{"branch-id", "page-size", "param-base-url", "tokens", "json-body", "field"} {
+		if IsReservedFlagName(name) {
+			t.Errorf("IsReservedFlagName(%q) = true, want false", name)
+		}
+	}
+}
+
+// A spec param that would shadow a global flag is registered under --param-,
+// the global name is left alone, and the value still goes out under the
+// param's original spec spelling.
+func TestBuildCommand_ReservedQueryParamDoesNotShadowGlobalFlag(t *testing.T) {
+	var captured APIRequest
+	op := &operationInfo{
+		Tag:         "things",
+		OperationID: "thingsList",
+		Method:      "GET",
+		Path:        "/api/v1/things",
+		QueryParams: []paramInfo{
+			{Name: "baseUrl", In: "query", Description: "filter by callback base URL"},
+			{Name: "cursor", In: "query"},
+		},
+	}
+	cmd := buildCommand(op, func(req APIRequest) error { captured = req; return nil })
+
+	// The command must not define --base-url itself; that name belongs to the
+	// root's persistent flag, which merges in at parse time.
+	if f := cmd.Flags().Lookup("base-url"); f != nil {
+		t.Fatalf("generated command registered a local --%s, shadowing the global flag", f.Name)
+	}
+	if cmd.Flags().Lookup("param-base-url") == nil {
+		t.Fatal("expected the param to be registered as --param-base-url")
+	}
+	if usage := cmd.Flags().FlagUsages(); !strings.Contains(usage, `"baseUrl"`) {
+		t.Errorf("help should name the original spec param, got:\n%s", usage)
+	}
+
+	// A real root command with the global flag, so parsing mirrors production.
+	root := &cobra.Command{Use: "omni"}
+	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
+	root.SetGlobalNormalizationFunc(NormalizeFlagName)
+	root.AddCommand(cmd)
+	root.SetArgs([]string{"list", "--param-base-url", "https://filter.example", "--base-url", "https://api.example"})
+	root.SilenceUsage, root.SilenceErrors = true, true
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if captured.Path != "/api/v1/things?baseUrl=https%3A%2F%2Ffilter.example" {
+		t.Errorf("path = %q, want the param sent as baseUrl", captured.Path)
+	}
+	// The global flag still holds the value the user gave it.
+	if got, _ := cmd.Flags().GetString("base-url"); got != "https://api.example" {
+		t.Errorf("--base-url = %q, want the global value %q", got, "https://api.example")
+	}
+}
+
+// Command names and flag names share one slug renderer (canonicalName).
+// Unifying them was safe only because it changes no command name the real spec
+// generates — unlike flags, a command spelling has no normalization fallback,
+// so a change would break every user script that calls it. This guards the
+// property: names stay unique within their group and free of the letter-by-
+// letter acronym splits the old renderer produced ("get-u-r-l-info").
+func TestRealSpec_CommandNamesAreStable(t *testing.T) {
+	specData := loadSpec(t)
+	doc, err := libopenapi.NewDocument(specData)
+	if err != nil {
+		t.Fatalf("parsing spec: %v", err)
+	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("building model: %v", err)
+	}
+
+	groups := map[string][]*operationInfo{}
+	for pair := model.Model.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		extractOperations(pair.Key(), pair.Value(), groups)
+	}
+	if len(groups) == 0 {
+		t.Fatal("no operations parsed from the spec")
+	}
+
+	for tag, ops := range groups {
+		seen := map[string]string{}
+		for _, op := range ops {
+			name := commandName(op)
+			if name == "" {
+				t.Errorf("%s: operation %s produced an empty command name", tag, op.OperationID)
+				continue
+			}
+			for _, seg := range strings.Split(name, "-") {
+				if len(seg) == 1 {
+					t.Errorf("%s %s: single-letter segment %q suggests an acronym was split letter by letter", slugify(tag), name, seg)
+				}
+			}
+			if prev, ok := seen[name]; ok {
+				t.Errorf("%s: %s and %s both generate the command %q", slugify(tag), prev, op.OperationID, name)
+			}
+			seen[name] = op.OperationID
+		}
+	}
+}
+
+// The real spec must generate cleanly. Any param that had to be renamed — to
+// avoid a global flag or another param on the same operation — is logged, since
+// that is a spec change worth noticing on a sync.
+func TestRealSpec_NoFlagCollisions(t *testing.T) {
+	specData := loadSpec(t)
+	specOps := parseSpecOperations(t, specData)
+	if len(specOps) == 0 {
+		t.Fatal("no operations parsed from the spec")
+	}
+
+	doc, err := libopenapi.NewDocument(specData)
+	if err != nil {
+		t.Fatalf("parsing spec: %v", err)
+	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("building model: %v", err)
+	}
+
+	groups := map[string][]*operationInfo{}
+	for pair := model.Model.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		extractOperations(pair.Key(), pair.Value(), groups)
+	}
+
+	renamed := 0
+	for tag, ops := range groups {
+		for _, op := range ops {
+			if err := validateFlagNames(op); err != nil {
+				t.Errorf("%s %s: %v", slugify(tag), commandName(op), err)
+			}
+			for _, qf := range resolveQueryFlags(op) {
+				if qf.Note != "" {
+					renamed++
+					t.Logf("%s %s: param %q registered as --%s %s", slugify(tag), commandName(op), qf.Param.Name, qf.Name, qf.Note)
+				}
+			}
+		}
+	}
+	t.Logf("%d query params renamed to avoid a flag name that was already taken", renamed)
 }
 
 // ---------------------------------------------------------------------------
@@ -701,5 +1369,125 @@ func TestSpecCoverage(t *testing.T) {
 
 	if len(uncovered) > 0 {
 		t.Errorf("%d/%d operations uncovered", len(uncovered), totalOps)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Arguments help section tests
+//
+// Cobra's usage line only shows placeholders like "<branchname>", which is how
+// an agent ends up passing a branch UUID to a command that wants a branch NAME.
+// buildCommand therefore renders the spec's param descriptions into an
+// "Arguments:" block in the command's long help.
+// ---------------------------------------------------------------------------
+
+func TestBuildCommand_ArgumentsSection(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "Models",
+		OperationID: "modelsMergeBranch",
+		Summary:     "Merge branch",
+		Method:      "POST",
+		Path:        "/api/v1/models/{modelId}/branch/{branchName}/merge",
+		PathParams: []paramInfo{
+			{Name: "modelId", In: "path", Description: "Model UUID"},
+			{Name: "branchName", In: "path", Description: "Branch name"},
+		},
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	if !strings.Contains(cmd.Long, "Arguments:") {
+		t.Fatalf("Long = %q, expected an Arguments section", cmd.Long)
+	}
+	for _, want := range []string{"<modelid>", "Model UUID", "<branchname>", "Branch name"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
+		}
+	}
+	// With no Description on the operation, the Short still has to survive.
+	if !strings.Contains(cmd.Long, "Merge branch") {
+		t.Errorf("Long = %q, expected the summary to be preserved", cmd.Long)
+	}
+}
+
+// Shorthand positional args are part of the same positional list, so they
+// belong in the same block as the path params.
+func TestBuildCommand_ArgumentsSectionIncludesShorthandArgs(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "AI",
+		OperationID: "aiGenerateQuery",
+		Method:      "POST",
+		Path:        "/api/v1/ai/generate-query",
+		HasBody:     true,
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	for _, want := range []string{"Arguments:", "<model-id>", "UUID of the shared model", "<prompt>", "natural language query prompt"} {
+		if !strings.Contains(cmd.Long, want) {
+			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
+		}
+	}
+}
+
+// Commands with no positionals must not grow an empty Arguments block.
+func TestBuildCommand_NoArgumentsSectionWithoutPositionals(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "Models",
+		OperationID: "modelsList",
+		Summary:     "List models",
+		Method:      "GET",
+		Path:        "/api/v1/models",
+	}
+
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+	if strings.Contains(cmd.Long, "Arguments:") {
+		t.Errorf("Long = %q, expected no Arguments section", cmd.Long)
+	}
+}
+
+// End-to-end against the real spec: the description the spec gives for a path
+// param has to reach the generated command's help.
+func TestGenerateCommands_ArgumentsSectionFromSpec(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	var merge *cobra.Command
+	for _, tagCmd := range cmds {
+		if tagCmd.Use != "models" {
+			continue
+		}
+		for _, sub := range tagCmd.Commands() {
+			if sub.Name() == "merge-branch" {
+				merge = sub
+			}
+		}
+	}
+	if merge == nil {
+		t.Fatal("models merge-branch not found in generated commands")
+	}
+
+	// The second positional is a branch NAME, not a branch UUID — that
+	// distinction is exactly what the Arguments section exists to convey.
+	if !strings.Contains(merge.Long, "Arguments:") {
+		t.Fatalf("Long = %q, expected an Arguments section", merge.Long)
+	}
+	if !strings.Contains(merge.Long, "Branch name") {
+		t.Errorf("Long = %q, expected the spec's branchName description", merge.Long)
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Model UUID", "Model UUID"},
+		{"  padded  ", "padded"},
+		{"first line\nsecond line", "first line"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := firstLine(c.in); got != c.want {
+			t.Errorf("firstLine(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

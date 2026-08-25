@@ -96,6 +96,10 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
 	cmd.Flags().StringArray("attr", nil, "user attribute as key=value (repeatable); empty value clears the attribute")
 	cmd.Flags().String("attr-json", "", `JSON object of attributes for numeric/array values, e.g. '{"level":3,"regions":["us","eu"]}'`)
 
+	// Hand-written, but agents reach for --schema on any API command; describe the
+	// SCIM PATCH body it assembles so the flag works here too.
+	openapi.RegisterSchemaFlag(cmd, openapi.StaticSchemaEmitter("set-attributes", setAttributesSchemaDoc))
+
 	cmd.Example = `  # Set two string attributes (by user ID)
   omni users set-attributes 550e8400-e29b-41d4-a716-446655440000 --attr region=us-east --attr team=growth
 
@@ -109,6 +113,75 @@ attribute. Use --attr-json to set numeric or multi-value (array) attributes.`,
   omni users set-attributes user@example.com --attr-json '{"level":3,"regions":["us","eu"]}'`
 
 	return cmd
+}
+
+// setAttributesSchemaDoc mirrors the generated commands' --schema document for
+// the hand-written set-attributes command. The body shown is the SCIM PatchOp
+// the CLI assembles from --attr/--attr-json; the response is the SCIM user
+// representation returned by PATCH /api/scim/v2/Users/{id}.
+// Hand-transcribed, so TestStaticSchemaDocs_ResponseMatchesSpec checks it
+// against the spec and the body-assembly code — keep both in step.
+func setAttributesSchemaDoc() openapi.SchemaDoc {
+	return openapi.SchemaDoc{
+		Method: "PATCH",
+		Path:   "/api/scim/v2/Users/{id}",
+		Args: []openapi.SchemaArg{{
+			Name:        "userIdOrEmail",
+			Placeholder: "<user-id-or-email>",
+			Type:        "string",
+			Description: "SCIM user ID, or an email address resolved to one via a SCIM lookup",
+		}},
+		Required: []string{"schemas", "Operations"},
+		Body: map[string]interface{}{
+			"type":        "object",
+			"description": "SCIM PatchOp assembled by the CLI from --attr/--attr-json; not passed through as JSON.",
+			"properties": map[string]interface{}{
+				"schemas": map[string]interface{}{
+					"type":        "array",
+					"description": `always ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]`,
+					"items":       map[string]interface{}{"type": "string"},
+				},
+				"Operations": map[string]interface{}{
+					"type":        "array",
+					"description": "a single replace op nesting the attributes under " + userAttributePrefix,
+					"items": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"op":    schemaString(`always "replace"`),
+							"value": map[string]interface{}{"type": "object", "description": "attribute name → value; null clears the attribute"},
+						},
+						"required": []string{"op", "value"},
+					},
+				},
+			},
+			"required": []string{"schemas", "Operations"},
+		},
+		Example: map[string]interface{}{
+			"schemas": []interface{}{"urn:ietf:params:scim:api:messages:2.0:PatchOp"},
+			"Operations": []interface{}{map[string]interface{}{
+				"op": "replace",
+				"value": map[string]interface{}{
+					userAttributePrefix: map[string]interface{}{"region": "us-east"},
+				},
+			}},
+		},
+		Response: &openapi.SchemaResponse{
+			Status:      "200",
+			ContentType: "application/json",
+			Description: "SCIM user updated",
+			Schema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"active":      map[string]interface{}{"type": "boolean", "description": "Whether the user is active"},
+					"displayName": schemaString("Display name"),
+					"id":          map[string]interface{}{"type": "string", "format": "uuid", "description": "SCIM user ID"},
+					"schemas":     map[string]interface{}{"type": "array", "description": "SCIM schema URIs", "items": map[string]interface{}{"type": "string"}},
+					"userName":    map[string]interface{}{"type": "string", "format": "email", "description": "Username (email)"},
+				},
+				"required": []string{"active", "displayName", "id", "schemas", "userName"},
+			},
+		},
+	}
 }
 
 // buildSetAttributesBody assembles a SCIM PatchOp body that sets Omni user

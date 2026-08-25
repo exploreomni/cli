@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // schemaTestSpec exercises the body-schema describer: allOf composition,
@@ -66,33 +68,45 @@ const schemaTestSpec = `{
   }
 }`
 
-// runSchema generates commands from a spec and runs the "widgets create"
-// command with --schema, returning the parsed JSON document. It dispatches
-// through the parent group with the full arg path, since cobra's Execute()
-// re-parses from the root regardless of the receiver.
-func runSchema(t *testing.T) bodySchemaDoc {
+// execSchema generates commands from spec and dispatches args through the first
+// command group, returning the parsed schema document or the execution error
+// (usage/errors silenced so an error carries only the message under test). It
+// dispatches through the parent group with the full arg path, since cobra's
+// Execute() re-parses from the root regardless of the receiver. Every schema
+// test runs through here.
+func execSchema(t *testing.T, spec string, args ...string) (SchemaDoc, error) {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(schemaTestSpec), noop)
+	cmds, err := GenerateCommands([]byte(spec), noop)
 	if err != nil {
 		t.Fatalf("GenerateCommands: %v", err)
 	}
-	if len(cmds) != 1 {
-		t.Fatalf("expected 1 group, got %d", len(cmds))
-	}
 	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
 
 	var buf bytes.Buffer
 	group.SetOut(&buf)
 	group.SetErr(&buf)
-	group.SetArgs([]string{"create", "--schema"})
-	if err := group.Execute(); err != nil {
-		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
+	group.SetArgs(args)
+	if execErr := group.Execute(); execErr != nil {
+		return SchemaDoc{}, execErr
 	}
 
-	var doc bodySchemaDoc
+	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
+	}
+	return doc, nil
+}
+
+// runSchema runs "create --schema" against schemaTestSpec, failing the test if
+// it errors.
+func runSchema(t *testing.T) SchemaDoc {
+	t.Helper()
+	doc, err := execSchema(t, schemaTestSpec, "create", "--schema")
+	if err != nil {
+		t.Fatalf("Execute --schema: %v", err)
 	}
 	return doc
 }
@@ -225,7 +239,7 @@ const mapTestSpec = `{
   }
 }`
 
-func runMapSchema(t *testing.T) bodySchemaDoc {
+func runMapSchema(t *testing.T) SchemaDoc {
 	t.Helper()
 	noop := func(req APIRequest) error { return nil }
 	cmds, err := GenerateCommands([]byte(mapTestSpec), noop)
@@ -243,7 +257,7 @@ func runMapSchema(t *testing.T) bodySchemaDoc {
 	if err := group.Execute(); err != nil {
 		t.Fatalf("Execute --schema: %v\n%s", err, buf.String())
 	}
-	var doc bodySchemaDoc
+	var doc SchemaDoc
 	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
 		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
 	}
@@ -448,31 +462,10 @@ func TestSchema_DescribeOnRefFieldDrill(t *testing.T) {
 	}
 }
 
-// runSchemaWith runs "create --schema" plus extra flags against a spec. On
-// success it returns the parsed doc; on failure it returns the execution error
-// (usage/errors silenced so the error carries only the message under test).
-func runSchemaWith(t *testing.T, spec string, extra ...string) (bodySchemaDoc, error) {
+// runSchemaWith runs "create --schema" plus extra flags against a spec.
+func runSchemaWith(t *testing.T, spec string, extra ...string) (SchemaDoc, error) {
 	t.Helper()
-	noop := func(req APIRequest) error { return nil }
-	cmds, err := GenerateCommands([]byte(spec), noop)
-	if err != nil {
-		t.Fatalf("GenerateCommands: %v", err)
-	}
-	group := cmds[0]
-	group.SilenceUsage = true
-	group.SilenceErrors = true
-	var buf bytes.Buffer
-	group.SetOut(&buf)
-	group.SetErr(&buf)
-	group.SetArgs(append([]string{"create", "--schema"}, extra...))
-	if execErr := group.Execute(); execErr != nil {
-		return bodySchemaDoc{}, execErr
-	}
-	var doc bodySchemaDoc
-	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
-		t.Fatalf("unmarshal schema output: %v\n%s", err, buf.String())
-	}
-	return doc, nil
+	return execSchema(t, spec, append([]string{"create", "--schema"}, extra...)...)
 }
 
 // --field drills to a nested property; the $ref ("child" → Node) is resolved
@@ -552,6 +545,462 @@ func TestSchema_DepthLimitsExpansion(t *testing.T) {
 	}
 }
 
+// bodylessTestSpec exercises --schema on operations that take no request body:
+// a GET with a path param, two query params (one enum-valued and required) and a
+// bare-array 200 response, plus a DELETE whose only success status (204) carries
+// no content. The 202 is declared before the 200 so the "lowest 2xx wins"
+// selection can't pass by accident of declaration order, and text/csv sits
+// before application/json so the media-type preference is exercised too.
+const bodylessTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/widgets/{widgetId}/checks": {
+      "get": {
+        "operationId": "widgetsChecks",
+        "tags": ["widgets"],
+        "parameters": [
+          {"name": "widgetId", "in": "path", "required": true, "description": "Widget UUID", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "description": "Max results", "schema": {"type": "integer"}},
+          {"name": "severity", "in": "query", "required": true, "description": "Filter by severity", "schema": {"type": "string", "enum": ["error", "warning"]}}
+        ],
+        "responses": {
+          "202": {"description": "queued", "content": {"application/json": {"schema": {"type": "object"}}}},
+          "200": {
+            "description": "Check results",
+            "content": {
+              "text/csv": {"schema": {"type": "string"}},
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "description": "Bare top-level array of issues.",
+                  "items": {
+                    "type": "object",
+                    "required": ["message"],
+                    "properties": {"message": {"type": "string"}, "nested": {"type": "object", "properties": {"deep": {"type": "string"}}}}
+                  }
+                }
+              }
+            }
+          },
+          "404": {"description": "not found"}
+        }
+      },
+      "delete": {
+        "operationId": "widgetsDeleteChecks",
+        "tags": ["widgets"],
+        "parameters": [
+          {"name": "widgetId", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"204": {"description": "Checks cleared"}}
+      }
+    }
+  }
+}`
+
+// runSchemaCmd runs "<name> --schema" plus extra flags against a spec, with no
+// positional args — --schema must short-circuit before arg validation.
+func runSchemaCmd(t *testing.T, spec, name string, extra ...string) (SchemaDoc, error) {
+	t.Helper()
+	return execSchema(t, spec, append([]string{name, "--schema"}, extra...)...)
+}
+
+// --schema on a bodyless GET works with no positional args and describes the
+// call: args, query flags, and an explicit null body.
+func TestSchema_BodylessGetDescribesArgsAndQueryParams(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Method != "GET" || doc.Path != "/api/v1/widgets/{widgetId}/checks" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if doc.Body != nil {
+		t.Errorf("body = %v, want null for a bodyless operation", doc.Body)
+	}
+	if len(doc.Args) != 1 {
+		t.Fatalf("args = %v, want 1 entry", doc.Args)
+	}
+	arg := doc.Args[0]
+	if arg.Name != "widgetId" || arg.Placeholder != "<widgetid>" || arg.Type != "string" || arg.Description != "Widget UUID" {
+		t.Errorf("arg = %+v, want the widgetId path param", arg)
+	}
+
+	byFlag := map[string]SchemaQueryParam{}
+	for _, q := range doc.QueryParams {
+		byFlag[q.Flag] = q
+	}
+	limit, ok := byFlag["--limit"]
+	if !ok {
+		t.Fatalf("query params %v missing --limit", doc.QueryParams)
+	}
+	if limit.Type != "integer" || limit.Required || limit.Description != "Max results" {
+		t.Errorf("--limit = %+v, want an optional integer with its description", limit)
+	}
+	severity, ok := byFlag["--severity"]
+	if !ok {
+		t.Fatalf("query params %v missing --severity", doc.QueryParams)
+	}
+	if !severity.Required {
+		t.Errorf("--severity.required = false, want true")
+	}
+	if strings.Join(severity.Enum, ",") != "error,warning" {
+		t.Errorf("--severity.enum = %v, want [error warning]", severity.Enum)
+	}
+}
+
+// The response section reports the lowest declared 2xx, prefers application/json
+// over other media types, and renders a bare top-level array as such — the shape
+// a caller would otherwise have to discover by crashing on it.
+func TestSchema_ResponseBareArray(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp := doc.Response
+	if resp == nil {
+		t.Fatal("response section missing")
+	}
+	if resp.Status != "200" {
+		t.Errorf("response.status = %q, want 200 (lowest 2xx wins over 202)", resp.Status)
+	}
+	if resp.ContentType != "application/json" {
+		t.Errorf("response.contentType = %q, want application/json", resp.ContentType)
+	}
+	if resp.Description != "Check results" {
+		t.Errorf("response.description = %q", resp.Description)
+	}
+	schema, ok := resp.Schema.(map[string]interface{})
+	if !ok {
+		t.Fatalf("response.schema is not an object: %T", resp.Schema)
+	}
+	if schema["type"] != "array" {
+		t.Errorf("response.schema.type = %v, want array", schema["type"])
+	}
+	items, ok := schema["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("response.schema.items missing: %v", schema)
+	}
+	props, ok := items["properties"].(map[string]interface{})
+	if !ok || props["message"] == nil {
+		t.Errorf("response item properties = %v, want a message field", items["properties"])
+	}
+}
+
+// A 2xx with no content still reports the status, so a caller can tell "no body"
+// from "unknown".
+func TestSchema_ResponseWithoutContent(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "delete-checks")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.Status != "204" {
+		t.Errorf("response.status = %q, want 204", doc.Response.Status)
+	}
+	if doc.Response.Schema != nil {
+		t.Errorf("response.schema = %v, want null for a contentless status", doc.Response.Schema)
+	}
+}
+
+// --depth bounds the response expansion too, not just the request body.
+func TestSchema_DepthLimitsResponseExpansion(t *testing.T) {
+	doc, err := runSchemaCmd(t, bodylessTestSpec, "checks", "--depth", "1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := json.Marshal(doc.Response)
+	if !strings.Contains(string(raw), "max depth reached") {
+		t.Errorf("expected a depth-truncation note in the response at --depth 1: %s", raw)
+	}
+}
+
+// --field only drills the request body, so asking for it on a bodyless operation
+// must say so plainly rather than silently returning an empty body.
+func TestSchema_FieldOnBodylessOperationErrors(t *testing.T) {
+	_, err := runSchemaCmd(t, bodylessTestSpec, "checks", "--field", "anything")
+	if err == nil {
+		t.Fatal("expected an error for --field on a bodyless operation")
+	}
+	if !strings.Contains(err.Error(), "request body") {
+		t.Errorf("error = %q, want it to explain that --field needs a request body", err.Error())
+	}
+}
+
+// A body operation's document keeps its established shape (method, path,
+// required, body, example) and gains the response section — existing consumers
+// must not break.
+func TestSchema_BodyOperationStaysBackwardCompatible(t *testing.T) {
+	doc := runSchema(t)
+	if doc.Method != "POST" || doc.Path != "/api/v1/widgets" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if len(doc.Required) == 0 {
+		t.Error("required is empty; the body op's required list regressed")
+	}
+	if _, ok := doc.Body.(map[string]interface{}); !ok {
+		t.Errorf("body is not an object: %T", doc.Body)
+	}
+	if _, ok := doc.Example.(map[string]interface{}); !ok {
+		t.Errorf("example is not an object: %T", doc.Example)
+	}
+	// schemaTestSpec's 200 declares a description but no content.
+	if doc.Response == nil || doc.Response.Status != "200" {
+		t.Errorf("response = %+v, want the declared 200", doc.Response)
+	}
+}
+
+// collidingParamsSpec declares query params literally named schema, field and
+// depth — all three preferred discovery flag names. The params must keep their
+// own flags (they are the endpoint's contract) and discovery must still be
+// reachable, under its fallback names.
+const collidingParamsSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/things": {
+      "get": {
+        "operationId": "thingsList",
+        "tags": ["things"],
+        "parameters": [
+          {"name": "schema", "in": "query", "description": "Database schema to inspect", "schema": {"type": "string"}},
+          {"name": "field", "in": "query", "description": "Field to group by", "schema": {"type": "string"}},
+          {"name": "depth", "in": "query", "description": "Traversal depth", "schema": {"type": "integer"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Things",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"a": {"type": "object", "properties": {"b": {"type": "string"}}}}}}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+// A spec param owning a discovery flag name must not disable discovery: the
+// flags move to deterministic fallbacks, and the document reports where they
+// went.
+func TestSchema_ParamNameCollisionFallsBackToPrefixedFlags(t *testing.T) {
+	doc, err := runSchemaCmdFlag(t, collidingParamsSpec, "list", "schema-doc")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Method != "GET" || doc.Path != "/api/v1/things" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if doc.SchemaFlags == nil {
+		t.Fatal("schemaFlags section missing; agents can't discover the renamed flags")
+	}
+	want := SchemaFlags{Schema: "schema-doc", Field: "schema-field", Depth: "schema-depth"}
+	if *doc.SchemaFlags != want {
+		t.Errorf("schemaFlags = %+v, want %+v", *doc.SchemaFlags, want)
+	}
+	// The colliding query params are still described as query params.
+	flags := map[string]bool{}
+	for _, q := range doc.QueryParams {
+		flags[q.Flag] = true
+	}
+	for _, f := range []string{"--schema", "--field", "--depth"} {
+		if !flags[f] {
+			t.Errorf("query param %s missing from the document", f)
+		}
+	}
+}
+
+// The renamed refinement flags must work, and the renaming must be visible in
+// --help so a reader can find them.
+func TestSchema_RenamedRefinementFlagsWork(t *testing.T) {
+	doc, err := runSchemaCmdFlag(t, collidingParamsSpec, "list", "schema-doc", "--schema-depth", "0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw, _ := json.Marshal(doc.Response)
+	if !strings.Contains(string(raw), "max depth reached") {
+		t.Errorf("--schema-depth 0 did not bound the response: %s", raw)
+	}
+
+	sub := subcommand(t, collidingParamsSpec, "list")
+	help := sub.LocalFlags().FlagUsages()
+	for _, want := range []string{"--schema-doc", "--schema-field", "--schema-depth", "because --schema is a parameter"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("flag help does not mention %q:\n%s", want, help)
+		}
+	}
+}
+
+// A colliding param must still be sent as a query param — never swallowed as a
+// discovery control.
+func TestSchema_CollidingParamsStillReachTheRequest(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+	cmds, err := GenerateCommands([]byte(collidingParamsSpec), exec)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	group.SetArgs([]string{"list", "--schema", "public", "--field", "name", "--depth", "3"})
+	if err := group.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"schema=public", "field=name", "depth=3"} {
+		if !strings.Contains(captured.Path, want) {
+			t.Errorf("path %q missing %s", captured.Path, want)
+		}
+	}
+}
+
+// wildcardResponseSpec exercises response declarations that are easy to lose:
+// an operation whose only success status is the "2XX" range key, one where a
+// specific code must beat the range key, and one whose media type declares no
+// schema.
+const wildcardResponseSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/ranged": {
+      "get": {
+        "operationId": "rangedOnly",
+        "tags": ["resp"],
+        "responses": {
+          "2XX": {"description": "Ranged success", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}}},
+          "4XX": {"description": "Ranged failure"}
+        }
+      }
+    },
+    "/api/v1/both": {
+      "get": {
+        "operationId": "rangedAndSpecific",
+        "tags": ["resp"],
+        "responses": {
+          "2XX": {"description": "Ranged success", "content": {"application/json": {"schema": {"type": "string"}}}},
+          "201": {"description": "Created", "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}}}}}
+        }
+      }
+    },
+    "/api/v1/schemaless": {
+      "get": {
+        "operationId": "schemalessMedia",
+        "tags": ["resp"],
+        "responses": {
+          "200": {"description": "A file", "content": {"text/csv": {}}}
+        }
+      }
+    },
+    "/api/v1/mixed": {
+      "get": {
+        "operationId": "mixedMedia",
+        "tags": ["resp"],
+        "responses": {
+          "200": {
+            "description": "Mixed",
+            "content": {"application/json": {}, "text/ndjson": {"schema": {"type": "object", "properties": {"row": {"type": "string"}}}}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+// A success response declared only under the "2XX" range key must still be
+// reported rather than dropped.
+func TestSchema_ResponseAcceptsRangeWildcard(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "ranged-only")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing for a 2XX-only operation")
+	}
+	if doc.Response.Status != "2XX" {
+		t.Errorf("response.status = %q, want 2XX", doc.Response.Status)
+	}
+	schema, ok := doc.Response.Schema.(map[string]interface{})
+	if !ok || schema["type"] != "object" {
+		t.Errorf("response.schema = %v, want the declared object", doc.Response.Schema)
+	}
+}
+
+// A specific 2xx code beats the range wildcard.
+func TestSchema_SpecificCodeBeatsRangeWildcard(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "ranged-and-specific")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil || doc.Response.Status != "201" {
+		t.Fatalf("response = %+v, want the specific 201 to win over 2XX", doc.Response)
+	}
+	schema, ok := doc.Response.Schema.(map[string]interface{})
+	if !ok || schema["type"] != "object" {
+		t.Errorf("response.schema = %v, want the 201 object, not the 2XX string", doc.Response.Schema)
+	}
+}
+
+// A media type declared without a schema must still be reported by name —
+// "text/csv, shape undocumented" beats implying an empty response.
+func TestSchema_ResponseMediaTypeWithoutSchema(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "schemaless-media")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.ContentType != "text/csv" {
+		t.Errorf("response.contentType = %q, want text/csv (the declared media type was dropped)", doc.Response.ContentType)
+	}
+	if doc.Response.Schema != nil {
+		t.Errorf("response.schema = %v, want null for an undocumented media type", doc.Response.Schema)
+	}
+}
+
+// When application/json declares no schema but another media type does, report
+// the one that actually carries a shape.
+func TestSchema_ResponsePrefersMediaTypeThatHasASchema(t *testing.T) {
+	doc, err := runSchemaCmd(t, wildcardResponseSpec, "mixed-media")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc.Response == nil {
+		t.Fatal("response section missing")
+	}
+	if doc.Response.ContentType != "text/ndjson" {
+		t.Errorf("response.contentType = %q, want text/ndjson (the only type with a schema)", doc.Response.ContentType)
+	}
+	if doc.Response.Schema == nil {
+		t.Error("response.schema is null; the declared ndjson schema was dropped")
+	}
+}
+
+// subcommand generates commands from a spec and returns the named subcommand of
+// the first group.
+func subcommand(t *testing.T, spec, name string) *cobra.Command {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(spec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == name {
+			return sub
+		}
+	}
+	t.Fatalf("subcommand %q not found", name)
+	return nil
+}
+
+// runSchemaCmdFlag is runSchemaCmd for commands whose discovery flag was
+// renamed by a parameter collision.
+func runSchemaCmdFlag(t *testing.T, spec, name, schemaFlag string, extra ...string) (SchemaDoc, error) {
+	t.Helper()
+	return execSchema(t, spec, append([]string{name, "--" + schemaFlag}, extra...)...)
+}
+
 // Without --schema, the command must still enforce normal behavior (here, that
 // the body flag path is taken and the executor is invoked).
 func TestSchema_FlagDoesNotAffectNormalRun(t *testing.T) {
@@ -570,5 +1019,116 @@ func TestSchema_FlagDoesNotAffectNormalRun(t *testing.T) {
 	}
 	if !called {
 		t.Error("executor was not called on a normal (non --schema) run")
+	}
+}
+
+// deprecatedTestSpec declares a deprecated operation, whose notice cobra would
+// print as plain text ahead of --schema's JSON if we left it to cobra.
+const deprecatedTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/legacy": {
+      "put": {
+        "operationId": "legacyUpdate",
+        "tags": ["legacy"],
+        "deprecated": true,
+        "requestBody": {
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+        },
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  }
+}`
+
+// runDeprecated dispatches args against the deprecated spec's group, returning
+// stdout and stderr separately so the two streams can be asserted on
+// independently.
+func runDeprecated(t *testing.T, args ...string) (stdout, stderr string) {
+	t.Helper()
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands([]byte(deprecatedTestSpec), noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	group := cmds[0]
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	var out, errBuf bytes.Buffer
+	group.SetOut(&out)
+	group.SetErr(&errBuf)
+	group.SetArgs(args)
+	if execErr := group.Execute(); execErr != nil {
+		t.Fatalf("Execute %v: %v\n%s%s", args, execErr, out.String(), errBuf.String())
+	}
+	return out.String(), errBuf.String()
+}
+
+// --schema on a deprecated operation must emit JSON and nothing else: an agent
+// pipes this straight into a parser, and cobra's deprecation notice would
+// corrupt it.
+func TestSchema_DeprecatedOperationEmitsCleanJSON(t *testing.T) {
+	stdout, stderr := runDeprecated(t, "update", "--schema")
+	if strings.Contains(stdout, "deprecated") || !strings.HasPrefix(strings.TrimSpace(stdout), "{") {
+		t.Fatalf("stdout is not pure JSON: %q", stdout)
+	}
+	var doc SchemaDoc
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("unmarshal schema output: %v\n%s", err, stdout)
+	}
+	if doc.Method != "PUT" || doc.Path != "/api/v1/legacy" {
+		t.Errorf("method/path = %q %q", doc.Method, doc.Path)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want nothing on a --schema run", stderr)
+	}
+}
+
+// A real (non --schema) run still warns that the operation is deprecated, on
+// stderr so it never mixes into the JSON response body on stdout.
+func TestSchema_DeprecatedOperationStillWarnsOnRealRun(t *testing.T) {
+	stdout, stderr := runDeprecated(t, "update", "--body", `{"name":"x"}`)
+	if !strings.Contains(stderr, "deprecated") {
+		t.Errorf("stderr = %q, want a deprecation notice", stderr)
+	}
+	if strings.Contains(stdout, "deprecated") {
+		t.Errorf("deprecation notice leaked to stdout: %q", stdout)
+	}
+}
+
+// Taking the notice over from cobra must not resurrect the command in help
+// listings: Deprecated hid it, so Hidden has to keep hiding it.
+func TestSchema_DeprecatedOperationStaysOutOfHelp(t *testing.T) {
+	cmd := subcommand(t, deprecatedTestSpec, "update")
+	if cmd.IsAvailableCommand() {
+		t.Error("deprecated command is listed in help; it was hidden before")
+	}
+}
+
+// limitDocDepth is how a hand-written command's static document honors --depth.
+// Its truncation must be indistinguishable from the describer's, so the
+// placeholder emitted at the same depth is identical.
+func TestSchema_StaticDepthLimitMatchesDescriber(t *testing.T) {
+	generated, err := runSchemaWith(t, schemaTestSpec, "--depth", "0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	genProps := generated.Body.(map[string]interface{})["properties"].(map[string]interface{})
+	wantPlaceholder := genProps["name"]
+
+	static := SchemaDoc{Body: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"name": map[string]interface{}{"type": "string", "example": "my-widget"},
+		},
+	}}
+	limited := limitDocDepth(static, 0)
+	gotProps := limited.Body.(map[string]interface{})["properties"].(map[string]interface{})
+
+	got, _ := json.Marshal(gotProps["name"])
+	want, _ := json.Marshal(wantPlaceholder)
+	if string(got) != string(want) {
+		t.Errorf("static truncation = %s, describer truncation = %s", got, want)
 	}
 }
