@@ -417,7 +417,8 @@ func schemaRequested(cmd *cobra.Command, name string) bool {
 
 // requestBodyMediaType returns the media type and definition the CLI will use,
 // preferring application/json for backward compatibility and otherwise using
-// the first declared media type.
+// the first declared media type. Entries with no schema are skipped, so a
+// schema-less application/json stub never shadows a real multipart definition.
 func requestBodyMediaType(rb *v3.RequestBody) (string, *v3.MediaType) {
 	if rb == nil || rb.Content == nil {
 		return "", nil
@@ -426,7 +427,7 @@ func requestBodyMediaType(rb *v3.RequestBody) (string, *v3.MediaType) {
 	var first *v3.MediaType
 	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
 		mt := pair.Value()
-		if mt == nil {
+		if mt == nil || mt.Schema == nil {
 			continue
 		}
 		if pair.Key() == "application/json" {
