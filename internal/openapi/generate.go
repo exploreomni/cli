@@ -83,18 +83,12 @@ const (
 )
 
 // NewGroupCommand builds a command that only groups subcommands (e.g. `omni
-// models`), with the handling that keeps a mistyped subcommand from looking
-// like success:
-//
-//   - unknown subcommand: a cobra-style error with suggestions, exit non-zero,
-//     nothing on stdout.
-//   - no subcommand at all: the group's help, but on stderr and with a
-//     non-zero exit, since "omni models" produced no data.
-//   - `omni models list-branches --help`: also an unknown-subcommand error.
-//     Cobra answers the help flag before RunE, so without a custom help func
-//     a typo plus --help would still print help on stdout and exit 0.
-//
-// Plain `omni <group> --help` is unaffected: help on stdout, exit 0.
+// models`), with the handling that keeps a mistyped or missing subcommand from
+// looking like success: an unknown subcommand is a cobra-style error with
+// suggestions, and a bare group prints its help to stderr — both exit non-zero
+// with nothing on stdout. That covers `omni models list-branches --help`, which
+// is a typo rather than a help request; plain `omni <group> --help` is
+// unaffected (help on stdout, exit 0).
 func NewGroupCommand(use, short string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         use,
@@ -114,8 +108,11 @@ func GroupRunE(cmd *cobra.Command, args []string) error {
 
 	if len(args) == 0 {
 		// The group produced no data, so its help goes to stderr and stdout
-		// stays empty for the pipe.
+		// stays empty for the pipe. The help text is the whole error report:
+		// letting cobra append its own "Error: ..." line would state the same
+		// failure twice, so silence it and let the non-zero exit speak.
 		renderHelp(cmd.ErrOrStderr(), cmd)
+		cmd.SilenceErrors = true
 		return fmt.Errorf("%q requires a subcommand", cmd.CommandPath())
 	}
 

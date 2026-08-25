@@ -172,30 +172,83 @@ func TestOutputResponseTo_NonJSONErrorBodyStillJSON(t *testing.T) {
 }
 
 // Not every 2xx body is JSON: `query run` streams text/ndjson by default and
-// returns CSV/XLSX with a result type. Those pass through to stdout unchanged
-// and count as success — an un-parseable payload is data, not an error.
+// returns CSV/XLSX with a result type. Those pass through to stdout byte for
+// byte — no re-indenting, no appended newline — and count as success; an
+// un-parseable payload is data, not an error.
 func TestOutputResponseTo_NonJSONSuccessPassesThrough(t *testing.T) {
-	bodies := []string{
-		"{\"kind\":\"jobs_submitted\"}\n{\"kind\":\"job\"}\n",
-		"id,name\n1,widget\n",
+	bodies := []struct {
+		name string
+		body string
+	}{
+		{"ndjson", "{\"kind\":\"jobs_submitted\"}\n{\"kind\":\"job\"}\n"},
+		{"csv", "id,name\n1,widget\n"},
+		// A CSV whose last row has no trailing newline: appending one would
+		// change the file the user redirected to disk.
+		{"csv without trailing newline", "id,name\n1,widget"},
+		// Binary payloads (XLSX with --result-type) must survive verbatim too.
+		{"binary", "PK\x03\x04\x14\x00\x00\x00\x08\x00"},
 	}
-	for _, body := range bodies {
+	for _, tc := range bodies {
 		for _, compact := range []bool{true, false} {
 			var stdout, stderr bytes.Buffer
 			resp := &http.Response{
 				StatusCode: 200,
-				Body:       io.NopCloser(strings.NewReader(body)),
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
 			}
 
 			if err := outputResponseTo(&stdout, &stderr, resp, "json", compact); err != nil {
-				t.Fatalf("compact=%v: non-JSON 2xx body should succeed, got %v", compact, err)
+				t.Fatalf("%s compact=%v: non-JSON 2xx body should succeed, got %v", tc.name, compact, err)
 			}
-			if !strings.Contains(stdout.String(), strings.TrimRight(body, "\n")) {
-				t.Errorf("compact=%v: stdout = %q, want the body passed through", compact, stdout.String())
+			if stdout.String() != tc.body {
+				t.Errorf("%s compact=%v: stdout = %q, want the body byte for byte (%q)", tc.name, compact, stdout.String(), tc.body)
 			}
 			if stderr.Len() != 0 {
-				t.Errorf("compact=%v: stderr should be empty, got %q", compact, stderr.String())
+				t.Errorf("%s compact=%v: stderr should be empty, got %q", tc.name, compact, stderr.String())
 			}
+		}
+	}
+}
+
+// Human mode passes non-JSON payloads through unchanged as well — the same
+// bytes, just on a terminal.
+func TestOutputResponseTo_NonJSONSuccessPassesThroughHuman(t *testing.T) {
+	const body = "id,name\n1,widget"
+	var stdout, stderr bytes.Buffer
+	resp := &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	if err := outputResponseTo(&stdout, &stderr, resp, "human", false); err != nil {
+		t.Fatalf("non-JSON 2xx body should succeed, got %v", err)
+	}
+	if stdout.String() != body {
+		t.Errorf("stdout = %q, want the body byte for byte", stdout.String())
+	}
+}
+
+// A literal `null` error body is valid JSON but says nothing, so the envelope
+// omits "body" rather than carrying a JSON null that means the same thing.
+func TestOutputResponseTo_NullErrorBodyOmitted(t *testing.T) {
+	for _, compact := range []bool{true, false} {
+		var stdout, stderr bytes.Buffer
+		resp := &http.Response{
+			StatusCode: 500,
+			Body:       io.NopCloser(strings.NewReader("null")),
+		}
+
+		if err := outputResponseTo(&stdout, &stderr, resp, "json", compact); err == nil {
+			t.Fatalf("compact=%v: expected error for 500 status", compact)
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+			t.Fatalf("compact=%v: stderr is not valid JSON (%v): %q", compact, err, stderr.String())
+		}
+		if _, ok := envelope["body"]; ok {
+			t.Errorf("compact=%v: envelope = %q, want no \"body\" field for a literal null", compact, stderr.String())
+		}
+		if envelope["error"] != "HTTP 500" {
+			t.Errorf("compact=%v: error = %v, want the status fallback", compact, envelope["error"])
 		}
 	}
 }
@@ -210,11 +263,24 @@ func TestOutputResponseTo_ReadFailureWritesNothing(t *testing.T) {
 	}
 
 	err := outputResponseTo(&stdout, &stderr, resp, "json", false)
-	if err == nil {
-		t.Fatal("expected an error when the body can't be read")
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want *apiError so cobra's duplicate line is silenced", err)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("stdout should be empty, got %q", stdout.String())
+	}
+	// The one-JSON-document contract holds for our own failures too.
+	var envelope map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not a single JSON document (%v): %q", err, stderr.String())
+	}
+	detail, _ := envelope["error"].(string)
+	if !strings.Contains(detail, "unexpected EOF") {
+		t.Errorf("error = %q, want the read failure", detail)
+	}
+	if _, ok := envelope["body"]; ok {
+		t.Errorf("envelope = %q, want no body when the body couldn't be read", stderr.String())
 	}
 }
 

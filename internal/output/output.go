@@ -2,6 +2,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,34 +20,32 @@ func JSONTo(w io.Writer, body io.Reader, compact bool) error {
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
+	return JSONBytes(w, data, compact)
+}
 
+// JSONBytes writes an already-read body as formatted JSON to w. Callers that
+// have the bytes in hand use this so a large payload isn't read — and
+// allocated — a second time.
+func JSONBytes(w io.Writer, data []byte, compact bool) error {
 	if compact {
-		_, err = w.Write(data)
-		if err != nil {
+		if _, err := w.Write(data); err != nil {
 			return err
 		}
 		fmt.Fprintln(w)
 		return nil
 	}
 
-	// Pretty-print
-	var raw json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		// Not JSON — print raw
-		_, err = w.Write(data)
+	// Pretty-print. json.Indent reformats the bytes in place rather than
+	// building a value first, so the body is parsed once.
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, data, "", "  "); err != nil {
+		// Not JSON — print raw.
+		_, err := w.Write(data)
 		fmt.Fprintln(w)
 		return err
 	}
 
-	pretty, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		_, err = w.Write(data)
-		fmt.Fprintln(w)
-		return err
-	}
-
-	_, err = w.Write(pretty)
-	if err != nil {
+	if _, err := w.Write(bytes.TrimRight(pretty.Bytes(), "\n")); err != nil {
 		return err
 	}
 	fmt.Fprintln(w)

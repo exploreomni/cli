@@ -550,6 +550,32 @@ func TestGroupRunE_NoSubcommand(t *testing.T) {
 	}
 }
 
+// The bare-group help IS the error report, so cobra must not append its own
+// "Error: ..." line on top of it — one failure, one surface.
+func TestGroupRunE_NoSubcommandReportsErrorOnce(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := &cobra.Command{Use: "omni"}
+	group := NewGroupCommand("models", "models commands")
+	group.AddCommand(&cobra.Command{Use: "list", Short: "list models", RunE: func(*cobra.Command, []string) error { return nil }})
+	root.AddCommand(group)
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"models"})
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected a non-nil error so the CLI exits non-zero")
+	}
+	if strings.Contains(errOut.String(), "Error:") {
+		t.Errorf("stderr = %q, want no duplicate cobra error line alongside the help", errOut.String())
+	}
+	if n := strings.Count(errOut.String(), "Usage:"); n != 1 {
+		t.Errorf("stderr has %d usage blocks, want exactly 1: %q", n, errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+}
+
 // --help is not an error: it still prints to stdout and exits zero.
 func TestGroupRunE_HelpFlagStaysOnStdout(t *testing.T) {
 	var out, errOut bytes.Buffer

@@ -67,6 +67,9 @@ accepted as a flag, so it can't leak into shell history.`,
   # API key (prompts securely for the key)
   omni config init --name prod --endpoint https://myorg.omniapp.co --auth api-key`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			reader := bufio.NewReader(os.Stdin)
 
 			if !cmd.Flags().Changed("name") {
@@ -162,6 +165,9 @@ func configShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Display current configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("no config found at %s — run `omni config init`", config.ConfigPath())
@@ -197,6 +203,9 @@ func configSetFormatCmd() *cobra.Command {
 		Short: "Set the default output format",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			format := strings.ToLower(strings.TrimSpace(args[0]))
 			if !config.ValidOutputFormat(format) {
 				return fmt.Errorf("invalid format %q — must be one of: json, human, auto", args[0])
@@ -227,6 +236,9 @@ func configUseCmd() *cobra.Command {
 		Long:  "Switch the default profile.\n\nIf the profile name contains spaces, quote it: `omni config use \"My Profile\"`. Run `omni config list` to see profile names.",
 		Args:  profileNameArgs(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("no config found — run `omni config init`")
@@ -284,6 +296,9 @@ func configListCmd() *cobra.Command {
 		Short: "List configured profiles",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("no config found — run `omni config init`")
@@ -316,6 +331,9 @@ func configRenameCmd() *cobra.Command {
 		Short: "Rename a profile",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			oldName, newName := args[0], args[1]
 
 			cfg, err := config.Load()
@@ -354,6 +372,9 @@ func configDeleteCmd() *cobra.Command {
 		Short: "Delete a profile",
 		Args:  profileNameArgs(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			name := args[0]
 			cfg, err := config.Load()
 			if err != nil {
@@ -395,6 +416,9 @@ func configLoginCmd() *cobra.Command {
 		Short: "Log in via OAuth browser flow",
 		Args:  profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("no config found — run `omni config init` first")
@@ -443,6 +467,9 @@ func configLogoutCmd() *cobra.Command {
 		Short: "Clear OAuth tokens from a profile",
 		Args:  profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Args are validated: failures below are runtime errors, not usage errors.
+			cmd.SilenceUsage = true
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("no config found — run `omni config init` first")
