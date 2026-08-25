@@ -173,9 +173,10 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// Build the use string: operation-name <path-param1> <path-param2> ...
 	name := commandName(op)
+	queryFlags := resolveQueryFlags(op)
 	use := name
 	for _, p := range op.PathParams {
-		use += " <" + canonicalFlagName(p.Name) + ">"
+		use += " <" + canonicalName(p.Name) + ">"
 	}
 
 	short := op.Summary
@@ -205,19 +206,18 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 			//
 			// The flag name is the canonical kebab-case rendering of the param
 			// (branchId → --branch-id), but the query string must use the
-			// param's ORIGINAL spec spelling — query.Set takes q.Name, never
-			// the flag name. The server rejects "branch-id" where it expects
-			// "branchId", so these two must not be conflated. That holds for
-			// params queryFlagName had to rename too: --param-base-url still
-			// goes out as baseUrl=.
+			// param's ORIGINAL spec spelling — the server rejects "branch-id"
+			// where it expects "branchId", so the two must not be conflated.
+			// That holds for renamed params too: --param-base-url still goes
+			// out as baseUrl=.
 			query := url.Values{}
-			for _, q := range op.QueryParams {
-				val, err := cmd.Flags().GetString(queryFlagName(q.Name))
+			for _, qf := range queryFlags {
+				val, err := cmd.Flags().GetString(qf.Name)
 				if err != nil {
 					continue
 				}
 				if val != "" {
-					query.Set(q.Name, val)
+					query.Set(qf.Param.Name, val)
 				}
 			}
 			if len(query) > 0 {
@@ -267,22 +267,21 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	cmd.Flags().SetNormalizeFunc(NormalizeFlagName)
 
 	// Register query params as flags
-	for _, q := range op.QueryParams {
-		flagName := queryFlagName(q.Name)
-		desc := q.Description
-		if len(q.Enum) > 0 {
-			desc += fmt.Sprintf(" [%s]", strings.Join(q.Enum, ", "))
+	for _, qf := range queryFlags {
+		desc := qf.Param.Description
+		if len(qf.Param.Enum) > 0 {
+			desc += fmt.Sprintf(" [%s]", strings.Join(qf.Param.Enum, ", "))
 		}
-		if canonical := canonicalFlagName(q.Name); flagName != canonical {
+		if qf.Note != "" {
 			// Say so in --help, otherwise the flag looks like a typo next to
 			// the spec's parameter name.
 			desc = strings.TrimSpace(desc)
 			if desc != "" {
 				desc += " "
 			}
-			desc += fmt.Sprintf("(query param %q; renamed because --%s is a global CLI flag)", q.Name, canonical)
+			desc += qf.Note
 		}
-		cmd.Flags().String(flagName, "", desc)
+		cmd.Flags().String(qf.Name, "", desc)
 	}
 
 	// If the operation accepts a body, add --body and --json-body flags
@@ -367,7 +366,7 @@ func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
 func commandName(op *operationInfo) string {
 	if op.OperationID != "" {
 		// Strip the tag prefix if present (e.g., "models-list" from "ModelsList")
-		name := camelToKebab(op.OperationID)
+		name := canonicalName(op.OperationID)
 		tagPrefix := slugify(op.Tag) + "-"
 		name = strings.TrimPrefix(name, tagPrefix)
 		return name
@@ -392,18 +391,20 @@ func slugify(s string) string {
 	return s
 }
 
-// canonicalFlagName derives the CLI flag name for an OpenAPI parameter. The
-// spec names the same concept inconsistently across sibling operations —
-// "branchId" here, "branch_id" there — so camelCase is split into words before
-// slugifying and both spellings land on one flag:
+// canonicalName renders an OpenAPI identifier — a parameter name or an
+// operationId — as the kebab-case spelling the CLI uses for flags and command
+// names. The spec names the same concept inconsistently across sibling
+// operations ("branchId" here, "branch_id" there), so camelCase is split into
+// words before slugifying and both spellings land on one flag:
 //
 //	branchId    → branch-id
 //	branch_id   → branch-id
-//	pageSize    → page-size
 //	baseModelId → base-model-id
+//	ModelsList  → models-list
 //
-// Acronym runs stay intact: "modelURL" → "model-url", "URLPrefix" → "url-prefix".
-func canonicalFlagName(s string) string {
+// Acronym runs stay intact ("modelURL" → "model-url", "URLPrefix" →
+// "url-prefix"), including when pluralized ("apiURLs" → "api-urls").
+func canonicalName(s string) string {
 	var b strings.Builder
 	rs := []rune(s)
 	for i, r := range rs {
@@ -413,8 +414,9 @@ func canonicalFlagName(s string) string {
 			case !unicode.IsUpper(prev) && prev != '-' && prev != '_' && prev != ' ':
 				// lower/digit → upper: a word boundary ("pageSize").
 				b.WriteRune('-')
-			case unicode.IsUpper(prev) && i+1 < len(rs) && unicode.IsLower(rs[i+1]):
-				// End of an acronym run ("URLPrefix" → "URL-Prefix").
+			case unicode.IsUpper(prev) && i+1 < len(rs) && unicode.IsLower(rs[i+1]) && !isPluralS(rs, i+1):
+				// End of an acronym run ("URLPrefix" → "URL-Prefix"), unless the
+				// lowercase letter is just the acronym's plural ("URLs").
 				b.WriteRune('-')
 			}
 		}
@@ -423,19 +425,25 @@ func canonicalFlagName(s string) string {
 	return slugify(b.String())
 }
 
-// reservedFlagKeys are the flag names a generated query-param flag must not
-// claim, keyed by flagLookupKey. They are either the root command's persistent
-// flags (mirrored from addGlobalFlags in cmd/omni/main.go, kept in sync by
-// TestGlobalFlagsAreReserved) or flags a generated command registers for
-// itself.
+// isPluralS reports whether rs[i] is a lone trailing "s" pluralizing the
+// acronym before it, as in "URLs" or "IDsList" — as opposed to the start of a
+// following word, as in "JSONString".
+func isPluralS(rs []rune, i int) bool {
+	return rs[i] == 's' && (i+1 == len(rs) || !unicode.IsLower(rs[i+1]))
+}
+
+// globalFlagKeys are the flag names a generated query-param flag must never
+// claim, keyed by flagLookupKey: the root command's persistent flags (mirrored
+// from addGlobalFlags in cmd/omni/main.go, kept in sync by
+// TestGlobalFlagsAreReserved) plus the --help flag cobra adds everywhere.
 //
-// Shadowing one of these is not merely confusing, it is unsafe. pflag's
+// Shadowing one of these is not merely confusing, it is unsafe: pflag's
 // AddFlagSet skips a persistent flag whose name is already taken locally, so a
-// spec param named "baseUrl" would canonicalize to --base-url, take the slot
-// before the root's persistent flag merged in, and then resolveConfig's
-// GetString("base-url") would read the query param's value — one value both
-// filtering the request and choosing the host it is sent to.
-var reservedFlagKeys = map[string]string{
+// spec param named "baseUrl" would take the --base-url slot before the root's
+// persistent flag merged in, and resolveConfig's GetString("base-url") would
+// then read the query param's value — one value both filtering the request and
+// choosing the host it is sent to.
+var globalFlagKeys = map[string]string{
 	// Root persistent flags.
 	flagLookupKey("profile"):  "profile",
 	flagLookupKey("token"):    "token",
@@ -444,7 +452,13 @@ var reservedFlagKeys = map[string]string{
 	flagLookupKey("format"):   "format",
 	// Added by cobra on every command; must stay a bool.
 	flagLookupKey("help"): "help",
-	// Registered by buildCommand for body-taking operations.
+}
+
+// bodyFlagKeys are the flags buildCommand registers for itself, but only on
+// operations that take a request body. They are therefore reserved only on
+// those commands: a bodyless operation with a param named "field" keeps
+// --field, since nothing else on that command wants it.
+var bodyFlagKeys = map[string]string{
 	flagLookupKey("body"):      "body",
 	flagLookupKey("json-body"): "json-body",
 	flagLookupKey("schema"):    "schema",
@@ -454,28 +468,95 @@ var reservedFlagKeys = map[string]string{
 
 // IsReservedFlagName reports whether name — in any spelling, since matching
 // ignores case and dash/underscore placement — is claimed by a global or
-// built-in CLI flag.
+// built-in flag present on every command. Flags that only some commands
+// register (--body and friends) are handled per-operation by queryFlagName.
 func IsReservedFlagName(name string) bool {
-	_, ok := reservedFlagKeys[flagLookupKey(name)]
+	_, ok := globalFlagKeys[flagLookupKey(name)]
 	return ok
 }
 
-// queryFlagName is the flag name a query param is registered under: its
-// canonical kebab-case name, unless that would shadow a global or built-in
-// flag, in which case it gets a "param-" prefix (a spec param "baseUrl"
+// isReservedFlagName reports whether name is claimed on a command generated for
+// an operation with (or without) a request body.
+func isReservedFlagName(name string, hasBody bool) bool {
+	key := flagLookupKey(name)
+	if _, ok := globalFlagKeys[key]; ok {
+		return true
+	}
+	if !hasBody {
+		return false
+	}
+	_, ok := bodyFlagKeys[key]
+	return ok
+}
+
+// queryFlagName is the name a query param would be registered under on its own:
+// its canonical kebab-case name, unless that would shadow a flag the command
+// already has, in which case it gets a "param-" prefix (a spec param "baseUrl"
 // becomes --param-base-url and leaves --base-url meaning the API endpoint).
 //
 // Renaming rather than failing generation is deliberate: the spec is synced
 // from upstream and can introduce such a param at any time, and a hard failure
-// there would take the entire CLI down — every command, not just the affected
-// one. Renaming keeps the endpoint reachable and the global flag honest, and
-// buildCommand explains the rename in --help.
-func queryFlagName(param string) string {
-	name := canonicalFlagName(param)
-	if IsReservedFlagName(name) {
+// here would take the entire CLI down — every command, not just the affected
+// one.
+func queryFlagName(param string, hasBody bool) string {
+	name := canonicalName(param)
+	if isReservedFlagName(name, hasBody) {
 		return "param-" + name
 	}
 	return name
+}
+
+// queryFlag is a query param together with the flag name it is actually
+// registered under and, when that is not the param's canonical name, the
+// explanation buildCommand puts in --help.
+type queryFlag struct {
+	Param paramInfo
+	Name  string
+	Note  string
+}
+
+// resolveQueryFlags assigns every query param on an operation a flag name that
+// is free: the canonical kebab-case name, "param-"-prefixed if it would shadow
+// a global or built-in flag, then "-2", "-3"... if an earlier param on the same
+// operation already claimed it.
+//
+// Two params that canonicalize alike ("branchId" and "branch_id" on one
+// operation) are upstream spec drift, not a bug here, so the later one is
+// renamed rather than failing generation — which would exit the whole CLI.
+func resolveQueryFlags(op *operationInfo) []queryFlag {
+	claimed := map[string]bool{}
+	for key := range globalFlagKeys {
+		claimed[key] = true
+	}
+	if op.HasBody {
+		for key := range bodyFlagKeys {
+			claimed[key] = true
+		}
+	}
+
+	flags := make([]queryFlag, 0, len(op.QueryParams))
+	for _, q := range op.QueryParams {
+		canonical := canonicalName(q.Name)
+		base, note := canonical, ""
+		if isReservedFlagName(canonical, op.HasBody) {
+			base = "param-" + canonical
+			note = fmt.Sprintf("(query param %q; renamed because --%s is a global CLI flag)", q.Name, canonical)
+		}
+
+		name := base
+		if claimed[flagLookupKey(name)] {
+			if note == "" {
+				note = fmt.Sprintf("(query param %q; renamed because another param on this command also becomes --%s)", q.Name, base)
+			}
+			for n := 2; claimed[flagLookupKey(name)]; n++ {
+				name = fmt.Sprintf("%s-%d", base, n)
+			}
+		}
+
+		claimed[flagLookupKey(name)] = true
+		flags = append(flags, queryFlag{Param: q, Name: name, Note: note})
+	}
+	return flags
 }
 
 // flagLookupKey reduces a flag name to the form used for matching: lowercased,
@@ -494,14 +575,12 @@ func flagLookupKey(name string) string {
 
 // NormalizeFlagName is a pflag normalization function that resolves a flag name
 // the user typed to whichever flag is registered under an equivalent spelling,
-// ignoring case and dash/underscore placement. So --branchid, --branch_id and
+// ignoring case and dash/underscore placement, so --branchid, --branch_id and
 // --branchId all find a registered --branch-id.
 //
-// Names with no registered match are returned unchanged. That matters at
+// Names with no registered match are returned unchanged, which matters at
 // registration time: pflag rewrites Flag.Name to whatever this returns, so
-// returning the raw lookup key would make --help advertise "--branchid". Help
-// output keeps showing only the canonical kebab-case name; the alternates are
-// accepted silently.
+// returning the raw lookup key would make --help advertise "--branchid".
 func NormalizeFlagName(fs *pflag.FlagSet, name string) pflag.NormalizedName {
 	key := flagLookupKey(name)
 	match := ""
@@ -516,66 +595,39 @@ func NormalizeFlagName(fs *pflag.FlagSet, name string) pflag.NormalizedName {
 	return pflag.NormalizedName(name)
 }
 
-// validateFlagNames reports flags on a single generated command whose names
-// collide once normalized. Since lookups ignore case and separators, a command
-// declaring both "branchId" and "branch_id" would register two flags that are
-// indistinguishable — pflag panics on the second one — so fail generation with
-// a message that names the culprits instead.
-//
-// Query params are checked under their effective flag name, i.e. after
-// queryFlagName has moved any that would shadow a global or built-in flag out
-// of the way. Body-shorthand flags are hand-written in this repo, so a
-// collision there is a bug to fix rather than upstream drift to absorb: they
-// are reported, including against the reserved names.
+// validateFlagNames reports a body-shorthand flag that collides with another
+// flag on the same command once normalized, since lookups ignore case and
+// separators and pflag panics on a second flag with an equivalent name.
+// Shorthands are hand-written in this repo, so a collision there is a bug to
+// fix rather than upstream drift to absorb — query params, which come from the
+// synced spec, are renamed by resolveQueryFlags instead of reported.
 func validateFlagNames(op *operationInfo) error {
 	claimed := map[string]string{} // lookup key → description of the claimant
 
-	claim := func(flagName, source string) error {
-		key := flagLookupKey(flagName)
-		desc := fmt.Sprintf("--%s (%s)", flagName, source)
-		if prev, ok := claimed[key]; ok {
-			return fmt.Errorf("%s collides with %s: flag names are matched ignoring case, dashes and underscores, so both resolve to %q", desc, prev, key)
-		}
-		claimed[key] = desc
-		return nil
-	}
-
-	// Reserved names are spoken for on every command, whether or not this
-	// operation registers them itself.
-	for key, display := range reservedFlagKeys {
+	for key, display := range globalFlagKeys {
 		claimed[key] = fmt.Sprintf("--%s (global or built-in flag)", display)
 	}
-
-	for _, q := range op.QueryParams {
-		if err := claim(queryFlagName(q.Name), "query param "+q.Name); err != nil {
-			return err
+	if op.HasBody {
+		for key, display := range bodyFlagKeys {
+			claimed[key] = fmt.Sprintf("--%s (built-in flag)", display)
 		}
+	}
+	for _, qf := range resolveQueryFlags(op) {
+		claimed[flagLookupKey(qf.Name)] = fmt.Sprintf("--%s (query param %s)", qf.Name, qf.Param.Name)
 	}
 
 	if sh := GetBodyShorthand(op.OperationID); sh != nil {
 		for _, f := range sh.Flags {
-			if err := claim(f.FlagName, "body shorthand for "+op.OperationID); err != nil {
-				return err
+			key := flagLookupKey(f.FlagName)
+			desc := fmt.Sprintf("--%s (body shorthand for %s)", f.FlagName, op.OperationID)
+			if prev, ok := claimed[key]; ok {
+				return fmt.Errorf("%s collides with %s: flag names are matched ignoring case, dashes and underscores, so both resolve to %q", desc, prev, key)
 			}
+			claimed[key] = desc
 		}
 	}
 
 	return nil
-}
-
-func camelToKebab(s string) string {
-	var result strings.Builder
-	for i, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				result.WriteByte('-')
-			}
-			result.WriteRune(r + 32) // toLower
-		} else {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
 }
 
 func schemaType(proxy *base.SchemaProxy) string {

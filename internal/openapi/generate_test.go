@@ -38,18 +38,20 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// camelToKebab converts operationIds like "aiJobStatus" into kebab-case
-// "ai-job-status" for use as CLI subcommand names.
-func TestCamelToKebab(t *testing.T) {
+// Command names come from the same slug renderer as flag names. Unifying them
+// was only safe because it changes no command name generated from the real spec
+// (TestRealSpec_CommandNamesAreStable) — command spellings have no
+// normalization fallback, so any change would break users.
+func TestCanonicalName_OperationIDs(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"ModelsList", "models-list"},
 		{"aiJobStatus", "ai-job-status"},
 		{"a", "a"},
-		{"ABC", "a-b-c"},
+		{"ABC", "abc"},
 	}
 	for _, c := range cases {
-		if got := camelToKebab(c.in); got != c.want {
-			t.Errorf("camelToKebab(%q) = %q, want %q", c.in, got, c.want)
+		if got := canonicalName(c.in); got != c.want {
+			t.Errorf("canonicalName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -417,8 +419,8 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 // working.
 // ---------------------------------------------------------------------------
 
-// canonicalFlagName turns an OpenAPI param name into the kebab-case flag name.
-func TestCanonicalFlagName(t *testing.T) {
+// canonicalName turns an OpenAPI param name into the kebab-case flag name.
+func TestCanonicalName(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"branchId", "branch-id"},
 		{"branch_id", "branch-id"},
@@ -433,12 +435,18 @@ func TestCanonicalFlagName(t *testing.T) {
 		{"modelURL", "model-url"},
 		{"URLPrefix", "url-prefix"},
 		{"parseJSONBody", "parse-json-body"},
+		// A pluralized acronym stays one word instead of splitting on the "s".
+		{"URLs", "urls"},
+		{"IDs", "ids"},
+		{"apiURLs", "api-urls"},
+		{"modelIDs", "model-ids"},
+		{"IDsList", "ids-list"},
 		// Digits attach to the word they follow.
 		{"v2Identifier", "v2-identifier"},
 	}
 	for _, c := range cases {
-		if got := canonicalFlagName(c.in); got != c.want {
-			t.Errorf("canonicalFlagName(%q) = %q, want %q", c.in, got, c.want)
+		if got := canonicalName(c.in); got != c.want {
+			t.Errorf("canonicalName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -551,10 +559,11 @@ func TestGenerateCommands_SiblingParamsAgreeOnFlagName(t *testing.T) {
 	}
 }
 
-// Two params on one operation that normalize identically would register two
-// indistinguishable flags (pflag panics on the second), so generation fails
-// with a message naming both.
-func TestGenerateCommands_DetectsFlagCollision(t *testing.T) {
+// Two params on one operation that normalize identically cannot share a flag
+// (pflag panics on the second), but the spec is synced from upstream, so the
+// later one is renamed out of the way rather than failing generation — which
+// would take down every command in the CLI, not just this one.
+func TestGenerateCommands_DegradesOnFlagCollision(t *testing.T) {
 	spec := `{
 		"openapi": "3.1.0",
 		"info": {"title": "test", "version": "1.0"},
@@ -573,14 +582,42 @@ func TestGenerateCommands_DetectsFlagCollision(t *testing.T) {
 		}
 	}`
 
-	_, err := GenerateCommands([]byte(spec), func(req APIRequest) error { return nil })
-	if err == nil {
-		t.Fatal("expected a collision error, got nil")
+	var captured APIRequest
+	cmds, err := GenerateCommands([]byte(spec), func(req APIRequest) error { captured = req; return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
 	}
-	for _, want := range []string{"things list", "branchId", "branch_id", "branchid"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q should mention %q", err.Error(), want)
+
+	var cmd *cobra.Command
+	for _, sub := range cmds[0].Commands() {
+		if sub.Name() == "list" {
+			cmd = sub
 		}
+	}
+	if cmd == nil {
+		t.Fatal("expected a generated \"things list\" command")
+	}
+	if cmd.Flags().Lookup("branch-id") == nil {
+		t.Fatal("the first param should keep the canonical --branch-id")
+	}
+	second := cmd.Flags().Lookup("branch-id-2")
+	if second == nil {
+		t.Fatal("the second param should be registered under a fallback name")
+	}
+	// The rename is announced, otherwise --branch-id-2 looks like a typo.
+	if !strings.Contains(second.Usage, `"branch_id"`) {
+		t.Errorf("fallback flag usage should name the original param, got %q", second.Usage)
+	}
+
+	// Both flags still reach the server under their own spec spellings.
+	tagCmd := cmds[0]
+	tagCmd.SilenceUsage, tagCmd.SilenceErrors = true, true
+	tagCmd.SetArgs([]string{"list", "--branch-id", "a", "--branch-id-2", "b"})
+	if err := tagCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "branchId=a") || !strings.Contains(captured.Path, "branch_id=b") {
+		t.Errorf("path = %q, want both branchId=a and branch_id=b", captured.Path)
 	}
 }
 
@@ -592,6 +629,16 @@ func TestValidateFlagNames(t *testing.T) {
 	}
 	if err := validateFlagNames(ok); err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+
+	// Params that canonicalize alike are renamed by resolveQueryFlags, so they
+	// are not reported either.
+	colliding := &operationInfo{
+		OperationID: "thingsList",
+		QueryParams: []paramInfo{{Name: "branchId"}, {Name: "branch_id"}},
+	}
+	if err := validateFlagNames(colliding); err != nil {
+		t.Errorf("unexpected error for colliding params: %v", err)
 	}
 
 	// A param whose name matches a built-in flag is renamed out of the way
@@ -671,40 +718,75 @@ func TestShorthand_TypedFlagsAcceptAlternateSpellings(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestQueryFlagName_ReservedNamesArePrefixed(t *testing.T) {
-	cases := []struct{ in, want string }{
-		// Reserved: renamed out of the way.
-		{"baseUrl", "param-base-url"},
-		{"base_url", "param-base-url"},
-		{"token", "param-token"},
-		{"profile", "param-profile"},
-		{"compact", "param-compact"},
-		{"format", "param-format"},
-		{"help", "param-help"},
-		{"body", "param-body"},
-		{"schema", "param-schema"},
-		{"field", "param-field"},
-		{"depth", "param-depth"},
+	cases := []struct {
+		in      string
+		hasBody bool
+		want    string
+	}{
+		// Global flags: reserved on every command.
+		{"baseUrl", false, "param-base-url"},
+		{"base_url", false, "param-base-url"},
+		{"token", false, "param-token"},
+		{"profile", false, "param-profile"},
+		{"compact", false, "param-compact"},
+		{"format", false, "param-format"},
+		{"help", false, "param-help"},
+		// Body flags: only registered — and so only reserved — on operations
+		// that take a request body.
+		{"body", true, "param-body"},
+		{"schema", true, "param-schema"},
+		{"field", true, "param-field"},
+		{"depth", true, "param-depth"},
+		{"body", false, "body"},
+		{"schema", false, "schema"},
+		{"field", false, "field"},
+		{"depth", false, "depth"},
 		// Everything else keeps its canonical name.
-		{"branchId", "branch-id"},
-		{"pageSize", "page-size"},
-		{"baseModelId", "base-model-id"},
-		{"formatting", "formatting"},
-		{"tokenId", "token-id"},
+		{"branchId", true, "branch-id"},
+		{"pageSize", false, "page-size"},
+		{"baseModelId", false, "base-model-id"},
+		{"formatting", false, "formatting"},
+		{"tokenId", false, "token-id"},
 	}
 	for _, c := range cases {
-		if got := queryFlagName(c.in); got != c.want {
-			t.Errorf("queryFlagName(%q) = %q, want %q", c.in, got, c.want)
+		if got := queryFlagName(c.in, c.hasBody); got != c.want {
+			t.Errorf("queryFlagName(%q, hasBody=%v) = %q, want %q", c.in, c.hasBody, got, c.want)
 		}
 	}
 }
 
+// A bodyless operation registers no --field, so a param of that name keeps it
+// instead of being renamed on the strength of a flag that is not there.
+func TestBuildCommand_BodylessOperationDoesNotReserveBodyFlags(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "things",
+		OperationID: "thingsList",
+		Method:      "GET",
+		Path:        "/api/v1/things",
+		QueryParams: []paramInfo{{Name: "field", In: "query"}},
+	}
+	cmd := buildCommand(op, func(req APIRequest) error { return nil })
+
+	f := cmd.Flags().Lookup("field")
+	if f == nil {
+		t.Fatal("expected the param to keep --field on a bodyless command")
+	}
+	if strings.Contains(f.Usage, "renamed") {
+		t.Errorf("help should not claim a rename, got %q", f.Usage)
+	}
+	if cmd.Flags().Lookup("param-field") != nil {
+		t.Error("--param-field should not exist on a bodyless command")
+	}
+}
+
 func TestIsReservedFlagName_IgnoresSpelling(t *testing.T) {
-	for _, name := range []string{"base-url", "baseUrl", "base_url", "BASEURL", "json-body", "jsonBody"} {
+	for _, name := range []string{"base-url", "baseUrl", "base_url", "BASEURL", "help", "FORMAT"} {
 		if !IsReservedFlagName(name) {
 			t.Errorf("IsReservedFlagName(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"branch-id", "page-size", "param-base-url", "tokens"} {
+	// Flags only some commands register are not globally reserved.
+	for _, name := range []string{"branch-id", "page-size", "param-base-url", "tokens", "json-body", "field"} {
 		if IsReservedFlagName(name) {
 			t.Errorf("IsReservedFlagName(%q) = true, want false", name)
 		}
@@ -760,9 +842,55 @@ func TestBuildCommand_ReservedQueryParamDoesNotShadowGlobalFlag(t *testing.T) {
 	}
 }
 
-// The real spec must generate cleanly: no operation may declare two params that
-// normalize to one flag. Any param that had to be renamed is logged, since that
-// is a spec change worth noticing on a sync.
+// Command names and flag names share one slug renderer (canonicalName).
+// Unifying them was safe only because it changes no command name the real spec
+// generates — unlike flags, a command spelling has no normalization fallback,
+// so a change would break every user script that calls it. This guards the
+// property: names stay unique within their group and free of the letter-by-
+// letter acronym splits the old renderer produced ("get-u-r-l-info").
+func TestRealSpec_CommandNamesAreStable(t *testing.T) {
+	specData := loadSpec(t)
+	doc, err := libopenapi.NewDocument(specData)
+	if err != nil {
+		t.Fatalf("parsing spec: %v", err)
+	}
+	model, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("building model: %v", err)
+	}
+
+	groups := map[string][]*operationInfo{}
+	for pair := model.Model.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		extractOperations(pair.Key(), pair.Value(), groups)
+	}
+	if len(groups) == 0 {
+		t.Fatal("no operations parsed from the spec")
+	}
+
+	for tag, ops := range groups {
+		seen := map[string]string{}
+		for _, op := range ops {
+			name := commandName(op)
+			if name == "" {
+				t.Errorf("%s: operation %s produced an empty command name", tag, op.OperationID)
+				continue
+			}
+			for _, seg := range strings.Split(name, "-") {
+				if len(seg) == 1 {
+					t.Errorf("%s %s: single-letter segment %q suggests an acronym was split letter by letter", slugify(tag), name, seg)
+				}
+			}
+			if prev, ok := seen[name]; ok {
+				t.Errorf("%s: %s and %s both generate the command %q", slugify(tag), prev, op.OperationID, name)
+			}
+			seen[name] = op.OperationID
+		}
+	}
+}
+
+// The real spec must generate cleanly. Any param that had to be renamed — to
+// avoid a global flag or another param on the same operation — is logged, since
+// that is a spec change worth noticing on a sync.
 func TestRealSpec_NoFlagCollisions(t *testing.T) {
 	specData := loadSpec(t)
 	specOps := parseSpecOperations(t, specData)
@@ -790,15 +918,15 @@ func TestRealSpec_NoFlagCollisions(t *testing.T) {
 			if err := validateFlagNames(op); err != nil {
 				t.Errorf("%s %s: %v", slugify(tag), commandName(op), err)
 			}
-			for _, q := range op.QueryParams {
-				if flag := queryFlagName(q.Name); flag != canonicalFlagName(q.Name) {
+			for _, qf := range resolveQueryFlags(op) {
+				if qf.Note != "" {
 					renamed++
-					t.Logf("%s %s: param %q registered as --%s (reserved name)", slugify(tag), commandName(op), q.Name, flag)
+					t.Logf("%s %s: param %q registered as --%s %s", slugify(tag), commandName(op), qf.Param.Name, qf.Name, qf.Note)
 				}
 			}
 		}
 	}
-	t.Logf("%d query params renamed to avoid global/built-in flags", renamed)
+	t.Logf("%d query params renamed to avoid a flag name that was already taken", renamed)
 }
 
 // ---------------------------------------------------------------------------
