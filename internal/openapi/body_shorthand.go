@@ -233,9 +233,18 @@ var bodyShorthands = map[string]*BodyShorthand{
 
 	// v2 documents. Metadata fields are promoted to flags; the heavy nested
 	// content (containers / controls / queryPresentations / settings) stays
-	// on --body/stdin. Because a v2-get response is a valid draft PATCH body,
-	// content round-trips cleanly: v2-get <id> > doc.json, edit, then
-	// v2-patch-draft <id> --body - < doc.json and v2-publish-draft <id>.
+	// on --body/stdin.
+	//
+	// A v2-get response is a starting point for a draft PATCH body, NOT a
+	// guaranteed clean round-trip: the response carries read-only/derived keys
+	// the PATCH validator rejects (e.g. `hidden` on filter configs, and
+	// per-tile keys such as calculations / column_totals / fill_fields /
+	// pivots / row_totals / userEditedSQL / chartType / visType / fields /
+	// config), so expect to strip fields until the PATCH is accepted. Tiles
+	// (queryPresentations.data.<n>) and controls (controls.data.<id>) are
+	// replace-whole — send the complete object, never a partial — and
+	// queryPresentations.order must enumerate every presentation key. A 200 is
+	// not proof the content survived; re-read with v2-get and check visConfig.
 	"documentsV2Create": {
 		Args: []ArgMapping{
 			{Name: "model-id", FieldPath: "modelId", Description: "UUID of the model the document is built on", Transform: "string"},
@@ -270,6 +279,11 @@ var bodyShorthands = map[string]*BodyShorthand{
 	},
 }
 
+// bodyExclusiveSuffix is appended to every promoted flag's help text. Promoted
+// flags assemble a JSON body, so they are rejected at runtime when --body /
+// --json-body is also supplied (see applyBodyShorthand).
+const bodyExclusiveSuffix = " (cannot be combined with --body)"
+
 // GetBodyShorthand returns the shorthand for an operation, or nil if none exists.
 func GetBodyShorthand(operationID string) *BodyShorthand {
 	return bodyShorthands[operationID]
@@ -287,13 +301,29 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 
 	// Keep promoted flags value-taking so callers can use an explicit value such
 	// as `--run-query false`, but show their schema type in help. assembleBody
-	// uses the same request schema to encode the JSON value.
+	// uses the same request schema to encode the JSON value. The --body
+	// exclusivity note is appended here, for every flag regardless of type,
+	// rather than baked into each Description literal so the help text can't
+	// drift from the runtime check below.
+	//
+	// FlagName is the canonical kebab-case spelling. Registration goes through
+	// the flag set's normalization function (installed in buildCommand), so
+	// --branchid / --branchId / --branch_id reach the same flag, as do the
+	// Lookup and Changed calls below.
 	for _, f := range sh.Flags {
 		fieldType, err := shorthandFieldType(op.BodySchema, f.FieldPath)
 		if err != nil {
 			fieldType = "string"
 		}
-		cmd.Flags().Var(&shorthandFlagValue{value: f.Default, typeName: fieldType}, f.FlagName, f.Description)
+		cmd.Flags().Var(&shorthandFlagValue{value: f.Default, typeName: fieldType}, f.FlagName, f.Description+bodyExclusiveSuffix)
+	}
+
+	// Say the same thing from the other side: --body's own description on a
+	// shorthand-bearing command warns that promoted flags can't be mixed in.
+	if len(sh.Flags) > 0 {
+		if bodyFlag := cmd.Flags().Lookup("body"); bodyFlag != nil {
+			bodyFlag.Usage += "; cannot be combined with this command's promoted field flags — put those fields in the JSON instead"
+		}
 	}
 
 	// Replace the Args validator with a flexible one
