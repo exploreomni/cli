@@ -341,7 +341,10 @@ func argumentsHelp(op *operationInfo, sh *BodyShorthand) string {
 	var lines []argLine
 
 	for _, p := range op.PathParams {
-		lines = append(lines, argLine{"<" + slugify(p.Name) + ">", firstLine(p.Description)})
+		// canonicalName, not slugify: the usage line spells positionals the
+		// canonical way ("<model-id>"), and a differently-spelled name here
+		// reads as a second, unrelated argument.
+		lines = append(lines, argLine{"<" + canonicalName(p.Name) + ">", firstLine(p.Description)})
 	}
 	if sh != nil {
 		for _, a := range sh.Args {
