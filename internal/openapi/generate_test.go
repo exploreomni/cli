@@ -409,6 +409,89 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 	}
 }
 
+// Every generated command must accept --schema (and its --field/--depth
+// refinements), including bodyless GET/DELETE ones. Agents reach for --schema
+// first, so a command missing the flag costs a wasted call.
+func TestGenerateCommands_SchemaFlagOnEveryCommand(t *testing.T) {
+	specData := loadSpec(t)
+	noop := func(req APIRequest) error { return nil }
+	cmds, err := GenerateCommands(specData, noop)
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	// A spec param may legitimately own one of these names, in which case the
+	// discovery flag lives under its fallback — but it must exist either way.
+	fallbacks := map[string]string{"schema": "schema-doc", "field": "schema-field", "depth": "schema-depth"}
+
+	checked := 0
+	for _, tagCmd := range cmds {
+		for _, sub := range tagCmd.Commands() {
+			for flag, fallback := range fallbacks {
+				if sub.Flags().Lookup(flag) == nil && sub.Flags().Lookup(fallback) == nil {
+					t.Errorf("%s %s: neither --%s nor --%s registered", tagCmd.Name(), sub.Name(), flag, fallback)
+				}
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no subcommands were checked")
+	}
+	t.Logf("checked --schema registration on %d subcommands", checked)
+}
+
+// freeFlagName must never give up: when both the preferred name and its
+// fallback are taken it keeps suffixing until it finds a free one, so the
+// discovery flag is always registered somewhere.
+func TestFreeFlagName(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema" {
+		t.Errorf("freeFlagName on an empty command = %q, want schema", got)
+	}
+
+	cmd.Flags().String("schema", "", "a spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc" {
+		t.Errorf("freeFlagName with schema taken = %q, want schema-doc", got)
+	}
+
+	cmd.Flags().String("schema-doc", "", "another spec param")
+	if got := freeFlagName(cmd, "schema", "schema-doc"); got != "schema-doc-2" {
+		t.Errorf("freeFlagName with both taken = %q, want schema-doc-2", got)
+	}
+}
+
+// --schema must short-circuit before positional-arg validation, so a command
+// with required path params still answers without them (and without a token).
+func TestBuildCommand_SchemaSkipsArgValidation(t *testing.T) {
+	var called bool
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testGetWidget",
+		Method:      "GET",
+		Path:        "/api/v1/widgets/{widgetId}",
+		PathParams:  []paramInfo{{Name: "widgetId", In: "path", Type: "string"}},
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--schema"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --schema with no args: %v", err)
+	}
+	if called {
+		t.Error("executor was called on a --schema run")
+	}
+	if !strings.Contains(buf.String(), `"body": null`) {
+		t.Errorf("schema output missing an explicit null body: %s", buf.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Flag-name normalization
 //

@@ -1079,7 +1079,7 @@ func TestShorthand_AllMappedFieldsExistInSpec(t *testing.T) {
 			continue
 		}
 		for _, arg := range sh.Args {
-			if _, err := resolveField(op.BodySchema, arg.FieldPath); err != nil {
+			if _, err := resolveField(op.BodySchema, arg.FieldPath, "field"); err != nil {
 				t.Errorf("%s: positional field %q is not present in the request schema: %v", opID, arg.FieldPath, err)
 			}
 		}
