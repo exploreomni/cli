@@ -390,6 +390,22 @@ func configDeleteCmd() *cobra.Command {
 	return cmd
 }
 
+// targetProfileName resolves which profile a login/logout command should act
+// on: the positional argument wins, then the global -p/--profile flag, then the
+// configured default profile.
+func targetProfileName(cmd *cobra.Command, args []string, cfg *config.Config) (string, error) {
+	if len(args) > 0 && args[0] != "" {
+		return args[0], nil
+	}
+	if flag, _ := cmd.Flags().GetString("profile"); flag != "" {
+		return flag, nil
+	}
+	if cfg.DefaultProfile != "" {
+		return cfg.DefaultProfile, nil
+	}
+	return "", fmt.Errorf("no profile specified and no default profile set")
+}
+
 func configLoginCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login [profile]",
@@ -401,15 +417,9 @@ func configLoginCmd() *cobra.Command {
 				return fmt.Errorf("no config found — run `omni config init` first")
 			}
 
-			name := ""
-			if len(args) > 0 {
-				name = args[0]
-			}
-			if name == "" {
-				name = cfg.DefaultProfile
-			}
-			if name == "" {
-				return fmt.Errorf("no profile specified and no default profile set")
+			name, err := targetProfileName(cmd, args, cfg)
+			if err != nil {
+				return err
 			}
 
 			p, ok := cfg.Profiles[name]
@@ -449,15 +459,9 @@ func configLogoutCmd() *cobra.Command {
 				return fmt.Errorf("no config found — run `omni config init` first")
 			}
 
-			name := ""
-			if len(args) > 0 {
-				name = args[0]
-			}
-			if name == "" {
-				name = cfg.DefaultProfile
-			}
-			if name == "" {
-				return fmt.Errorf("no profile specified and no default profile set")
+			name, err := targetProfileName(cmd, args, cfg)
+			if err != nil {
+				return err
 			}
 
 			p, ok := cfg.Profiles[name]

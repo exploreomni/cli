@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
 
@@ -566,5 +567,71 @@ func TestConfigDelete_UnknownProfile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `"nope" not found`) {
 		t.Errorf("error = %q, want it to mention the missing profile", err.Error())
+	}
+}
+
+// Regression for #83: the global -p/--profile flag must be honoured when no
+// positional profile is given, instead of silently acting on the default.
+func TestConfigLogout_ProfileFlagOverridesDefault(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "playground",
+		Profiles: map[string]config.Profile{
+			"playground": {AuthMethod: "oauth", AccessToken: "keep", RefreshToken: "keep"},
+			"prod":       {AuthMethod: "oauth", AccessToken: "a", RefreshToken: "r"},
+		},
+	})
+
+	cmd := configLogoutCmd()
+	cmd.Flags().StringP("profile", "p", "", "")
+	if err := cmd.Flags().Set("profile", "prod"); err != nil {
+		t.Fatal(err)
+	}
+	_ = captureStdout(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	cfg, _ := config.Load()
+	if cfg.Profiles["prod"].AccessToken != "" {
+		t.Error("-p prod: prod tokens were not cleared")
+	}
+	if cfg.Profiles["playground"].AccessToken != "keep" {
+		t.Error("-p prod: default profile was modified")
+	}
+}
+
+func TestTargetProfileName(t *testing.T) {
+	cfg := &config.Config{DefaultProfile: "playground"}
+	newCmd := func(flag string) *cobra.Command {
+		c := &cobra.Command{}
+		c.Flags().StringP("profile", "p", "", "")
+		if flag != "" {
+			_ = c.Flags().Set("profile", flag)
+		}
+		return c
+	}
+	tests := []struct {
+		name string
+		args []string
+		flag string
+		want string
+	}{
+		{"positional wins over flag", []string{"prod"}, "staging", "prod"},
+		{"flag wins over default", nil, "prod", "prod"},
+		{"default when neither", nil, "", "playground"},
+	}
+	for _, tc := range tests {
+		got, err := targetProfileName(newCmd(tc.flag), tc.args, cfg)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if _, err := targetProfileName(newCmd(""), nil, &config.Config{}); err == nil {
+		t.Error("expected error when no profile and no default")
 	}
 }
