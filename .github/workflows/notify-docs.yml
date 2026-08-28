@@ -1,13 +1,11 @@
 name: Notify Docs on Changes
 
 on:
+  # Release-only: the receiver diffs previous tag..this tag, so one dispatch per
+  # release carries every change since the last one. Pushes to main are
+  # deliberately not a trigger — they produced a docs PR per merge.
   release:
     types: [published]
-  push:
-    branches: [main]
-    paths:
-      - "**/*.md"
-      - "!.github/**"
 
 jobs:
   notify:
