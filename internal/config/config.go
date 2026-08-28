@@ -5,11 +5,13 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -82,8 +84,13 @@ type ResolvedConfig struct {
 func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
 
-	// Start from config file
-	cfg, _ := Load()
+	// Start from config file. A missing file is normal (env/flags may carry
+	// everything); any other failure is remembered and reported below if the
+	// config turns out to be needed, instead of masquerading as "no token".
+	cfg, loadErr := Load()
+	if loadErr != nil && errors.Is(loadErr, os.ErrNotExist) {
+		loadErr = nil
+	}
 	var profile *Profile
 	if cfg != nil {
 		name := profileName
@@ -91,15 +98,26 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 			name = cfg.DefaultProfile
 		}
 		if name != "" {
-			if p, ok := cfg.Profiles[name]; ok {
-				profile = &p
-				rc.BaseURL = p.APIEndpoint
-				switch p.AuthMethod {
-				case "oauth":
-					rc.Token = p.AccessToken
-				default: // "api-key"
-					rc.Token = p.APIKey
+			p, ok := cfg.Profiles[name]
+			if !ok {
+				names := make([]string, 0, len(cfg.Profiles))
+				for n := range cfg.Profiles {
+					names = append(names, n)
 				}
+				sort.Strings(names)
+				which := "profile"
+				if profileName == "" {
+					which = "default profile"
+				}
+				return nil, fmt.Errorf("%s %q not found in %s (available: %s)", which, name, ConfigPath(), strings.Join(names, ", "))
+			}
+			profile = &p
+			rc.BaseURL = p.APIEndpoint
+			switch p.AuthMethod {
+			case "oauth":
+				rc.Token = p.AccessToken
+			default: // "api-key"
+				rc.Token = p.APIKey
 			}
 		}
 	}
@@ -151,6 +169,9 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	}
 
 	// Validate
+	if loadErr != nil && (rc.Token == "" || rc.BaseURL == "") {
+		return nil, fmt.Errorf("loading config %s: %w", ConfigPath(), loadErr)
+	}
 	if rc.Token == "" {
 		return nil, fmt.Errorf("no API token configured. Set OMNI_API_TOKEN, use --token, or run `omni config init`")
 	}
@@ -256,4 +277,3 @@ func ConfigPath() string {
 	}
 	return filepath.Join(configDir(), "config.json")
 }
-
