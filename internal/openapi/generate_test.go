@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -1642,7 +1643,10 @@ func TestBuildCommand_ArgumentsSection(t *testing.T) {
 	if !strings.Contains(cmd.Long, "Arguments:") {
 		t.Fatalf("Long = %q, expected an Arguments section", cmd.Long)
 	}
-	for _, want := range []string{"<modelid>", "Model UUID", "<branchname>", "Branch name"} {
+	// The names must match the usage line's spelling, which is canonical
+	// kebab-case — "<modelid>" here next to "<model-id>" there reads as two
+	// different arguments.
+	for _, want := range []string{"<model-id>", "Model UUID", "<branch-name>", "Branch name"} {
 		if !strings.Contains(cmd.Long, want) {
 			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
 		}
@@ -1719,6 +1723,39 @@ func TestGenerateCommands_ArgumentsSectionFromSpec(t *testing.T) {
 	}
 	if !strings.Contains(merge.Long, "Branch name") {
 		t.Errorf("Long = %q, expected the spec's branchName description", merge.Long)
+	}
+}
+
+// The Arguments block and the usage line describe the same positionals, so a
+// reader comparing them must see the same names. They are built from separate
+// code paths, which is exactly how they drifted before ("<modelid>" in the
+// Arguments block, "<model-id>" in the usage line).
+func TestGenerateCommands_ArgumentNamesMatchUsageLine(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	placeholder := regexp.MustCompile(`<[^>]+>`)
+	checked := 0
+	for _, tagCmd := range cmds {
+		for _, sub := range tagCmd.Commands() {
+			names := placeholder.FindAllString(sub.Use, -1)
+			if len(names) == 0 {
+				continue
+			}
+			checked++
+			for _, name := range names {
+				if !strings.Contains(sub.Long, "\n  "+name) {
+					t.Errorf("%s %s: usage line has %s but the Arguments block does not:\n%s",
+						tagCmd.Use, sub.Name(), name, sub.Long)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no commands with positional args found; the spec or generator changed")
 	}
 }
 
