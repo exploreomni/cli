@@ -147,6 +147,7 @@ and maps, so you can name a leaf without knowing the container shape:
                   then exit (works on every API command)
   --field PATH    With --schema: drill into a dotted field path of the body
   --depth N       With --schema: cap nesting depth (lower = smaller)
+  --query K=V     Extra query parameter not declared in the spec (repeatable)
 
 ## Tips
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
@@ -158,6 +159,8 @@ and maps, so you can name a leaf without knowing the container shape:
   The few hand-written commands (config *, agent-help, models create-branch,
   users set-attributes) have no Arguments section — read their Usage line.
 - Query parameters are flags: omni models list --page-size 10
+- Params the spec marks required are enforced before the request; a missing one fails locally.
+- If the server demands a query param the spec doesn't declare, send it with --query key=value (repeatable).
 - Flag names are kebab-case, and spelling is forgiving: case, dashes and
   underscores are ignored, so --branch-id, --branchId, --branch_id and
   --branchid all mean the same flag. --help always shows the canonical form.

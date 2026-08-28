@@ -378,6 +378,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 					query.Set(qf.Param.Name, val)
 				}
 			}
+			if err := applyExtraQueryParams(cmd, queryFlags, query); err != nil {
+				return err
+			}
+			if err := checkRequiredQueryParams(queryFlags, query); err != nil {
+				return err
+			}
 			if len(query) > 0 {
 				path += "?" + query.Encode()
 			}
@@ -424,7 +430,10 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// canonical --branch-id no matter how the spec spelled the param.
 	cmd.Flags().SetNormalizeFunc(NormalizeFlagName)
 
-	// Register query params as flags
+	// Register query params as flags. Params the spec marks required are marked
+	// required on the flag too, so a missing one fails here instead of costing a
+	// round trip and a server 400.
+	hasRequiredQuery := false
 	for _, qf := range queryFlags {
 		desc := qf.Param.Description
 		if len(qf.Param.Enum) > 0 {
@@ -439,7 +448,14 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 			}
 			desc += qf.Note
 		}
+		if qf.Param.Required {
+			desc = strings.TrimSpace(desc + " (required)")
+		}
 		cmd.Flags().String(qf.Name, "", desc)
+		if qf.Param.Required {
+			cmd.MarkFlagRequired(qf.Name)
+			hasRequiredQuery = true
+		}
 	}
 
 	// If the operation accepts a body, add --body and --json-body flags
@@ -453,6 +469,15 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	sh := GetBodyShorthand(op.OperationID)
 	if sh != nil {
 		applyBodyShorthand(cmd, op, sh)
+	}
+
+	// Escape hatch for query params the spec doesn't declare: without it, an
+	// operation whose server requires an undeclared param is simply uncallable.
+	// Registered after every other flag and guarded so a spec param or shorthand
+	// flag that resolves to "query" keeps its own name instead of panicking the
+	// flag registration.
+	if cmd.Flags().Lookup(queryFlagName) == nil {
+		cmd.Flags().StringArray(queryFlagName, nil, "send an extra query parameter not declared in the spec (repeatable, key=value)")
 	}
 
 	// Describe the positional args in the long help. Cobra's usage line only
@@ -469,9 +494,32 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// Args/RunE, so the short-circuit wraps the final versions. Registered for
 	// every operation — bodyless ones still describe their args, query flags and
 	// response shape.
-	RegisterSchemaFlag(cmd, func(c *cobra.Command, names SchemaFlags) error {
+	names := RegisterSchemaFlag(cmd, func(c *cobra.Command, names SchemaFlags) error {
 		return emitBodySchema(c, op, names)
 	})
+
+	// Required query flags must not block --schema: it's pure local discovery
+	// with no API call, so it needs no params at all. Cobra runs PreRunE before
+	// ValidateRequiredFlags, so toggling the annotation here is enough. It's
+	// rewritten on every invocation (not just cleared) so a --schema run can't
+	// leave the requirement relaxed for a later one.
+	if hasRequiredQuery {
+		cmd.PreRunE = func(c *cobra.Command, args []string) error {
+			required := "true"
+			if schemaRequested(c, names.Schema) {
+				required = "false"
+			}
+			for _, qf := range queryFlags {
+				if !qf.Param.Required {
+					continue
+				}
+				if err := c.Flags().SetAnnotation(qf.Name, cobra.BashCompOneRequiredFlag, []string{required}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
 
 	return cmd
 }
@@ -524,6 +572,83 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// queryFlagName is the generic escape hatch flag for query params the spec
+// doesn't declare.
+const queryFlagName = "query"
+
+// applyExtraQueryParams merges repeatable --query key=value pairs into the
+// query string. Keys are sent verbatim — the server sees exactly what the user
+// typed. A key that also has an explicitly-set declared flag is ambiguous and
+// errors rather than silently picking one; repeating the same key is allowed
+// and sends every value (some params are arrays).
+func applyExtraQueryParams(cmd *cobra.Command, queryFlags []queryFlag, query url.Values) error {
+	extras, err := cmd.Flags().GetStringArray(queryFlagName)
+	if err != nil {
+		// The flag isn't registered — a spec param claimed the name.
+		return nil
+	}
+	for _, kv := range extras {
+		key, val, ok := strings.Cut(kv, "=")
+		if !ok || key == "" {
+			return fmt.Errorf("invalid --query value %q: expected key=value", kv)
+		}
+		for _, qf := range queryFlags {
+			// Match the way flags themselves match: any spelling differing only
+			// in case or dash/underscore placement is the same parameter, under
+			// either the spec's name or the flag it was registered as.
+			if flagLookupKey(key) != flagLookupKey(qf.Param.Name) && flagLookupKey(key) != flagLookupKey(qf.Name) {
+				continue
+			}
+			if cmd.Flags().Changed(qf.Name) {
+				return fmt.Errorf("--query %s=... conflicts with --%s; set that parameter one way or the other", key, qf.Name)
+			}
+		}
+		query.Add(key, val)
+	}
+	return nil
+}
+
+// checkRequiredQueryParams verifies every spec-required query param ended up in
+// the query string with a non-empty value. MarkFlagRequired only proves the flag
+// was supplied, so `--q=` (or `--query q=`) would otherwise pass validation and
+// then be dropped as empty — exactly the server 400 round trip this is meant to
+// avoid. A value under either the spec spelling or the flag spelling counts,
+// mirroring how --query conflicts are detected.
+func checkRequiredQueryParams(queryFlags []queryFlag, query url.Values) error {
+	// Index the assembled query by the same normalized key flags match on, so a
+	// value that arrived through --query counts no matter which spelling of the
+	// param the user typed.
+	byKey := map[string][]string{}
+	for k, vals := range query {
+		key := flagLookupKey(k)
+		byKey[key] = append(byKey[key], vals...)
+	}
+
+	var missing []string
+	for _, qf := range queryFlags {
+		if !qf.Param.Required {
+			continue
+		}
+		if hasNonEmptyValue(byKey[flagLookupKey(qf.Param.Name)]) || hasNonEmptyValue(byKey[flagLookupKey(qf.Name)]) {
+			continue
+		}
+		missing = append(missing, `"`+qf.Name+`"`)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("required flag(s) %s cannot be empty", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func hasNonEmptyValue(vals []string) bool {
+	for _, v := range vals {
+		if v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // schemaRequested reports whether the schema discovery flag — registered under
