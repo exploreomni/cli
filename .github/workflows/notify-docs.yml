@@ -1,20 +1,11 @@
 name: Notify Docs on Changes
 
 on:
+  # Release-only: the receiver diffs previous tag..this tag, so one dispatch per
+  # release carries every change since the last one. Pushes to main are
+  # deliberately not a trigger — they produced a docs PR per merge.
   release:
     types: [published]
-  push:
-    branches: [main]
-    paths:
-      # Prose changes.
-      - "**/*.md"
-      # Anything that changes the generated command surface: flags, args,
-      # help text, agent-help, and the spec every command is derived from.
-      - "cmd/**"
-      - "internal/openapi/**"
-      - "api/openapi.json"
-      - "!.github/**"
-      - "!**/*_test.go"
 
 jobs:
   notify:
