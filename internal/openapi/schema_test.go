@@ -622,8 +622,13 @@ func TestSchema_BodylessGetDescribesArgsAndQueryParams(t *testing.T) {
 		t.Fatalf("args = %v, want 1 entry", doc.Args)
 	}
 	arg := doc.Args[0]
-	if arg.Name != "widgetId" || arg.Placeholder != "<widgetid>" || arg.Type != "string" || arg.Description != "Widget UUID" {
+	if arg.Name != "widgetId" || arg.Placeholder != "<widget-id>" || arg.Type != "string" || arg.Description != "Widget UUID" {
 		t.Errorf("arg = %+v, want the widgetId path param", arg)
+	}
+	// The placeholder and flag spellings must match what --help and the usage
+	// line print (canonicalName), not the older bare-lowercase slugify form.
+	if strings.Contains(arg.Placeholder, "widgetid") {
+		t.Errorf("placeholder %q uses the old slugify spelling; want kebab-case", arg.Placeholder)
 	}
 
 	byFlag := map[string]SchemaQueryParam{}
