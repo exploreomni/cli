@@ -354,14 +354,17 @@ func describeBody(op *operationInfo, field string, maxDepth int, names SchemaFla
 	for _, p := range op.PathParams {
 		doc.Args = append(doc.Args, SchemaArg{
 			Name:        p.Name,
-			Placeholder: "<" + slugify(p.Name) + ">",
+			Placeholder: "<" + canonicalName(p.Name) + ">",
 			Type:        p.Type,
 			Description: p.Description,
 		})
 	}
-	for _, q := range op.QueryParams {
+	// Use the same resolution as flag registration so collision renames
+	// (--param-base-url, --foo-2) are reported exactly as the CLI accepts them.
+	for _, qf := range resolveQueryFlags(op) {
+		q := qf.Param
 		doc.QueryParams = append(doc.QueryParams, SchemaQueryParam{
-			Flag:        "--" + slugify(q.Name),
+			Flag:        "--" + qf.Name,
 			Name:        q.Name,
 			Type:        q.Type,
 			Enum:        q.Enum,
