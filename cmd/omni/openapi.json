@@ -2460,9 +2460,9 @@
           "code": {
             "type": "string",
             "enum": [
+              "not_expressible",
               "no_query",
               "malformed_query",
-              "no_gate",
               "dry_run_failed",
               "no_condition_detected"
             ],
@@ -26102,6 +26102,13 @@
                 },
                 "description": "Filters that were embedded directly in raw SQL (read-only)."
               },
+              "imported_model_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Model IDs (UUIDs) the query reaches through its composite topic's imports — the topic's import_models entries, which must be model ids, not names. Authorization requires the run gate on each; omit only for queries that do not touch imported topics."
+              },
               "join_paths_from_topic_name": {
                 "type": "string",
                 "description": "Topic name that determines join path precedence for parsed SQL queries."
@@ -30403,6 +30410,13 @@
                   ]
                 },
                 "description": "Filters that were embedded directly in raw SQL (read-only)."
+              },
+              "imported_model_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Model IDs (UUIDs) the query reaches through its composite topic's imports — the topic's import_models entries, which must be model ids, not names. Authorization requires the run gate on each; omit only for queries that do not touch imported topics."
               },
               "join_paths_from_topic_name": {
                 "type": "string",
@@ -44764,6 +44778,7 @@
     },
     "/api/v1/dashboards/{identifier}/download": {
       "post": {
+        "description": "The artifact includes cross-model tiles the download runs as (the target user when one is named, else the API key’s user); tiles on a model they cannot query are omitted.",
         "operationId": "dashboardsDownload",
         "summary": "Initiate dashboard download",
         "tags": [
@@ -50128,7 +50143,7 @@
     },
     "/api/v1/models/{modelId}": {
       "patch": {
-        "description": "Update metadata for an existing model. Currently supports renaming the model via the `name` field.",
+        "description": "Update metadata for an existing model. Currently supports renaming the model via the `name` field. Renaming a schema, shared, or shared extension model requires Connection Admin; renaming a branch requires Modeler.",
         "operationId": "modelsUpdate",
         "summary": "Update model",
         "tags": [

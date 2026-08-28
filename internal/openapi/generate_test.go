@@ -1,9 +1,12 @@
 package openapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -11,6 +14,7 @@ import (
 	"github.com/pb33f/libopenapi"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // ---------------------------------------------------------------------------
@@ -358,6 +362,338 @@ func TestBuildCommand_QueryFlags(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Required query params + the generic --query escape hatch
+// ---------------------------------------------------------------------------
+
+// listOp is a GET operation with one required query param and one optional one.
+func listOp() *operationInfo {
+	return &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+		QueryParams: []paramInfo{
+			{Name: "connectionId", In: "query", Required: true},
+			{Name: "page_size", In: "query"},
+		},
+	}
+}
+
+// A query param the spec marks required must fail client-side when it's
+// missing, instead of costing a round trip and a server 400.
+func TestBuildCommand_RequiredQueryParamMissing(t *testing.T) {
+	called := false
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--page-size", "10"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error for a missing required query param, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection-id") {
+		t.Errorf("error = %q, want it to name the missing flag", err.Error())
+	}
+	if called {
+		t.Error("executor should not run when a required flag is missing")
+	}
+
+	// The flag's usage should advertise that it's required.
+	usage := cmd.Flags().Lookup("connection-id").Usage
+	if !strings.Contains(usage, "(required)") {
+		t.Errorf("usage = %q, want it to mention (required)", usage)
+	}
+}
+
+func TestBuildCommand_RequiredQueryParamPresent(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{"--connectionid", "c-1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "connectionId=c-1") {
+		t.Errorf("path %q missing connectionId=c-1", captured.Path)
+	}
+}
+
+// MarkFlagRequired only proves the flag was supplied, so an explicit empty
+// value (--connectionid=) would otherwise sail past validation and then be
+// dropped from the query string — the server 400 this is meant to prevent.
+func TestBuildCommand_RequiredQueryParamEmpty(t *testing.T) {
+	cases := [][]string{
+		{"--connectionid="},                      // explicit empty declared flag
+		{"--connectionid", ""},                   // same, separate-arg form
+		{"--connectionid=", "--page-size", "10"}, // empty alongside other params
+	}
+
+	for _, args := range cases {
+		called := false
+		exec := func(req APIRequest) error { called = true; return nil }
+
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs(args)
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("args %v: expected an error for an empty required param, got nil", args)
+		}
+		if !strings.Contains(err.Error(), "connection-id") {
+			t.Errorf("args %v: error = %q, want it to name the flag", args, err.Error())
+		}
+		if called {
+			t.Errorf("args %v: executor should not run for an empty required param", args)
+		}
+	}
+}
+
+// The emptiness check runs on the assembled query string, so it also covers
+// values that arrived through the --query escape hatch (under either the spec
+// spelling or the flag spelling).
+func TestCheckRequiredQueryParams(t *testing.T) {
+	op := listOp()
+	cases := []struct {
+		name    string
+		query   url.Values
+		wantErr bool
+	}{
+		{"absent", url.Values{}, true},
+		{"empty under spec name", url.Values{"connectionId": {""}}, true},
+		{"empty under flag name", url.Values{"connectionid": {""}}, true},
+		{"set under spec name", url.Values{"connectionId": {"c-1"}}, false},
+		{"set under flag name", url.Values{"connectionid": {"c-1"}}, false},
+		{"one of several non-empty", url.Values{"connectionId": {"", "c-1"}}, false},
+		{"optional param empty is fine", url.Values{"connectionId": {"c-1"}, "page_size": {""}}, false},
+	}
+
+	for _, c := range cases {
+		err := checkRequiredQueryParams(resolveQueryFlags(op), c.query)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("%s: expected an error, got nil", c.name)
+			} else if !strings.Contains(err.Error(), "connection-id") {
+				t.Errorf("%s: error = %q, want it to name the flag", c.name, err.Error())
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+		}
+	}
+}
+
+// A declared required param has its own flag, so --query is not a substitute
+// for it: cobra still insists the flag itself be supplied.
+func TestBuildCommand_ExtraQueryDoesNotSubstituteForRequiredFlag(t *testing.T) {
+	called := false
+	exec := func(req APIRequest) error { called = true; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--query", "connectionId=c-1"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected the required flag to still be enforced, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection-id") {
+		t.Errorf("error = %q, want it to name the missing flag", err.Error())
+	}
+	if called {
+		t.Error("executor should not run when the required flag is missing")
+	}
+}
+
+// --query is the escape hatch for params the spec doesn't declare. It's
+// repeatable, and repeating a key sends every value.
+func TestBuildCommand_ExtraQueryParams(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{
+		"--connectionid", "c-1",
+		"--query", "undeclared=yes",
+		"--query", "tag=a",
+		"--query", "tag=b",
+		"--query", "empty=",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, want := range []string{"connectionId=c-1", "undeclared=yes", "tag=a&tag=b", "empty="} {
+		if !strings.Contains(captured.Path, want) {
+			t.Errorf("path %q missing %q", captured.Path, want)
+		}
+	}
+}
+
+func TestBuildCommand_ExtraQueryParamMalformed(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	for _, bad := range []string{"noequals", "=novalue"} {
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--connectionid", "c-1", "--query", bad})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("--query %q: expected an error, got nil", bad)
+		}
+		if !strings.Contains(err.Error(), "key=value") {
+			t.Errorf("--query %q: error = %q, want it to explain key=value", bad, err.Error())
+		}
+	}
+}
+
+// Sending the same param both ways is ambiguous — error rather than silently
+// picking one. Both the spec spelling and the flag spelling are caught.
+func TestBuildCommand_ExtraQueryParamConflict(t *testing.T) {
+	for _, key := range []string{"connectionId", "connectionid", "connection-id"} {
+		called := false
+		exec := func(req APIRequest) error { called = true; return nil }
+
+		cmd := buildCommand(listOp(), exec)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--connectionid", "c-1", "--query", key + "=c-2"})
+
+		err := cmd.Execute()
+		if err == nil {
+			t.Fatalf("--query %s=: expected a conflict error, got nil", key)
+		}
+		if !strings.Contains(err.Error(), "conflicts with --connection-id") {
+			t.Errorf("error = %q, want it to name the conflicting flag", err.Error())
+		}
+		if called {
+			t.Error("executor should not run on a conflicting --query")
+		}
+	}
+}
+
+// An unset declared flag isn't a conflict — --query can supply its value.
+func TestBuildCommand_ExtraQueryParamNoConflictWhenFlagUnset(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	cmd := buildCommand(listOp(), exec)
+	cmd.SetArgs([]string{"--connectionid", "c-1", "--query", "page_size=25"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "page_size=25") {
+		t.Errorf("path %q missing page_size=25", captured.Path)
+	}
+}
+
+// A spec param that slugifies to "query" owns the flag name; the escape hatch
+// steps aside rather than panicking the flag registration.
+func TestBuildCommand_QueryParamNamedQuery(t *testing.T) {
+	var captured APIRequest
+	exec := func(req APIRequest) error { captured = req; return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testSearch",
+		Method:      "GET",
+		Path:        "/api/v1/search",
+		QueryParams: []paramInfo{{Name: "query", In: "query"}},
+	}
+
+	cmd := buildCommand(op, exec)
+	cmd.SetArgs([]string{"--query", "revenue"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(captured.Path, "query=revenue") {
+		t.Errorf("path %q missing query=revenue", captured.Path)
+	}
+}
+
+// --schema is local discovery with no API call, so it must stay zero-friction
+// even on an operation with required query params.
+func TestBuildCommand_SchemaIgnoresRequiredQueryParams(t *testing.T) {
+	spec := `{
+		"openapi": "3.1.0",
+		"info": {"title": "test", "version": "1.0"},
+		"paths": {
+			"/api/v1/widgets": {
+				"post": {
+					"operationId": "widgetsCreate",
+					"tags": ["widgets"],
+					"parameters": [
+						{"name": "connectionId", "in": "query", "required": true, "schema": {"type": "string"}}
+					],
+					"requestBody": {
+						"content": {"application/json": {"schema": {
+							"type": "object",
+							"required": ["name"],
+							"properties": {"name": {"type": "string"}}
+						}}}
+					},
+					"responses": {"200": {"description": "ok"}}
+				}
+			}
+		}
+	}`
+
+	called := false
+	// Each case gets a fresh command tree; cobra keeps parsed flag state on the
+	// command, and the real CLI runs one command per process.
+	run := func(args ...string) (string, error) {
+		exec := func(req APIRequest) error { called = true; return nil }
+		cmds, err := GenerateCommands([]byte(spec), exec)
+		if err != nil {
+			t.Fatalf("GenerateCommands: %v", err)
+		}
+		group := cmds[0]
+		var buf bytes.Buffer
+		group.SetOut(&buf)
+		group.SetErr(&buf)
+		group.SilenceUsage = true
+		group.SilenceErrors = true
+		group.SetArgs(args)
+		execErr := group.Execute()
+		return buf.String(), execErr
+	}
+
+	out, err := run("create", "--schema")
+	if err != nil {
+		t.Fatalf("Execute --schema: %v\n%s", err, out)
+	}
+	if called {
+		t.Error("--schema must not make an API call")
+	}
+	if !strings.Contains(out, `"name"`) {
+		t.Errorf("schema output missing body fields: %s", out)
+	}
+
+	// Without --schema the required param is still enforced.
+	if _, err := run("create", "--body", "{}"); err == nil {
+		t.Fatal("expected a missing-required-flag error without --schema")
+	}
+
+	// ...and supplying it goes through.
+	if out, err := run("create", "--body", "{}", "--connectionid", "c-1"); err != nil {
+		t.Fatalf("Execute with required param: %v\n%s", err, out)
+	}
+	if !called {
+		t.Error("expected the API call to run once the required param was set")
+	}
+}
+
+// Verify that operations with a request body (POST/PUT/PATCH) get a --body
+// flag, and the JSON value passed to it ends up in APIRequest.Body.
 func TestBuildCommand_BodyFlag(t *testing.T) {
 	var captured APIRequest
 	exec := func(req APIRequest) error { captured = req; return nil }
@@ -404,6 +740,257 @@ func TestBuildCommand_WrongArgCount(t *testing.T) {
 	cmd.SetArgs([]string{}) // 0 args, expects 1
 	if err := cmd.Execute(); err == nil {
 		t.Error("expected error for wrong arg count, got nil")
+	}
+}
+
+// A command that fails at runtime (e.g. the API returned HTTP 400) should not
+// print the usage block after the error — the message is the useful part, and
+// the usage text is noise that buries it.
+func TestBuildCommand_RuntimeErrorSilencesUsage(t *testing.T) {
+	exec := func(req APIRequest) error { return fmt.Errorf("API returned HTTP 400") }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+	}
+
+	var out bytes.Buffer
+	cmd := buildCommand(op, exec)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected the executor error to propagate")
+	}
+	if !cmd.SilenceUsage {
+		t.Error("SilenceUsage should be set once RunE is entered")
+	}
+	if strings.Contains(out.String(), "Usage:") {
+		t.Errorf("usage block should be suppressed, got %q", out.String())
+	}
+}
+
+// Flag-parse errors happen before RunE, so they're genuine usage errors and
+// should still print the usage block.
+func TestBuildCommand_FlagErrorKeepsUsage(t *testing.T) {
+	exec := func(req APIRequest) error { return nil }
+
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testListItems",
+		Method:      "GET",
+		Path:        "/api/v1/items",
+	}
+
+	var out bytes.Buffer
+	cmd := buildCommand(op, exec)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--nope"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for unknown flag")
+	}
+	if !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("usage block should be printed for flag errors, got %q", out.String())
+	}
+}
+
+// newTestGroup builds a tag group shaped like the ones GenerateCommands makes,
+// hung off a root command so cobra routes args to the group the way it does in
+// the real binary.
+func newTestGroup(out, errOut *bytes.Buffer) (*cobra.Command, *cobra.Command) {
+	root := &cobra.Command{Use: "omni"}
+	root.SilenceErrors = true
+	group := NewGroupCommand("models", "models commands")
+	group.AddCommand(&cobra.Command{Use: "list", Short: "list models", RunE: func(*cobra.Command, []string) error { return nil }})
+	group.AddCommand(&cobra.Command{Use: "get <id>", Short: "get a model", RunE: func(*cobra.Command, []string) error { return nil }})
+	root.AddCommand(group)
+	root.SetOut(out)
+	root.SetErr(errOut)
+	return root, group
+}
+
+// A mistyped subcommand must be a hard error with suggestions — not a silent
+// help dump on stdout that a piped consumer would try to parse as data.
+func TestGroupRunE_UnknownSubcommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list-branches"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected an error for an unknown subcommand")
+	}
+	if !strings.Contains(err.Error(), `unknown subcommand "list-branches" for "omni models"`) {
+		t.Errorf("error = %q, want an unknown-subcommand message", err.Error())
+	}
+	// "list-branches" is too far from "list" for Levenshtein, but the
+	// reverse-prefix pass should still point there.
+	if !strings.Contains(err.Error(), "Did you mean this?") || !strings.Contains(err.Error(), "list") {
+		t.Errorf("error = %q, want a suggestion for 'list'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "omni models --help") {
+		t.Errorf("error = %q, want a --help hint", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !group.SilenceUsage {
+		t.Error("SilenceUsage should be set so the error isn't buried in usage text")
+	}
+}
+
+// Nothing similar to suggest: still an error, still nothing on stdout.
+func TestGroupRunE_UnknownSubcommandNoSuggestions(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "zzzzzzzz"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected an error for an unknown subcommand")
+	}
+	if strings.Contains(err.Error(), "Did you mean this?") {
+		t.Errorf("error = %q, want no suggestion block", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+}
+
+// A bare group produced no data, so its help goes to stderr and the exit code
+// is non-zero — stdout stays empty for the pipe.
+func TestGroupRunE_NoSubcommand(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a non-nil error so the CLI exits non-zero")
+	}
+	if !strings.Contains(err.Error(), "requires a subcommand") {
+		t.Errorf("error = %q, want a 'requires a subcommand' message", err.Error())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "Available Commands") {
+		t.Errorf("stderr = %q, want the group help", errOut.String())
+	}
+}
+
+// The bare-group help IS the error report, so cobra must not append its own
+// "Error: ..." line on top of it — one failure, one surface.
+func TestGroupRunE_NoSubcommandReportsErrorOnce(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := &cobra.Command{Use: "omni"}
+	group := NewGroupCommand("models", "models commands")
+	group.AddCommand(&cobra.Command{Use: "list", Short: "list models", RunE: func(*cobra.Command, []string) error { return nil }})
+	root.AddCommand(group)
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"models"})
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected a non-nil error so the CLI exits non-zero")
+	}
+	if strings.Contains(errOut.String(), "Error:") {
+		t.Errorf("stderr = %q, want no duplicate cobra error line alongside the help", errOut.String())
+	}
+	if n := strings.Count(errOut.String(), "Usage:"); n != 1 {
+		t.Errorf("stderr has %d usage blocks, want exactly 1: %q", n, errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+}
+
+// --help is not an error: it still prints to stdout and exits zero.
+func TestGroupRunE_HelpFlagStaysOnStdout(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, _ := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--help should not error: %v", err)
+	}
+	if !strings.Contains(out.String(), "Available Commands") {
+		t.Errorf("stdout = %q, want the group help", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr should be empty, got %q", errOut.String())
+	}
+}
+
+// A typo plus --help is still a typo. Cobra answers the help flag before RunE,
+// so this is the one path that could still print help to stdout and exit 0.
+func TestGroupHelp_UnknownSubcommandWithHelpFlag(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list-branches", "--help"})
+
+	// Cobra always returns nil once it has handled the help flag, which is why
+	// the caller has to consult UnknownSubcommand for the exit code.
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error from Execute: %v", err)
+	}
+	if !UnknownSubcommand(group) {
+		t.Error("UnknownSubcommand should report the typo so the CLI exits non-zero")
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout should be empty, got %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), `unknown subcommand "list-branches"`) {
+		t.Errorf("stderr = %q, want an unknown-subcommand error", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "Did you mean this?") {
+		t.Errorf("stderr = %q, want a suggestion", errOut.String())
+	}
+}
+
+// The group's help func is inherited by its subcommands, so `--help` on a real
+// subcommand must still render normal help on stdout (and not recurse).
+func TestGroupHelp_SubcommandHelpUnaffected(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root, group := newTestGroup(&out, &errOut)
+	root.SetArgs([]string{"models", "list", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--help should not error: %v", err)
+	}
+	if UnknownSubcommand(group) {
+		t.Error("a valid subcommand should not be reported as unknown")
+	}
+	if !strings.Contains(out.String(), "list models") || !strings.Contains(out.String(), "Usage:") {
+		t.Errorf("stdout = %q, want the subcommand's help", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr should be empty, got %q", errOut.String())
+	}
+}
+
+// Every generated group gets the unknown-subcommand handling, not just the
+// ones someone remembered to wire up.
+func TestGenerateCommands_GroupsAreRunnable(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	for _, tagCmd := range cmds {
+		if tagCmd.RunE == nil {
+			t.Errorf("group %q has no RunE; an unknown subcommand would exit 0", tagCmd.Use)
+		}
+		if !isGroup(tagCmd) {
+			t.Errorf("group %q is missing the group annotation; --help after a typo would exit 0", tagCmd.Use)
+		}
 	}
 }
 
@@ -1150,13 +1737,14 @@ func TestRealSpec_NoFlagCollisions(t *testing.T) {
 // specOperation holds data we parse from the spec independently of the
 // command generator, so we can cross-reference what the generator produced.
 type specOperation struct {
-	Tag         string
-	OperationID string
-	Method      string
-	Path        string
-	PathParams  []string
-	HasBody     bool
-	BodyMedia   string
+	Tag           string
+	OperationID   string
+	Method        string
+	Path          string
+	PathParams    []string
+	RequiredQuery []string // flag names of required query params
+	HasBody       bool
+	BodyMedia     string
 }
 
 // parseSpecOperations reads the OpenAPI spec directly (bypassing our generator)
@@ -1200,21 +1788,27 @@ func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 				tag = op.Tags[0]
 			}
 
-			var pathParams []string
+			var pathParams, requiredQuery []string
 			for _, p := range op.Parameters {
-				if p.In == "path" {
+				switch p.In {
+				case "path":
 					pathParams = append(pathParams, p.Name)
+				case "query":
+					if boolVal(p.Required) {
+						requiredQuery = append(requiredQuery, slugify(p.Name))
+					}
 				}
 			}
 
 			ops = append(ops, specOperation{
-				Tag:         tag,
-				OperationID: op.OperationId,
-				Method:      method,
-				Path:        pathStr,
-				PathParams:  pathParams,
-				HasBody:     op.RequestBody != nil,
-				BodyMedia:   specBodyMediaType(op.RequestBody),
+				Tag:           tag,
+				OperationID:   op.OperationId,
+				Method:        method,
+				Path:          pathStr,
+				PathParams:    pathParams,
+				RequiredQuery: requiredQuery,
+				HasBody:       op.RequestBody != nil,
+				BodyMedia:     specBodyMediaType(op.RequestBody),
 			})
 		}
 	}
@@ -1281,6 +1875,15 @@ func TestSpecCoverage(t *testing.T) {
 				args[i] = "test-id"
 			}
 
+			// Required query params must carry a non-empty value, same as they
+			// would on a real invocation.
+			for _, flagName := range sop.RequiredQuery {
+				if err := sub.Flags().Set(flagName, "test-value"); err != nil {
+					failures = append(failures, fmt.Sprintf("%s: set required query flag %s: %v", key, flagName, err))
+					continue
+				}
+			}
+
 			// Operations with a request body (POST/PUT/PATCH) need --body set,
 			// otherwise the command would try to read from stdin.
 			if sop.HasBody {
@@ -1288,6 +1891,24 @@ func TestSpecCoverage(t *testing.T) {
 					failures = append(failures, fmt.Sprintf("%s: set body flag: %v", key, err))
 					continue
 				}
+			}
+
+			// Query params the spec marks required are enforced client-side, so
+			// give each one a dummy value — otherwise the command could never
+			// reach RunE and the operation would read as uncovered.
+			setErr := ""
+			sub.Flags().VisitAll(func(f *pflag.Flag) {
+				ann := f.Annotations[cobra.BashCompOneRequiredFlag]
+				if setErr != "" || len(ann) == 0 || ann[0] != "true" {
+					return
+				}
+				if err := sub.Flags().Set(f.Name, "test-value"); err != nil {
+					setErr = fmt.Sprintf("%s: set %s flag: %v", key, f.Name, err)
+				}
+			})
+			if setErr != "" {
+				failures = append(failures, setErr)
+				continue
 			}
 
 			if sub.RunE == nil {
@@ -1398,7 +2019,10 @@ func TestBuildCommand_ArgumentsSection(t *testing.T) {
 	if !strings.Contains(cmd.Long, "Arguments:") {
 		t.Fatalf("Long = %q, expected an Arguments section", cmd.Long)
 	}
-	for _, want := range []string{"<modelid>", "Model UUID", "<branchname>", "Branch name"} {
+	// The names must match the usage line's spelling, which is canonical
+	// kebab-case — "<modelid>" here next to "<model-id>" there reads as two
+	// different arguments.
+	for _, want := range []string{"<model-id>", "Model UUID", "<branch-name>", "Branch name"} {
 		if !strings.Contains(cmd.Long, want) {
 			t.Errorf("Long = %q, expected it to contain %q", cmd.Long, want)
 		}
@@ -1475,6 +2099,39 @@ func TestGenerateCommands_ArgumentsSectionFromSpec(t *testing.T) {
 	}
 	if !strings.Contains(merge.Long, "Branch name") {
 		t.Errorf("Long = %q, expected the spec's branchName description", merge.Long)
+	}
+}
+
+// The Arguments block and the usage line describe the same positionals, so a
+// reader comparing them must see the same names. They are built from separate
+// code paths, which is exactly how they drifted before ("<modelid>" in the
+// Arguments block, "<model-id>" in the usage line).
+func TestGenerateCommands_ArgumentNamesMatchUsageLine(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(req APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+
+	placeholder := regexp.MustCompile(`<[^>]+>`)
+	checked := 0
+	for _, tagCmd := range cmds {
+		for _, sub := range tagCmd.Commands() {
+			names := placeholder.FindAllString(sub.Use, -1)
+			if len(names) == 0 {
+				continue
+			}
+			checked++
+			for _, name := range names {
+				if !strings.Contains(sub.Long, "\n  "+name) {
+					t.Errorf("%s %s: usage line has %s but the Arguments block does not:\n%s",
+						tagCmd.Use, sub.Name(), name, sub.Long)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no commands with positional args found; the spec or generator changed")
 	}
 }
 

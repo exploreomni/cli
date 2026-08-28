@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
 
@@ -78,6 +80,48 @@ func TestApplyOAuthToken_CopiesAllFields(t *testing.T) {
 	// APIEndpoint should be untouched — the helper only writes auth fields.
 	if p.APIEndpoint != "https://myorg.omniapp.co" {
 		t.Errorf("APIEndpoint mutated: got %q", p.APIEndpoint)
+	}
+}
+
+// Runtime failures in the hand-written config commands must not dump the usage
+// block: same contract the generated API commands follow, so an error message
+// isn't buried under a wall of flags.
+func TestConfigCommands_NoUsageOnRuntimeError(t *testing.T) {
+	// An empty (absent) config file makes every command that loads config fail.
+	withConfig(t, nil)
+
+	cases := []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"init", configInitCmd, []string{"--name", "prod", "--endpoint", "https://myorg.omniapp.co", "--auth", "magic"}},
+		{"show", configShowCmd, nil},
+		{"list", configListCmd, nil},
+		{"use", configUseCmd, []string{"ghost"}},
+		{"rename", configRenameCmd, []string{"ghost", "other"}},
+		{"delete", configDeleteCmd, []string{"ghost", "--yes"}},
+		{"login", configLoginCmd, []string{"ghost"}},
+		{"logout", configLogoutCmd, []string{"ghost"}},
+		{"set-format", configSetFormatCmd, []string{"yaml"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			cmd := tc.cmd()
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tc.args)
+
+			if err := cmd.Execute(); err == nil {
+				t.Fatalf("expected a runtime error for %s", tc.name)
+			}
+			if strings.Contains(out.String(), "Usage:") {
+				t.Errorf("output = %q, want no usage block after a runtime error", out.String())
+			}
+		})
 	}
 }
 
@@ -566,5 +610,71 @@ func TestConfigDelete_UnknownProfile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `"nope" not found`) {
 		t.Errorf("error = %q, want it to mention the missing profile", err.Error())
+	}
+}
+
+// Regression for #83: the global -p/--profile flag must be honoured when no
+// positional profile is given, instead of silently acting on the default.
+func TestConfigLogout_ProfileFlagOverridesDefault(t *testing.T) {
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "playground",
+		Profiles: map[string]config.Profile{
+			"playground": {AuthMethod: "oauth", AccessToken: "keep", RefreshToken: "keep"},
+			"prod":       {AuthMethod: "oauth", AccessToken: "a", RefreshToken: "r"},
+		},
+	})
+
+	cmd := configLogoutCmd()
+	cmd.Flags().StringP("profile", "p", "", "")
+	if err := cmd.Flags().Set("profile", "prod"); err != nil {
+		t.Fatal(err)
+	}
+	_ = captureStdout(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+
+	cfg, _ := config.Load()
+	if cfg.Profiles["prod"].AccessToken != "" {
+		t.Error("-p prod: prod tokens were not cleared")
+	}
+	if cfg.Profiles["playground"].AccessToken != "keep" {
+		t.Error("-p prod: default profile was modified")
+	}
+}
+
+func TestTargetProfileName(t *testing.T) {
+	cfg := &config.Config{DefaultProfile: "playground"}
+	newCmd := func(flag string) *cobra.Command {
+		c := &cobra.Command{}
+		c.Flags().StringP("profile", "p", "", "")
+		if flag != "" {
+			_ = c.Flags().Set("profile", flag)
+		}
+		return c
+	}
+	tests := []struct {
+		name string
+		args []string
+		flag string
+		want string
+	}{
+		{"positional wins over flag", []string{"prod"}, "staging", "prod"},
+		{"flag wins over default", nil, "prod", "prod"},
+		{"default when neither", nil, "", "playground"},
+	}
+	for _, tc := range tests {
+		got, err := targetProfileName(newCmd(tc.flag), tc.args, cfg)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if _, err := targetProfileName(newCmd(""), nil, &config.Config{}); err == nil {
+		t.Error("expected error when no profile and no default")
 	}
 }

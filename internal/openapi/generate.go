@@ -4,6 +4,7 @@
 package openapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -62,10 +63,7 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 
 	for _, tag := range tagNames {
 		ops := groups[tag]
-		tagCmd := &cobra.Command{
-			Use:   slugify(tag),
-			Short: fmt.Sprintf("%s commands", tag),
-		}
+		tagCmd := NewGroupCommand(slugify(tag), fmt.Sprintf("%s commands", tag))
 
 		for _, op := range ops {
 			if err := validateFlagNames(op); err != nil {
@@ -78,6 +76,146 @@ func GenerateCommands(specData []byte, exec Executor) ([]*cobra.Command, error) 
 	}
 
 	return cmds, nil
+}
+
+const (
+	// groupAnnotation marks a command as a subcommand group, so the shared
+	// help func knows which commands to apply unknown-subcommand handling to.
+	groupAnnotation = "omni/group"
+
+	// unknownSubcommandAnnotation records that a command printed an
+	// unknown-subcommand error instead of help. Cobra's help path always
+	// returns nil from Execute, so the caller has to read this to exit
+	// non-zero — see UnknownSubcommand.
+	unknownSubcommandAnnotation = "omni/unknown-subcommand"
+)
+
+// NewGroupCommand builds a command that only groups subcommands (e.g. `omni
+// models`), with the handling that keeps a mistyped or missing subcommand from
+// looking like success: an unknown subcommand is a cobra-style error with
+// suggestions, and a bare group prints its help to stderr — both exit non-zero
+// with nothing on stdout. That covers `omni models list-branches --help`, which
+// is a typo rather than a help request; plain `omni <group> --help` is
+// unaffected (help on stdout, exit 0).
+func NewGroupCommand(use, short string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:         use,
+		Short:       short,
+		Annotations: map[string]string{groupAnnotation: "true"},
+		RunE:        GroupRunE,
+	}
+	cmd.SetHelpFunc(groupHelpFunc)
+	return cmd
+}
+
+// GroupRunE is the RunE for a command built by NewGroupCommand.
+func GroupRunE(cmd *cobra.Command, args []string) error {
+	// Past flag parsing: from here on, errors are runtime errors, not usage
+	// errors, so don't bury the message under the usage block.
+	cmd.SilenceUsage = true
+
+	if len(args) == 0 {
+		// The group produced no data, so its help goes to stderr and stdout
+		// stays empty for the pipe. The help text is the whole error report:
+		// letting cobra append its own "Error: ..." line would state the same
+		// failure twice, so silence it and let the non-zero exit speak.
+		renderHelp(cmd.ErrOrStderr(), cmd)
+		cmd.SilenceErrors = true
+		return fmt.Errorf("%q requires a subcommand", cmd.CommandPath())
+	}
+
+	return errors.New(unknownSubcommandMessage(cmd, args[0]))
+}
+
+// groupHelpFunc backs --help for group commands and, by inheritance, for their
+// subcommands. It only diverges from cobra's default when a group is asked for
+// help with an unresolved positional argument left over — `omni models
+// list-branches --help` — which is a typo, not a help request.
+func groupHelpFunc(cmd *cobra.Command, _ []string) {
+	leftover := cmd.Flags().Args()
+	if !isGroup(cmd) || len(leftover) == 0 {
+		renderHelp(cmd.OutOrStdout(), cmd)
+		return
+	}
+
+	cmd.Annotations[unknownSubcommandAnnotation] = leftover[0]
+	fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", cmd.ErrPrefix(), unknownSubcommandMessage(cmd, leftover[0]))
+}
+
+// UnknownSubcommand reports whether cmd's help output was really an
+// unknown-subcommand error. Cobra returns a nil error from Execute whenever it
+// handles the help flag, so main has to ask before choosing an exit code.
+func UnknownSubcommand(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd.Annotations[unknownSubcommandAnnotation]
+	return ok
+}
+
+func isGroup(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[groupAnnotation] == "true"
+}
+
+func unknownSubcommandMessage(cmd *cobra.Command, typed string) string {
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "unknown subcommand %q for %q", typed, cmd.CommandPath())
+	if names := subcommandSuggestions(cmd, typed); len(names) > 0 {
+		msg.WriteString("\n\nDid you mean this?")
+		for _, n := range names {
+			fmt.Fprintf(&msg, "\n\t%s", n)
+		}
+	}
+	fmt.Fprintf(&msg, "\n\nRun '%s --help' for a list of available subcommands", cmd.CommandPath())
+	return msg.String()
+}
+
+// renderHelp writes cobra's stock help text for cmd to w. It mirrors cobra's
+// defaultHelpFunc rather than calling cmd.Help(), which dispatches back through
+// HelpFunc — i.e. straight back into groupHelpFunc, forever.
+func renderHelp(w io.Writer, cmd *cobra.Command) {
+	desc := cmd.Long
+	if desc == "" {
+		desc = cmd.Short
+	}
+	if desc = strings.TrimRight(desc, " \t\n"); desc != "" {
+		fmt.Fprintf(w, "%s\n\n", desc)
+	}
+	if cmd.Runnable() || cmd.HasSubCommands() {
+		fmt.Fprint(w, cmd.UsageString())
+	}
+}
+
+// subcommandSuggestions returns close matches for a mistyped subcommand. It
+// extends cobra's Levenshtein/prefix matching with a reverse-prefix pass so an
+// over-specified guess like `models list-branches` still points at `list`
+// (the real answer being `list --model-kind BRANCH`).
+func subcommandSuggestions(cmd *cobra.Command, typed string) []string {
+	if cmd.DisableSuggestions {
+		return nil
+	}
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = 2
+	}
+
+	seen := map[string]bool{}
+	var names []string
+	for _, s := range cmd.SuggestionsFor(typed) {
+		if !seen[s] {
+			seen[s] = true
+			names = append(names, s)
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		if !sub.IsAvailableCommand() || seen[sub.Name()] {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(typed), strings.ToLower(sub.Name())+"-") {
+			seen[sub.Name()] = true
+			names = append(names, sub.Name())
+		}
+	}
+	return names
 }
 
 type paramInfo struct {
@@ -220,6 +358,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		Deprecated: deprecatedMsg(op),
 		Args:       cobra.ExactArgs(len(op.PathParams)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags parsed and args validated: anything that fails from here on
+			// (bad body, HTTP 4xx/5xx) is a runtime error, and dumping the usage
+			// block after it just buries the message — and, when the caller is
+			// piping, mixes prose into the stream.
+			cmd.SilenceUsage = true
+
 			// Substitute path params
 			path := op.Path
 			for i, p := range op.PathParams {
@@ -243,6 +387,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				if val != "" {
 					query.Set(qf.Param.Name, val)
 				}
+			}
+			if err := applyExtraQueryParams(cmd, queryFlags, query); err != nil {
+				return err
+			}
+			if err := checkRequiredQueryParams(queryFlags, query); err != nil {
+				return err
 			}
 			if len(query) > 0 {
 				path += "?" + query.Encode()
@@ -301,7 +451,10 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// canonical --branch-id no matter how the spec spelled the param.
 	cmd.Flags().SetNormalizeFunc(NormalizeFlagName)
 
-	// Register query params as flags
+	// Register query params as flags. Params the spec marks required are marked
+	// required on the flag too, so a missing one fails here instead of costing a
+	// round trip and a server 400.
+	hasRequiredQuery := false
 	for _, qf := range queryFlags {
 		desc := qf.Param.Description
 		if len(qf.Param.Enum) > 0 {
@@ -316,7 +469,14 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 			}
 			desc += qf.Note
 		}
+		if qf.Param.Required {
+			desc = strings.TrimSpace(desc + " (required)")
+		}
 		cmd.Flags().String(qf.Name, "", desc)
+		if qf.Param.Required {
+			cmd.MarkFlagRequired(qf.Name)
+			hasRequiredQuery = true
+		}
 	}
 
 	// If the operation accepts a body, add --body and --json-body flags.
@@ -340,6 +500,15 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		applyBodyShorthand(cmd, op, sh)
 	}
 
+	// Escape hatch for query params the spec doesn't declare: without it, an
+	// operation whose server requires an undeclared param is simply uncallable.
+	// Registered after every other flag and guarded so a spec param or shorthand
+	// flag that resolves to "query" keeps its own name instead of panicking the
+	// flag registration.
+	if cmd.Flags().Lookup(queryFlagName) == nil {
+		cmd.Flags().StringArray(queryFlagName, nil, "send an extra query parameter not declared in the spec (repeatable, key=value)")
+	}
+
 	// Describe the positional args in the long help. Cobra's usage line only
 	// shows the placeholders, so without this the spec's param descriptions
 	// (e.g. "branch name", not "branch UUID") never reach the reader.
@@ -354,9 +523,32 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	// Args/RunE, so the short-circuit wraps the final versions. Registered for
 	// every operation — bodyless ones still describe their args, query flags and
 	// response shape.
-	RegisterSchemaFlag(cmd, func(c *cobra.Command, names SchemaFlags) error {
+	names := RegisterSchemaFlag(cmd, func(c *cobra.Command, names SchemaFlags) error {
 		return emitBodySchema(c, op, names)
 	})
+
+	// Required query flags must not block --schema: it's pure local discovery
+	// with no API call, so it needs no params at all. Cobra runs PreRunE before
+	// ValidateRequiredFlags, so toggling the annotation here is enough. It's
+	// rewritten on every invocation (not just cleared) so a --schema run can't
+	// leave the requirement relaxed for a later one.
+	if hasRequiredQuery {
+		cmd.PreRunE = func(c *cobra.Command, args []string) error {
+			required := "true"
+			if schemaRequested(c, names.Schema) {
+				required = "false"
+			}
+			for _, qf := range queryFlags {
+				if !qf.Param.Required {
+					continue
+				}
+				if err := c.Flags().SetAnnotation(qf.Name, cobra.BashCompOneRequiredFlag, []string{required}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
 
 	return cmd
 }
@@ -370,7 +562,10 @@ func argumentsHelp(op *operationInfo, sh *BodyShorthand) string {
 	var lines []argLine
 
 	for _, p := range op.PathParams {
-		lines = append(lines, argLine{"<" + slugify(p.Name) + ">", firstLine(p.Description)})
+		// canonicalName, not slugify: the usage line spells positionals the
+		// canonical way ("<model-id>"), and a differently-spelled name here
+		// reads as a second, unrelated argument.
+		lines = append(lines, argLine{"<" + canonicalName(p.Name) + ">", firstLine(p.Description)})
 	}
 	if sh != nil {
 		for _, a := range sh.Args {
@@ -406,6 +601,83 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// queryFlagName is the generic escape hatch flag for query params the spec
+// doesn't declare.
+const queryFlagName = "query"
+
+// applyExtraQueryParams merges repeatable --query key=value pairs into the
+// query string. Keys are sent verbatim — the server sees exactly what the user
+// typed. A key that also has an explicitly-set declared flag is ambiguous and
+// errors rather than silently picking one; repeating the same key is allowed
+// and sends every value (some params are arrays).
+func applyExtraQueryParams(cmd *cobra.Command, queryFlags []queryFlag, query url.Values) error {
+	extras, err := cmd.Flags().GetStringArray(queryFlagName)
+	if err != nil {
+		// The flag isn't registered — a spec param claimed the name.
+		return nil
+	}
+	for _, kv := range extras {
+		key, val, ok := strings.Cut(kv, "=")
+		if !ok || key == "" {
+			return fmt.Errorf("invalid --query value %q: expected key=value", kv)
+		}
+		for _, qf := range queryFlags {
+			// Match the way flags themselves match: any spelling differing only
+			// in case or dash/underscore placement is the same parameter, under
+			// either the spec's name or the flag it was registered as.
+			if flagLookupKey(key) != flagLookupKey(qf.Param.Name) && flagLookupKey(key) != flagLookupKey(qf.Name) {
+				continue
+			}
+			if cmd.Flags().Changed(qf.Name) {
+				return fmt.Errorf("--query %s=... conflicts with --%s; set that parameter one way or the other", key, qf.Name)
+			}
+		}
+		query.Add(key, val)
+	}
+	return nil
+}
+
+// checkRequiredQueryParams verifies every spec-required query param ended up in
+// the query string with a non-empty value. MarkFlagRequired only proves the flag
+// was supplied, so `--q=` (or `--query q=`) would otherwise pass validation and
+// then be dropped as empty — exactly the server 400 round trip this is meant to
+// avoid. A value under either the spec spelling or the flag spelling counts,
+// mirroring how --query conflicts are detected.
+func checkRequiredQueryParams(queryFlags []queryFlag, query url.Values) error {
+	// Index the assembled query by the same normalized key flags match on, so a
+	// value that arrived through --query counts no matter which spelling of the
+	// param the user typed.
+	byKey := map[string][]string{}
+	for k, vals := range query {
+		key := flagLookupKey(k)
+		byKey[key] = append(byKey[key], vals...)
+	}
+
+	var missing []string
+	for _, qf := range queryFlags {
+		if !qf.Param.Required {
+			continue
+		}
+		if hasNonEmptyValue(byKey[flagLookupKey(qf.Param.Name)]) || hasNonEmptyValue(byKey[flagLookupKey(qf.Name)]) {
+			continue
+		}
+		missing = append(missing, `"`+qf.Name+`"`)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("required flag(s) %s cannot be empty", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func hasNonEmptyValue(vals []string) bool {
+	for _, v := range vals {
+		if v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // schemaRequested reports whether the schema discovery flag — registered under

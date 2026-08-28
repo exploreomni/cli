@@ -14,6 +14,21 @@ const agentHelpText = `# Omni CLI — Agent Guide
 All output is JSON to stdout. Errors are JSON to stderr.
 Use --compact for non-indented output (good for piping to jq).
 
+## Streams and exit codes
+On failure nothing is written to stdout — the API's error body, the error
+message, and any suggestions all go to stderr, and the exit code is non-zero.
+So an empty stdout always means "no data", never "parse this".
+
+A failed API call leaves exactly one JSON document on stderr:
+  {"error": "<message>", "status": 400, "body": {<the API's payload>}}
+"body" is omitted when the response wasn't JSON. A successful response that
+isn't JSON (query run streams text/ndjson) passes through to stdout unchanged.
+
+A group with no subcommand ("omni models") prints its help to stderr and exits
+1; an unrecognized subcommand ("omni models list-branches") is an error with
+suggestions, with or without --help. Use "omni <group> --help" to see the real
+subcommand names.
+
 ## Auth
 Set OMNI_API_TOKEN env var, or run: omni config init
 
@@ -144,6 +159,7 @@ available; binary values in its JSON object are interpreted as file paths.
                   then exit (works on every API command)
   --field PATH    With --schema: drill into a dotted field path of the body
   --depth N       With --schema: cap nesting depth (lower = smaller)
+  --query K=V     Extra query parameter not declared in the spec (repeatable)
 
 ## Tips
 - Use "omni ai generate-query" to answer data questions — it picks fields and filters for you.
@@ -155,6 +171,8 @@ available; binary values in its JSON object are interpreted as file paths.
   The few hand-written commands (config *, agent-help, models create-branch,
   users set-attributes) have no Arguments section — read their Usage line.
 - Query parameters are flags: omni models list --page-size 10
+- Params the spec marks required are enforced before the request; a missing one fails locally.
+- If the server demands a query param the spec doesn't declare, send it with --query key=value (repeatable).
 - Flag names are kebab-case, and spelling is forgiving: case, dashes and
   underscores are ignored, so --branch-id, --branchId, --branch_id and
   --branchid all mean the same flag. --help always shows the canonical form.
