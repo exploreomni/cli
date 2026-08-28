@@ -168,6 +168,10 @@ available; binary values in its JSON object are interpreted as file paths.
   Generated API commands describe every positional in an "Arguments:" section in
   their --help. Read it — some positionals take a NAME, not a UUID:
     omni models merge-branch <model-id> <branch-name>   # 2nd arg is the NAME
+    omni models delete-branch <model-id> <branch-name>  # same: NAME, not the branch UUID
+    omni labels get <name>                              # labels are addressed by name, not id
+    omni documents add-label <identifier> <label-name>
+    omni users get-model-roles <membership-id>          # membership ID, not the user ID
   The few hand-written commands (config *, agent-help, models create-branch,
   users set-attributes) have no Arguments section — read their Usage line.
 - Query parameters are flags: omni models list --page-size 10

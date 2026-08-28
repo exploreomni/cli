@@ -185,7 +185,7 @@ func TestOutputResponseTo_NonJSONSuccessPassesThrough(t *testing.T) {
 		// A CSV whose last row has no trailing newline: appending one would
 		// change the file the user redirected to disk.
 		{"csv without trailing newline", "id,name\n1,widget"},
-		// Binary payloads (XLSX with --result-type) must survive verbatim too.
+		// Binary payloads (XLSX from a query run body with resultType) must survive verbatim too.
 		{"binary", "PK\x03\x04\x14\x00\x00\x00\x08\x00"},
 	}
 	for _, tc := range bodies {
@@ -332,5 +332,17 @@ func TestOutputResponseTo_SuccessGoesToStdout(t *testing.T) {
 				t.Errorf("stderr should be empty, got %q", stderr.String())
 			}
 		})
+	}
+}
+
+func TestExtractErrorDetail_NestedErrorObject(t *testing.T) {
+	body := json.RawMessage(`{"error":{"code":403,"message":"Invalid bearer token"}}`)
+	if got := extractErrorDetail(body, []byte(body), 403); got != "Invalid bearer token" {
+		t.Errorf("extractErrorDetail = %q, want the nested message", got)
+	}
+	// An object without a recognisable message still falls back to the raw body.
+	body = json.RawMessage(`{"error":{"code":403}}`)
+	if got := extractErrorDetail(body, []byte(body), 403); got != string(body) {
+		t.Errorf("extractErrorDetail = %q, want raw body fallback", got)
 	}
 }

@@ -61,6 +61,6 @@ All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for n
 
 Nothing is written to stdout on failure: HTTP ≥400 bodies, error messages, and subcommand suggestions all go to stderr, and the exit code is non-zero. A failed API call leaves exactly one JSON document on stderr — `{"error": <detail>, "status": <code>, "body": <the API's payload>}` — so `2>err.json` stays parseable; nothing else is printed alongside it. Runtime errors don't print the usage block (flag-parse errors still do).
 
-A 2xx body that isn't JSON (e.g. `query run`'s `text/ndjson` stream, or CSV/XLSX with `--result-type`) is passed through to stdout unchanged and counts as success. The body is read in full before anything is written, so a truncated response never leaves a partial payload on stdout.
+A 2xx body that isn't JSON (e.g. `query run`'s `text/ndjson` stream, or CSV/XLSX when `query run`'s body sets `"resultType"`) is passed through to stdout unchanged and counts as success. The body is read in full before anything is written, so a truncated response never leaves a partial payload on stdout.
 
 A group command with no subcommand (`omni models`) prints its help to stderr and exits 1; an unknown subcommand errors with suggestions, `--help` or not (`omni models list-branches --help` is a typo, not a help request).
