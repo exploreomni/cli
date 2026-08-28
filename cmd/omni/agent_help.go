@@ -94,6 +94,10 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ### Search Omni documentation
   omni ai search-omni-docs --body '{"query":"how do I..."}'
 
+### Upload a CSV
+Multipart body fields are generated as flags; binary fields take file paths.
+  omni uploads create --file ./people.csv --model-id MODEL_ID --view-name people
+
 ## Command Groups
   ai            AI-powered query generation, jobs, doc search
   ai-eval       AI eval prompt set management
@@ -137,12 +141,20 @@ and maps, so you can name a leaf without knowing the container shape:
   omni documents v2-create --schema --field queryPresentations.data # just the tiles map
   omni documents v2-create --schema --field queryPresentations.data.query
 
+For multipart/form-data commands, top-level schema properties are also exposed
+as flags. Binary properties are labeled "file path" in --help. --body remains
+available; binary values in its JSON object are interpreted as file paths.
+
 ## Common Flags
   --compact       Non-indented JSON output
   --token TOKEN   API token (overrides env/config)
   --base-url URL  API base URL (overrides config)
   --profile NAME  Config profile to use
-  --body JSON     Request body (JSON string or "-" for stdin)
+  --body JSON     Request body: JSON string, @path/to/file.json, or "-" for stdin
+                  (a bare path is rejected client-side — prefix it with @)
+                  For multipart/form-data endpoints (uploads create, uploads
+                  replace-data) the JSON is a map of field values; binary
+                  fields take file paths.
   --schema        Print args, flags, body schema + example, and response shape,
                   then exit (works on every API command)
   --field PATH    With --schema: drill into a dotted field path of the body

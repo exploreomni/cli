@@ -24,10 +24,11 @@ import (
 
 // APIRequest is passed to the executor callback when a generated command runs.
 type APIRequest struct {
-	Cmd    *cobra.Command
-	Method string
-	Path   string // fully resolved path with query string
-	Body   []byte // nil for GET/DELETE
+	Cmd         *cobra.Command
+	Method      string
+	Path        string // fully resolved path with query string
+	Body        []byte // nil for GET/DELETE
+	ContentType string // request body media type; defaults to application/json when empty
 }
 
 // Executor is the callback that actually makes the HTTP request.
@@ -227,18 +228,20 @@ type paramInfo struct {
 }
 
 type operationInfo struct {
-	Tag         string
-	OperationID string
-	Summary     string
-	Description string
-	Method      string
-	Path        string
-	PathParams  []paramInfo
-	QueryParams []paramInfo
-	HasBody     bool
-	BodySchema  *base.SchemaProxy // request body schema, when HasBody
-	Response    *responseInfo     // success (2xx) response, when the spec declares one
-	Deprecated  bool
+	Tag           string
+	OperationID   string
+	Summary       string
+	Description   string
+	Method        string
+	Path          string
+	PathParams    []paramInfo
+	QueryParams   []paramInfo
+	HasBody       bool
+	BodySchema    *base.SchemaProxy // request body schema, when HasBody
+	BodyMediaType string
+	BodyFields    []multipartFieldInfo
+	Response      *responseInfo // success (2xx) response, when the spec declares one
+	Deprecated    bool
 }
 
 // responseInfo captures the operation's success response so --schema can show
@@ -313,7 +316,14 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 		// Check for request body
 		if op.RequestBody != nil {
 			info.HasBody = true
-			info.BodySchema = requestBodySchema(op.RequestBody)
+			mediaType, media := requestBodyMediaType(op.RequestBody)
+			info.BodyMediaType = mediaType
+			if media != nil {
+				info.BodySchema = media.Schema
+				if mediaType == "multipart/form-data" {
+					info.BodyFields = multipartFields(media.Schema, media.Encoding)
+				}
+			}
 		}
 
 		info.Response = successResponse(op.Responses)
@@ -372,7 +382,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 			for _, qf := range queryFlags {
 				val, err := cmd.Flags().GetString(qf.Name)
 				if err != nil {
-					continue
+					return err
 				}
 				if val != "" {
 					query.Set(qf.Param.Name, val)
@@ -388,39 +398,50 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 				path += "?" + query.Encode()
 			}
 
-			// Read body from stdin or flags
+			// Read body from stdin, a file, or the flag value itself.
 			var body []byte
+			contentType := op.BodyMediaType
 			if op.HasBody {
-				bodyFlag, _ := cmd.Flags().GetString("body")
-				jsonBodyFlag, _ := cmd.Flags().GetString("json-body")
-
-				if bodyFlag != "" && jsonBodyFlag != "" {
+				// Flag selection goes by Changed, not by value: an explicitly
+				// empty --body is a mistake worth reporting rather than an
+				// unset flag.
+				if cmd.Flags().Changed("body") && cmd.Flags().Changed("json-body") {
 					return fmt.Errorf("cannot use both --body and --json-body; use one or the other")
 				}
 
-				effectiveBody := bodyFlag
-				if jsonBodyFlag != "" {
-					effectiveBody = jsonBodyFlag
+				flagName := "body"
+				if cmd.Flags().Changed("json-body") {
+					flagName = "json-body"
 				}
 
-				if effectiveBody == "-" || effectiveBody == "" {
-					if effectiveBody == "-" {
-						var err error
-						body, err = readStdin()
-						if err != nil {
-							return fmt.Errorf("reading stdin: %w", err)
-						}
+				bodyProvided := cmd.Flags().Changed(flagName)
+				if bodyProvided {
+					raw, _ := cmd.Flags().GetString(flagName)
+					var err error
+					body, err = resolveBody(raw, flagName)
+					if err != nil {
+						// A body input error is self-explanatory; the usage
+						// block would bury the hint.
+						cmd.SilenceUsage = true
+						return err
 					}
-				} else if effectiveBody != "" {
-					body = []byte(effectiveBody)
+				}
+
+				if op.BodyMediaType == "multipart/form-data" {
+					var err error
+					body, contentType, err = buildMultipartBody(cmd, body, bodyProvided, op.BodyFields)
+					if err != nil {
+						return err
+					}
 				}
 			}
 
 			return exec(APIRequest{
-				Cmd:    cmd,
-				Method: op.Method,
-				Path:   path,
-				Body:   body,
+				Cmd:         cmd,
+				Method:      op.Method,
+				Path:        path,
+				Body:        body,
+				ContentType: contentType,
 			})
 		},
 	}
@@ -458,11 +479,19 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		}
 	}
 
-	// If the operation accepts a body, add --body and --json-body flags
+	// If the operation accepts a body, add --body and --json-body flags.
 	if op.HasBody {
-		cmd.Flags().String("body", "", `request body as JSON string, or "-" for stdin (run with --schema to see its shape)`)
-		cmd.Flags().String("json-body", "", `request body as JSON string, or "-" for stdin (alias for --body)`)
+		bodyHelp := `request body as JSON string, "@path/to/file.json" to read a file, or "-" for stdin (run with --schema to see its shape)`
+		if op.BodyMediaType == "multipart/form-data" {
+			bodyHelp = `multipart fields as JSON string, "@path/to/file.json", or "-" for stdin; binary field values are file paths`
+		}
+		cmd.Flags().String("body", "", bodyHelp)
+		cmd.Flags().String("json-body", "", `request body as JSON string, "@path/to/file.json", or "-" for stdin (alias for --body)`)
 		cmd.Flags().MarkHidden("json-body")
+
+		if op.BodyMediaType == "multipart/form-data" {
+			registerMultipartFlags(cmd, op.BodyFields)
+		}
 	}
 
 	// Apply body shorthand if one exists for this operation
@@ -658,14 +687,45 @@ func schemaRequested(cmd *cobra.Command, name string) bool {
 	return err == nil && v
 }
 
-// requestBodySchema returns the schema for a request body, preferring the
-// application/json media type and falling back to the first declared one.
-func requestBodySchema(rb *v3.RequestBody) *base.SchemaProxy {
-	if rb == nil {
-		return nil
+// requestBodyMediaType returns the media type and definition the CLI will use,
+// preferring application/json for backward compatibility and otherwise using
+// the first declared media type. Entries with no schema are skipped, so a
+// schema-less application/json stub never shadows a real multipart definition.
+func requestBodyMediaType(rb *v3.RequestBody) (string, *v3.MediaType) {
+	if rb == nil || rb.Content == nil {
+		return "", nil
 	}
-	_, schema := pickMediaType(rb.Content)
-	return schema
+	var firstType string
+	var first *v3.MediaType
+	for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
+		mt := pair.Value()
+		if mt == nil || mt.Schema == nil {
+			continue
+		}
+		if pair.Key() == "application/json" {
+			return pair.Key(), mt
+		}
+		if first == nil {
+			firstType = pair.Key()
+			first = mt
+		}
+	}
+	return firstType, first
+}
+
+// bodyFlagIsJSON reports whether the --body flag value is JSON, and so worth
+// validating client-side. A JSON body is sent verbatim; a multipart body takes
+// a JSON object of field values that buildMultipartBody turns into form parts.
+// A body with no declared content defaults to JSON — that's what the CLI sends.
+// Any other media type passes --body through as raw bytes, unvalidated.
+func (op *operationInfo) bodyFlagIsJSON() bool {
+	switch {
+	case op.BodyMediaType == "", op.BodyMediaType == "application/json":
+		return true
+	case op.BodyMediaType == "multipart/form-data":
+		return true
+	}
+	return strings.HasSuffix(op.BodyMediaType, "+json")
 }
 
 // successResponse returns the operation's success response: the lowest declared

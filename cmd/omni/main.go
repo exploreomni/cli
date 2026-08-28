@@ -123,7 +123,7 @@ func executeAPICall(req openapi.APIRequest) error {
 	// scripts piping JSON shouldn't get decorative noise on stderr.
 	sp := maybeStartSpinner(format)
 
-	resp, err := auth.Do(cfg, req.Method, req.Path, req.Body)
+	resp, err := auth.DoWithContentType(cfg, req.Method, req.Path, req.Body, req.ContentType)
 	sp.Stop()
 	if err != nil {
 		return err

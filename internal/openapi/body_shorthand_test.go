@@ -276,10 +276,20 @@ func TestFlexibleArgs_ShorthandMode(t *testing.T) {
 	}
 }
 
+// mustSetFlag marks a flag as explicitly provided, the way parsing a command
+// line does — body mode is selected by Changed, not by the value.
+func mustSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
+	t.Helper()
+	if err := cmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("set --%s: %v", name, err)
+	}
+}
+
 func TestFlexibleArgs_BodyMode(t *testing.T) {
 	cmd := &cobra.Command{Use: "test"}
-	cmd.Flags().String("body", `{"key":"val"}`, "")
+	cmd.Flags().String("body", "", "")
 	cmd.Flags().String("json-body", "", "")
+	mustSetFlag(t, cmd, "body", `{"key":"val"}`)
 	validator := flexibleArgs(1, 1)
 
 	// 1 arg (path param only) should pass when --body is set
@@ -296,7 +306,8 @@ func TestFlexibleArgs_BodyMode(t *testing.T) {
 func TestFlexibleArgs_JsonBodyMode(t *testing.T) {
 	cmd := &cobra.Command{Use: "test"}
 	cmd.Flags().String("body", "", "")
-	cmd.Flags().String("json-body", `{"key":"val"}`, "")
+	cmd.Flags().String("json-body", "", "")
+	mustSetFlag(t, cmd, "json-body", `{"key":"val"}`)
 	validator := flexibleArgs(1, 1)
 
 	if err := validator(cmd, []string{"path-param"}); err != nil {

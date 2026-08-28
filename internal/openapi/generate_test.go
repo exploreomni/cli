@@ -1744,6 +1744,7 @@ type specOperation struct {
 	PathParams    []string
 	RequiredQuery []string // flag names of required query params
 	HasBody       bool
+	BodyMedia     string
 }
 
 // parseSpecOperations reads the OpenAPI spec directly (bypassing our generator)
@@ -1807,10 +1808,18 @@ func parseSpecOperations(t *testing.T, specData []byte) []specOperation {
 				PathParams:    pathParams,
 				RequiredQuery: requiredQuery,
 				HasBody:       op.RequestBody != nil,
+				BodyMedia:     specBodyMediaType(op.RequestBody),
 			})
 		}
 	}
 	return ops
+}
+
+// specBodyMediaType names the media type the generator will pick for a request
+// body, so the coverage table records what each operation is sent as.
+func specBodyMediaType(rb *v3.RequestBody) string {
+	mediaType, _ := requestBodyMediaType(rb)
+	return mediaType
 }
 
 func TestSpecCoverage(t *testing.T) {
@@ -1906,6 +1915,7 @@ func TestSpecCoverage(t *testing.T) {
 				failures = append(failures, fmt.Sprintf("%s: no RunE", key))
 				continue
 			}
+
 			if err := sub.RunE(sub, args); err != nil {
 				failures = append(failures, fmt.Sprintf("%s: RunE: %v", key, err))
 				continue
