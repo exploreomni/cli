@@ -185,7 +185,7 @@ func TestOutputResponseTo_NonJSONSuccessPassesThrough(t *testing.T) {
 		// A CSV whose last row has no trailing newline: appending one would
 		// change the file the user redirected to disk.
 		{"csv without trailing newline", "id,name\n1,widget"},
-		// Binary payloads (XLSX with --result-type) must survive verbatim too.
+		// Binary payloads (XLSX from a query run body with resultType) must survive verbatim too.
 		{"binary", "PK\x03\x04\x14\x00\x00\x00\x08\x00"},
 	}
 	for _, tc := range bodies {
