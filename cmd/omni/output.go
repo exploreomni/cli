@@ -64,8 +64,8 @@ func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format stri
 		return nil
 	}
 
-	// Non-JSON payloads (`query run`'s text/ndjson stream, CSV/XLSX with
-	// --result-type) go out unchanged: no re-indenting, no appended newline,
+	// Non-JSON payloads (`query run`'s text/ndjson stream, or CSV/XLSX when
+	// its body sets resultType) go out unchanged: no re-indenting, no appended newline,
 	// so a redirect to a file reproduces the response byte for byte.
 	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && !json.Valid(trimmed) {
 		_, err := stdout.Write(data)
@@ -106,8 +106,19 @@ func extractErrorDetail(body json.RawMessage, raw []byte, status int) string {
 		var obj map[string]any
 		if err := json.Unmarshal(body, &obj); err == nil {
 			for _, key := range []string{"detail", "message", "error"} {
-				if s, ok := obj[key].(string); ok && s != "" {
-					return s
+				switch v := obj[key].(type) {
+				case string:
+					if v != "" {
+						return v
+					}
+				case map[string]any:
+					// Auth failures arrive as {"error":{"code":403,"message":"..."}}:
+					// surface the message rather than the whole object re-serialised.
+					for _, inner := range []string{"message", "detail"} {
+						if s, ok := v[inner].(string); ok && s != "" {
+							return s
+						}
+					}
 				}
 			}
 		}

@@ -334,3 +334,15 @@ func TestOutputResponseTo_SuccessGoesToStdout(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractErrorDetail_NestedErrorObject(t *testing.T) {
+	body := json.RawMessage(`{"error":{"code":403,"message":"Invalid bearer token"}}`)
+	if got := extractErrorDetail(body, []byte(body), 403); got != "Invalid bearer token" {
+		t.Errorf("extractErrorDetail = %q, want the nested message", got)
+	}
+	// An object without a recognisable message still falls back to the raw body.
+	body = json.RawMessage(`{"error":{"code":403}}`)
+	if got := extractErrorDetail(body, []byte(body), 403); got != string(body) {
+		t.Errorf("extractErrorDetail = %q, want raw body fallback", got)
+	}
+}
