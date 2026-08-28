@@ -1137,3 +1137,55 @@ func TestSchema_StaticDepthLimitMatchesDescriber(t *testing.T) {
 		t.Errorf("static truncation = %s, describer truncation = %s", got, want)
 	}
 }
+
+// collidingQueryTestSpec has query params whose canonical flag names collide:
+// "baseUrl" with the global --base-url, and "branchId"/"branch_id" with each
+// other. Flag registration renames these (see resolveQueryFlags); --schema must
+// advertise the renamed flags, not the bare canonical spelling.
+const collidingQueryTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "test", "version": "1.0"},
+  "paths": {
+    "/api/v1/widgets": {
+      "get": {
+        "operationId": "widgetsList",
+        "tags": ["widgets"],
+        "parameters": [
+          {"name": "baseUrl", "in": "query", "description": "Filter by URL", "schema": {"type": "string"}},
+          {"name": "branchId", "in": "query", "description": "Branch (camel)", "schema": {"type": "string"}},
+          {"name": "branch_id", "in": "query", "description": "Branch (snake)", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  }
+}`
+
+func TestSchema_QueryFlagsReflectCollisionRenames(t *testing.T) {
+	doc, err := runSchemaCmd(t, collidingQueryTestSpec, "list")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := map[string]string{}
+	for _, q := range doc.QueryParams {
+		got[q.Name] = q.Flag
+	}
+	want := map[string]string{
+		"baseUrl":   "--param-base-url",
+		"branchId":  "--branch-id",
+		"branch_id": "--branch-id-2",
+	}
+	for name, flag := range want {
+		if got[name] != flag {
+			t.Errorf("query param %q advertised as %q, want %q (the flag the CLI actually registers)", name, got[name], flag)
+		}
+	}
+
+	// And the advertised flags must all be accepted by the command itself.
+	cmd := subcommand(t, collidingQueryTestSpec, "list")
+	for _, flag := range want {
+		if cmd.Flags().Lookup(strings.TrimPrefix(flag, "--")) == nil {
+			t.Errorf("--schema advertises %s but the command does not register it", flag)
+		}
+	}
+}
