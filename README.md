@@ -38,6 +38,19 @@ make build
 
 The binary is written to `./bin/omni`.
 
+### Updates
+
+In an interactive terminal, Omni checks for a newer stable release at most
+once every 24 hours and prints an upgrade notice after a successful command.
+The check is best-effort and is skipped in CI and when output is redirected.
+Set `OMNI_NO_UPDATE_NOTIFIER=1` to disable it.
+
+To check explicitly, including from an agent or script:
+
+```bash
+omni update check --format json
+```
+
 ## Quick start
 
 ### Configure a profile

@@ -10,6 +10,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
+	"github.com/exploreomni/omni-cli/internal/updatecheck"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -28,6 +29,7 @@ func init() {
 }
 
 func main() {
+	checker := updatecheck.New()
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
@@ -60,6 +62,7 @@ func main() {
 	// Hand-written commands (not from spec)
 	addConfigCommands(root)
 	addAgentHelpCommand(root)
+	addUpdateCommand(root, checker, version)
 
 	// Load OpenAPI spec and generate API commands
 	specData, err := specFS.ReadFile("openapi.json")
@@ -86,8 +89,11 @@ func main() {
 	// help flag, including for `omni models list-branches --help`, where the
 	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
 	// command that ran whether that's what happened.
+	automaticUpdate := startAutomaticUpdate(checker, version, os.Args[1:], os.Stdout, os.Stderr)
 	cmd, err := root.ExecuteC()
-	if err != nil || openapi.UnknownSubcommand(cmd) {
+	success := err == nil && !openapi.UnknownSubcommand(cmd)
+	automaticUpdate.finish(success, os.Stderr)
+	if !success {
 		os.Exit(1)
 	}
 }
