@@ -14,7 +14,7 @@ const agentHelpText = `# Omni CLI — Agent Guide
 All output is JSON to stdout. Errors are JSON to stderr.
 Use --compact for non-indented output (good for piping to jq).
 
-Check once per agent session whether this CLI is current:
+Automatic update notices are disabled for non-interactive runs. Check explicitly:
   omni update check --format json --compact
 
 ## Streams and exit codes
