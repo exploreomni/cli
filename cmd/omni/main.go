@@ -29,6 +29,8 @@ func init() {
 }
 
 func main() {
+	auth.SetVersion(version)
+
 	checker := updatecheck.New()
 	var updater automaticUpdate
 	root := &cobra.Command{
