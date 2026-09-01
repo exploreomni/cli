@@ -10,12 +10,10 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 )
 
-// userAgent identifies this CLI to the API. SetVersion replaces the placeholder
-// with the running build's version at startup.
 var userAgent = "omni-cli"
 
-// SetVersion sets the version reported in the User-Agent header. An empty or
-// unknown version leaves the bare product token in place.
+// SetVersion sets the version reported in the User-Agent header. Dev and
+// unknown builds keep the bare product token.
 func SetVersion(version string) {
 	version = strings.TrimSpace(version)
 	if version == "" || version == "dev" {
