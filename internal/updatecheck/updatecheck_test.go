@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -64,12 +66,17 @@ func newTestChecker(t *testing.T, statePath string, clk *clock, rt roundTripFunc
 }
 
 func TestCheckAlwaysFetchesAndCaches(t *testing.T) {
+	// The release endpoint gets the same User-Agent as the API, not a
+	// version string this package formats itself.
+	useragent.Set("1.2.0")
+	t.Cleanup(func() { useragent.Set("dev") })
+
 	clk := newClock()
 	var requests int
 	checker := newTestChecker(t, filepath.Join(t.TempDir(), "update.json"), clk, func(req *http.Request) (*http.Response, error) {
 		requests++
-		if got := req.Header.Get("User-Agent"); got != "omni-cli/v1.2.0" {
-			t.Errorf("User-Agent = %q", got)
+		if got := req.Header.Get("User-Agent"); got != "omni-cli/1.2.0" {
+			t.Errorf("User-Agent = %q, want %q", got, "omni-cli/1.2.0")
 		}
 		return releaseResponse(200, releaseBody), nil
 	})

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 // Do executes an authenticated HTTP request against the Omni API.
@@ -44,6 +45,7 @@ func DoWithContentType(cfg *config.ResolvedConfig, method, path string, body []b
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", useragent.String())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

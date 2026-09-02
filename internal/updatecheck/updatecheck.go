@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 const (
@@ -111,7 +113,7 @@ func statePathFromCacheDir(dir string, err error) string {
 // release endpoint and returns what it fetched; caching is best-effort, so a
 // broken or read-only cache never turns a successful check into a failure.
 func (c *Checker) Check(ctx context.Context, currentVersion string) (Result, error) {
-	release, err := c.fetch(ctx, currentVersion)
+	release, err := c.fetch(ctx)
 	if err != nil {
 		return Result{}, err
 	}
@@ -137,7 +139,7 @@ func (c *Checker) CheckAutomatic(ctx context.Context, currentVersion string) (Re
 		return result(currentVersion, cached.LatestRelease), nil
 	}
 
-	release, err := c.fetch(ctx, currentVersion)
+	release, err := c.fetch(ctx)
 	c.finishCheck(lease, release, err)
 	if err != nil {
 		if validVersion(cached.LatestRelease.Version) {
@@ -296,13 +298,13 @@ func newLeaseID() (string, error) {
 	return hex.EncodeToString(buf[:]), nil
 }
 
-func (c *Checker) fetch(ctx context.Context, currentVersion string) (Release, error) {
+func (c *Checker) fetch(ctx context.Context) (Release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Endpoint, nil)
 	if err != nil {
 		return Release{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "omni-cli/"+currentVersion)
+	req.Header.Set("User-Agent", useragent.String())
 
 	resp, err := c.Client.Do(req)
 	if err != nil {

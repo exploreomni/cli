@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 // These tests use httptest.NewServer to spin up a local HTTP server, then
@@ -17,6 +18,10 @@ import (
 // Verify that every request includes the correct auth and content headers.
 // The Omni API requires Bearer token auth and JSON content type.
 func TestDo_SetsHeaders(t *testing.T) {
+	// Restore the package default; nothing has set a version at this point.
+	t.Cleanup(func() { useragent.Set("dev") })
+	useragent.Set("9.9.9")
+
 	var gotHeaders http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeaders = r.Header
@@ -43,6 +48,9 @@ func TestDo_SetsHeaders(t *testing.T) {
 	}
 	if got := gotHeaders.Get("Accept"); got != "application/json" {
 		t.Errorf("Accept = %q, want %q", got, "application/json")
+	}
+	if got := gotHeaders.Get("User-Agent"); got != "omni-cli/9.9.9" {
+		t.Errorf("User-Agent = %q, want %q", got, "omni-cli/9.9.9")
 	}
 }
 
