@@ -815,6 +815,19 @@ func TestSchema_ParamNameCollisionFallsBackToPrefixedFlags(t *testing.T) {
 	}
 }
 
+func TestIsSchemaRequestTracksTheResolvedFlagName(t *testing.T) {
+	sub := subcommand(t, collidingParamsSpec, "list")
+	if IsSchemaRequest(sub) {
+		t.Fatal("schema mode reported before its flag was set")
+	}
+	if err := sub.Flags().Set("schema-doc", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if !IsSchemaRequest(sub) {
+		t.Fatal("renamed --schema-doc flag was not recognized as schema mode")
+	}
+}
+
 // The renamed refinement flags must work, and the renaming must be visible in
 // --help so a reader can find them.
 func TestSchema_RenamedRefinementFlagsWork(t *testing.T) {

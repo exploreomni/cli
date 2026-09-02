@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/gofrs/flock v0.13.0
 	github.com/pb33f/libopenapi v0.34.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

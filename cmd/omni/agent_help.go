@@ -14,6 +14,9 @@ const agentHelpText = `# Omni CLI — Agent Guide
 All output is JSON to stdout. Errors are JSON to stderr.
 Use --compact for non-indented output (good for piping to jq).
 
+Automatic update notices are disabled for non-interactive runs. Check explicitly:
+  omni update check --format json --compact
+
 ## Streams and exit codes
 On failure nothing is written to stdout — the API's error body, the error
 message, and any suggestions all go to stderr, and the exit code is non-zero.
@@ -117,6 +120,7 @@ Multipart body fields are generated as flags; binary fields take file paths.
   user-attributes  User attribute definitions
   users         User/group role management, set user attribute values
   config        CLI configuration profiles
+  update        Check for CLI updates
 
 ## Discovering request and response shapes
 Every API command accepts --schema, including GET/DELETE commands that take no

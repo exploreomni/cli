@@ -38,6 +38,22 @@ make build
 
 The binary is written to `./bin/omni`.
 
+### Updates
+
+In an interactive terminal, Omni waits 24 hours after a successful check for a
+newer stable release and prints an upgrade notice after a successful command.
+A failed or interrupted check backs off for 15 minutes rather than retrying on
+the next command, and concurrent runs coordinate through a lock file in the
+cache directory, so several shells make one request between them. The check is
+best-effort and is skipped in CI and whenever output isn't human-formatted on a
+terminal. Set `OMNI_NO_UPDATE_NOTIFIER=1` to disable it.
+
+To check explicitly, including from an agent or script:
+
+```bash
+omni update check --format json
+```
+
 ## Quick start
 
 ### Configure a profile

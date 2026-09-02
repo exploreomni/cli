@@ -10,6 +10,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
+	"github.com/exploreomni/omni-cli/internal/updatecheck"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -28,11 +29,17 @@ func init() {
 }
 
 func main() {
+	checker := updatecheck.New()
+	var updater automaticUpdate
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// This hook runs immediately before RunE, so the check overlaps
+			// with the work the user asked for.
+			updater = startAutomaticUpdate(checker, version, cmd, os.Stdout, os.Stderr)
+
 			// Skip auth for config commands
 			if cmd.Name() == "init" || cmd.Name() == "show" || cmd.Name() == "use" || cmd.Name() == "login" || cmd.Name() == "logout" || cmd.Name() == "config" {
 				return nil
@@ -60,6 +67,7 @@ func main() {
 	// Hand-written commands (not from spec)
 	addConfigCommands(root)
 	addAgentHelpCommand(root)
+	addUpdateCommand(root, checker, version)
 
 	// Load OpenAPI spec and generate API commands
 	specData, err := specFS.ReadFile("openapi.json")
@@ -87,7 +95,9 @@ func main() {
 	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
 	// command that ran whether that's what happened.
 	cmd, err := root.ExecuteC()
-	if err != nil || openapi.UnknownSubcommand(cmd) {
+	success := err == nil && !openapi.UnknownSubcommand(cmd)
+	updater.finish(success, os.Stderr)
+	if !success {
 		os.Exit(1)
 	}
 }
