@@ -8,24 +8,18 @@ import (
 	"strings"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
-
-var userAgent = "omni-cli"
 
 // SetVersion sets the version reported in the User-Agent header. Dev and
 // unknown builds keep the bare product token.
 func SetVersion(version string) {
-	version = strings.TrimSpace(version)
-	if version == "" || version == "dev" {
-		userAgent = "omni-cli"
-		return
-	}
-	userAgent = "omni-cli/" + strings.TrimPrefix(version, "v")
+	useragent.Set(version)
 }
 
 // UserAgent returns the User-Agent header sent with API requests.
 func UserAgent() string {
-	return userAgent
+	return useragent.String()
 }
 
 // Do executes an authenticated HTTP request against the Omni API.
@@ -62,7 +56,7 @@ func DoWithContentType(cfg *config.ResolvedConfig, method, path string, body []b
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", useragent.String())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -17,8 +17,8 @@ import (
 // Verify that every request includes the correct auth and content headers.
 // The Omni API requires Bearer token auth and JSON content type.
 func TestDo_SetsHeaders(t *testing.T) {
-	original := UserAgent()
-	t.Cleanup(func() { userAgent = original })
+	// Restore the package default; nothing has set a version at this point.
+	t.Cleanup(func() { SetVersion("dev") })
 	SetVersion("9.9.9")
 
 	var gotHeaders http.Header
@@ -54,8 +54,8 @@ func TestDo_SetsHeaders(t *testing.T) {
 }
 
 func TestSetVersion(t *testing.T) {
-	original := UserAgent()
-	t.Cleanup(func() { userAgent = original })
+	// Restore the package default; nothing has set a version at this point.
+	t.Cleanup(func() { SetVersion("dev") })
 
 	tests := []struct {
 		version string
@@ -65,6 +65,7 @@ func TestSetVersion(t *testing.T) {
 		{"v1.2.3", "omni-cli/1.2.3"},
 		{" v1.2.3 ", "omni-cli/1.2.3"},
 		{"dev", "omni-cli"},
+		{"(devel)", "omni-cli"},
 		{"", "omni-cli"},
 	}
 	for _, tt := range tests {

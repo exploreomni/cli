@@ -1,12 +1,17 @@
 package oauth
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/exploreomni/omni-cli/internal/useragent"
+	"golang.org/x/oauth2"
 )
 
 func TestConfig_BuildsExpectedURLs(t *testing.T) {
@@ -220,5 +225,60 @@ func TestLogin_MissingCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no authorization code") {
 		t.Errorf("error = %q, want it to mention missing code", err.Error())
+	}
+}
+
+// The token endpoint must see the same CLI User-Agent as our API requests —
+// x/oauth2 builds those requests itself, so the header only lands if we hand
+// it a client that stamps it on.
+func TestLogin_SendsUserAgentToTokenEndpoint(t *testing.T) {
+	useragent.Set("9.9.9")
+	t.Cleanup(func() { useragent.Set("dev") })
+
+	var gotUA string
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"a","refresh_token":"r","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer tokenSrv.Close()
+
+	stubBrowser(t, func(authURL string) {
+		redirect, state := extractRedirect(t, authURL)
+		hitCallback(t, redirect, url.Values{"code": {"test-code"}, "state": {state}})
+	})
+
+	if _, err := Login(tokenSrv.URL); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if gotUA != "omni-cli/9.9.9" {
+		t.Errorf("token endpoint User-Agent = %q, want %q", gotUA, "omni-cli/9.9.9")
+	}
+}
+
+// Token refresh goes through a TokenSource rather than Login, so it needs the
+// same context to carry the User-Agent client.
+func TestContext_TokenSourceSendsUserAgent(t *testing.T) {
+	useragent.Set("9.9.9")
+	t.Cleanup(func() { useragent.Set("dev") })
+
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"r2","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	src := Config(srv.URL, "").TokenSource(Context(context.Background()), &oauth2.Token{
+		AccessToken:  "stale",
+		RefreshToken: "r1",
+		Expiry:       time.Now().Add(-time.Hour),
+	})
+	if _, err := src.Token(); err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if gotUA != "omni-cli/9.9.9" {
+		t.Errorf("refresh User-Agent = %q, want %q", gotUA, "omni-cli/9.9.9")
 	}
 }

@@ -153,7 +153,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 			RefreshToken: profile.RefreshToken,
 			Expiry:       expiry,
 		}
-		src := oauth.Config(profile.APIEndpoint, "").TokenSource(context.Background(), current)
+		src := oauth.Config(profile.APIEndpoint, "").TokenSource(oauth.Context(context.Background()), current)
 		if refreshed, err := src.Token(); err == nil && refreshed.AccessToken != current.AccessToken {
 			profile.AccessToken = refreshed.AccessToken
 			profile.RefreshToken = refreshed.RefreshToken
