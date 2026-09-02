@@ -11,13 +11,13 @@ import (
 
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/updatecheck"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 type automaticReleaseChecker interface {
-	Check(ctx context.Context, currentVersion string, force bool) (updatecheck.Result, error)
-	NotificationDue(updatecheck.Result) bool
-	MarkNotified(version string) error
+	CheckAutomatic(ctx context.Context, currentVersion string) (updatecheck.Result, error)
+	ClaimNotification(updatecheck.Result) bool
 }
 
 type updateOutcome struct {
@@ -35,14 +35,18 @@ type automaticUpdate struct {
 	now      func() time.Time
 }
 
-func startAutomaticUpdate(checker automaticReleaseChecker, currentVersion string, args []string, stdout, stderr *os.File) automaticUpdate {
-	if !automaticUpdatesEnabled(currentVersion, args, stdout, stderr) {
+// startAutomaticUpdate begins a background check alongside the command the user
+// asked for. It runs from the root's PersistentPreRunE, so cmd is the command
+// cobra resolved and its flags are parsed: eligibility can look at the real
+// command and the resolved --format rather than guessing from raw os.Args.
+func startAutomaticUpdate(checker automaticReleaseChecker, currentVersion string, cmd *cobra.Command, stdout, stderr *os.File) automaticUpdate {
+	if !automaticUpdatesEnabled(currentVersion, cmd, stdout, stderr) {
 		return automaticUpdate{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan updateOutcome, 1)
 	go func() {
-		r, err := checker.Check(ctx, currentVersion, false)
+		r, err := checker.CheckAutomatic(ctx, currentVersion)
 		result <- updateOutcome{result: r, err: err}
 	}()
 	return automaticUpdate{
@@ -57,56 +61,81 @@ func (u automaticUpdate) finish(success bool, stderr io.Writer) {
 	}
 	u.cancel()
 	outcome := <-u.result
-	if !success || outcome.err != nil || !u.checker.NotificationDue(outcome.result) {
+	if !success || outcome.err != nil || !outcome.result.UpdateAvailable {
 		return
 	}
 
 	if u.homebrew && recentHomebrewRelease(outcome.result, u.now()) {
 		return
 	}
-	fmt.Fprintf(stderr, "\nA newer Omni CLI is available: %s -> %s\n", displayVersion(u.version), displayVersion(outcome.result.LatestVersion))
-	if u.homebrew {
-		fmt.Fprintf(stderr, "To upgrade, run: %s\n", outcome.result.Upgrade.Homebrew)
-	} else {
-		fmt.Fprintf(stderr, "To upgrade, run: %s\n", outcome.result.Upgrade.Other)
+	// Claim before printing: the claim is what makes concurrent commands
+	// announce a release once between them.
+	if !u.checker.ClaimNotification(outcome.result) {
+		return
 	}
+	fmt.Fprintf(stderr, "\nA newer Omni CLI is available: %s -> %s\n", displayVersion(u.version), displayVersion(outcome.result.LatestVersion))
+	fmt.Fprintf(stderr, "To upgrade, %s\n", upgradeHint(outcome.result.Upgrade, u.homebrew))
 	fmt.Fprintf(stderr, "%s\n", outcome.result.ReleaseURL)
-	_ = u.checker.MarkNotified(outcome.result.LatestVersion)
 }
 
-func automaticUpdatesEnabled(currentVersion string, args []string, stdout, stderr *os.File) bool {
+// upgradeHint phrases the advice for the platform it's given on. Homebrew is
+// empty where Homebrew isn't an option (Windows), and there "other" is already
+// a sentence — install.sh refuses to run there — rather than a command to run.
+func upgradeHint(u updatecheck.UpgradeInstructions, homebrew bool) string {
+	if homebrew && u.Homebrew != "" {
+		return "run: " + u.Homebrew
+	}
+	if u.Homebrew == "" {
+		return u.Other
+	}
+	return "run: " + u.Other
+}
+
+func automaticUpdatesEnabled(currentVersion string, cmd *cobra.Command, stdout, stderr *os.File) bool {
 	isTTY := term.IsTerminal(int(stdout.Fd())) && term.IsTerminal(int(stderr.Fd()))
-	format := config.ResolveOutputFormat(requestedOutputFormat(args), true)
-	return automaticUpdatesAllowed(currentVersion, args, isTTY && format == config.FormatHuman, os.Getenv)
+	return automaticUpdatesAllowed(currentVersion, cmd, interactiveHumanOutput(cmd, isTTY), os.Getenv)
 }
 
-func automaticUpdatesAllowed(currentVersion string, args []string, interactiveHuman bool, getenv func(string) string) bool {
-	if len(args) == 0 || !updatecheck.IsReleaseVersion(currentVersion) || getenv("OMNI_NO_UPDATE_NOTIFIER") != "" || getenv("CI") != "" || !interactiveHuman {
+// interactiveHumanOutput reports whether this invocation is a human sitting at
+// a terminal reading human-formatted output — the only audience a notice on
+// stderr is meant for. The format comes from the parsed flag, so every spelling
+// cobra accepts (-o json, -ojson, --format=json, --FORMAT json) is honoured.
+func interactiveHumanOutput(cmd *cobra.Command, isTTY bool) bool {
+	if !isTTY || cmd == nil {
 		return false
 	}
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" || arg == "--version" {
-			return false
-		}
+	formatFlag, _ := cmd.Flags().GetString("format")
+	return config.ResolveOutputFormat(formatFlag, isTTY) == config.FormatHuman
+}
+
+func automaticUpdatesAllowed(currentVersion string, cmd *cobra.Command, interactiveHuman bool, getenv func(string) string) bool {
+	if cmd == nil || !interactiveHuman || !updatecheck.IsReleaseVersion(currentVersion) ||
+		getenv("OMNI_NO_UPDATE_NOTIFIER") != "" || getenv("CI") != "" {
+		return false
 	}
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "update" && args[i+1] == "check" {
-			return false
-		}
+	// `omni help ...` prints a command's usage, not its output; --help and
+	// --version never reach this hook, cobra answers them first.
+	if cmd.Name() == "help" {
+		return false
+	}
+	// The explicit `omni update check` does its own reporting, and shell
+	// completion output is consumed by the shell. Match on the top-level
+	// group so an API command that happens to be named "update" (say
+	// `omni dashboards update`) still gets a notice.
+	switch topLevelCommand(cmd).Name() {
+	case "update", "completion":
+		return false
 	}
 	return true
 }
 
-func requestedOutputFormat(args []string) string {
-	for i, arg := range args {
-		if strings.HasPrefix(arg, "--format=") {
-			return strings.TrimPrefix(arg, "--format=")
-		}
-		if (arg == "--format" || arg == "-o") && i+1 < len(args) {
-			return args[i+1]
-		}
+// topLevelCommand returns cmd's ancestor directly below the root, or cmd
+// itself when it is the root or one of the root's own children.
+func topLevelCommand(cmd *cobra.Command) *cobra.Command {
+	for cmd.Parent() != nil && cmd.Parent().Parent() != nil {
+		cmd = cmd.Parent()
 	}
-	return ""
+	return cmd
 }
 
 func isHomebrewInstall() bool {

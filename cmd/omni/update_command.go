@@ -16,7 +16,7 @@ import (
 )
 
 type releaseChecker interface {
-	Check(ctx context.Context, currentVersion string, force bool) (updatecheck.Result, error)
+	Check(ctx context.Context, currentVersion string) (updatecheck.Result, error)
 }
 
 func addUpdateCommand(root *cobra.Command, checker releaseChecker, currentVersion string) {
@@ -30,17 +30,26 @@ func addUpdateCommand(root *cobra.Command, checker releaseChecker, currentVersio
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			result, err := checker.Check(cmd.Context(), currentVersion, true)
-			if err != nil {
-				return err
-			}
+			// Resolve the format before checking: a failure has to be reported
+			// in the format the caller asked for, not as cobra's plain
+			// "Error: ..." line, which would break the JSON contract agents
+			// rely on.
 			formatFlag, _ := cmd.Flags().GetString("format")
+			compact, _ := cmd.Flags().GetBool("compact")
 			format := config.ResolveOutputFormat(formatFlag, writerIsTerminal(cmd.OutOrStdout()))
+
+			result, err := checker.Check(cmd.Context(), currentVersion)
+			if err != nil {
+				// Same contract as a failed API call: exactly one document on
+				// stderr, nothing on stdout, and no duplicate line from cobra.
+				writeError(cmd.ErrOrStderr(), format, 0, err.Error(), nil, compact)
+				cmd.SilenceErrors = true
+				return &apiError{detail: err.Error()}
+			}
 			if format == config.FormatHuman {
 				writeHumanUpdateResult(cmd, result)
 				return nil
 			}
-			compact, _ := cmd.Flags().GetBool("compact")
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			if !compact {
 				enc.SetIndent("", "  ")
@@ -57,8 +66,12 @@ func writeHumanUpdateResult(cmd *cobra.Command, r updatecheck.Result) {
 		return
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "A newer Omni CLI is available: %s -> %s\n", displayVersion(r.CurrentVersion), displayVersion(r.LatestVersion))
-	fmt.Fprintf(cmd.OutOrStdout(), "Homebrew: %s\n", r.Upgrade.Homebrew)
-	fmt.Fprintf(cmd.OutOrStdout(), "Other:    %s\n", r.Upgrade.Other)
+	if r.Upgrade.Homebrew != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Homebrew: %s\n", r.Upgrade.Homebrew)
+		fmt.Fprintf(cmd.OutOrStdout(), "Other:    %s\n", r.Upgrade.Other)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "Upgrade:  %s\n", r.Upgrade.Other)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Release:  %s\n", r.ReleaseURL)
 }
 

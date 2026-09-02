@@ -4,12 +4,15 @@ package updatecheck
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +20,20 @@ import (
 
 const (
 	defaultEndpoint = "https://api.github.com/repos/exploreomni/cli/releases/latest"
-	checkInterval   = 24 * time.Hour
+	releasesPage    = "https://github.com/exploreomni/cli/releases/latest"
+	installCommand  = "curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh"
+
+	// checkInterval is the throttle between successful checks, failureBackoff
+	// the much shorter one applied after a failed or abandoned attempt, and
+	// leaseDuration the window in which the process that claimed a check is
+	// expected to finish it (comfortably longer than the HTTP timeout).
+	checkInterval  = 24 * time.Hour
+	failureBackoff = 15 * time.Minute
+	leaseDuration  = 30 * time.Second
+
+	// defaultLockStale is how long a lock file is honoured before it is
+	// treated as abandoned by a process that died while holding it.
+	defaultLockStale = 30 * time.Second
 )
 
 // Release is the subset of a GitHub release used by the updater.
@@ -28,8 +44,9 @@ type Release struct {
 }
 
 // UpgradeInstructions lists supported ways to install the newest release.
+// Homebrew is empty on platforms Homebrew doesn't serve.
 type UpgradeInstructions struct {
-	Homebrew string `json:"homebrew"`
+	Homebrew string `json:"homebrew,omitempty"`
 	Other    string `json:"other"`
 }
 
@@ -43,8 +60,17 @@ type Result struct {
 	PublishedAt     time.Time           `json:"-"`
 }
 
+// state is the durable scheduler behind the automatic check. NextCheckAt alone
+// decides whether a check may run, and it is written *before* any networking,
+// so a cancelled or killed process still leaves a throttle behind.
+// LeaseID/LeaseUntil name the process currently allowed to record a result:
+// the ID stops a slow owner from clobbering state claimed by a newer one, and
+// the deadline lets a crashed owner's claim be reclaimed.
 type state struct {
-	CheckedAt       time.Time `json:"checkedAt"`
+	CheckedAt       time.Time `json:"checkedAt,omitempty"`
+	NextCheckAt     time.Time `json:"nextCheckAt,omitempty"`
+	LeaseID         string    `json:"leaseId,omitempty"`
+	LeaseUntil      time.Time `json:"leaseUntil,omitempty"`
 	LatestRelease   Release   `json:"latestRelease"`
 	NotifiedVersion string    `json:"notifiedVersion,omitempty"`
 	NotifiedAt      time.Time `json:"notifiedAt,omitempty"`
@@ -56,6 +82,11 @@ type Checker struct {
 	Endpoint  string
 	StatePath string
 	Now       func() time.Time
+
+	// lockStale overrides defaultLockStale in tests. It is compared against
+	// the lock file's modification time, so it is measured on the real clock
+	// rather than on Now.
+	lockStale time.Duration
 }
 
 // New returns a checker suitable for CLI use.
@@ -78,45 +109,195 @@ func DefaultStatePath() string {
 	return filepath.Join(dir, "omni-cli", "update.json")
 }
 
-// Check returns the newest stable release. Unless force is true, a result
-// fetched during the previous 24 hours is reused.
-func (c *Checker) Check(ctx context.Context, currentVersion string, force bool) (Result, error) {
-	now := c.now()
-	s, _ := c.readState()
-	release := s.LatestRelease
-	if force || s.CheckedAt.IsZero() || now.Sub(s.CheckedAt) >= checkInterval {
-		var err error
-		release, err = c.fetch(ctx, currentVersion)
-		if err != nil {
-			return Result{}, err
-		}
-		s.CheckedAt = now
-		s.LatestRelease = release
-		if err := c.writeState(s); err != nil {
-			return Result{}, err
-		}
+// Check performs an explicit, user-requested check. It always contacts the
+// release endpoint and returns what it fetched; caching is best-effort, so a
+// broken or read-only cache never turns a successful check into a failure.
+func (c *Checker) Check(ctx context.Context, currentVersion string) (Result, error) {
+	release, err := c.fetch(ctx, currentVersion)
+	if err != nil {
+		return Result{}, err
 	}
-
+	c.recordCheck(release)
 	return result(currentVersion, release), nil
 }
 
-// NotificationDue reports whether this release has not been announced in the
-// previous 24 hours.
-func (c *Checker) NotificationDue(r Result) bool {
+// CheckAutomatic is the background check run alongside an interactive command.
+// It makes at most one request per checkInterval across every process sharing
+// the state file, and falls back to the cached release whenever a check isn't
+// due, the state is claimed elsewhere, or the request fails.
+func (c *Checker) CheckAutomatic(ctx context.Context, currentVersion string) (Result, error) {
+	cached, _ := c.readState()
+	lease, claimed := c.claimCheck()
+	if !claimed {
+		return result(currentVersion, cached.LatestRelease), nil
+	}
+
+	release, err := c.fetch(ctx, currentVersion)
+	c.finishCheck(lease, release, err)
+	if err != nil {
+		if validVersion(cached.LatestRelease.Version) {
+			// A stale but valid answer is still worth reporting; the throttle
+			// claimCheck wrote keeps the failed attempt from retrying.
+			return result(currentVersion, cached.LatestRelease), nil
+		}
+		return Result{}, err
+	}
+	return result(currentVersion, release), nil
+}
+
+// ClaimNotification atomically decides whether this process should print a
+// notice for r, recording the claim before it returns true. Deciding and
+// recording under one lock is what stops concurrent commands from each
+// announcing the same release.
+func (c *Checker) ClaimNotification(r Result) bool {
 	if !r.UpdateAvailable {
 		return false
 	}
+	unlock, ok := c.tryLock()
+	if !ok {
+		return false
+	}
+	defer unlock()
+
 	s, _ := c.readState()
-	return s.NotifiedVersion != r.LatestVersion || s.NotifiedAt.IsZero() || c.now().Sub(s.NotifiedAt) >= checkInterval
+	now := c.now()
+	if s.NotifiedVersion == r.LatestVersion && !s.NotifiedAt.IsZero() && now.Sub(s.NotifiedAt) < checkInterval {
+		return false
+	}
+	s.NotifiedVersion = r.LatestVersion
+	s.NotifiedAt = now
+	return c.writeState(s) == nil
 }
 
-// MarkNotified records that a notice was displayed. Notification failures are
-// deliberately allowed to be ignored by callers.
-func (c *Checker) MarkNotified(version string) error {
+// claimCheck reports whether this process may perform the next check, taking
+// the lease that makes it the only one allowed to record the outcome.
+func (c *Checker) claimCheck() (string, bool) {
+	unlock, ok := c.tryLock()
+	if !ok {
+		return "", false
+	}
+	defer unlock()
+
 	s, _ := c.readState()
-	s.NotifiedVersion = version
-	s.NotifiedAt = c.now()
-	return c.writeState(s)
+	now := c.now()
+	if !s.NextCheckAt.IsZero() && now.Before(s.NextCheckAt) {
+		return "", false
+	}
+	if s.LeaseID != "" && now.Before(s.LeaseUntil) {
+		return "", false
+	}
+	id, err := newLeaseID()
+	if err != nil {
+		return "", false
+	}
+	s.LeaseID = id
+	s.LeaseUntil = now.Add(leaseDuration)
+	// Written before any networking: if this process is cancelled or killed
+	// mid-request, the next invocation still waits out the short backoff
+	// instead of retrying straight away.
+	s.NextCheckAt = now.Add(failureBackoff)
+	if err := c.writeState(s); err != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// finishCheck records the outcome of the check claimed under lease. A failure
+// leaves the short backoff claimCheck already wrote in place.
+func (c *Checker) finishCheck(lease string, release Release, fetchErr error) {
+	unlock, ok := c.tryLock()
+	if !ok {
+		return
+	}
+	defer unlock()
+
+	s, err := c.readState()
+	if err != nil || s.LeaseID != lease {
+		// This lease expired and another process claimed the state; its result
+		// is the newer one, so leave it alone.
+		return
+	}
+	s.LeaseID = ""
+	s.LeaseUntil = time.Time{}
+	if fetchErr == nil {
+		now := c.now()
+		s.LatestRelease = release
+		s.CheckedAt = now
+		s.NextCheckAt = now.Add(checkInterval)
+	}
+	_ = c.writeState(s)
+}
+
+// recordCheck stores an explicitly fetched release, ignoring cache failures.
+func (c *Checker) recordCheck(release Release) {
+	unlock, ok := c.tryLock()
+	if !ok {
+		return
+	}
+	defer unlock()
+
+	s, _ := c.readState()
+	now := c.now()
+	s.LatestRelease = release
+	s.CheckedAt = now
+	s.NextCheckAt = now.Add(checkInterval)
+	_ = c.writeState(s)
+}
+
+// tryLock takes the update lock without blocking, returning false when another
+// process holds it — the requested command must never wait on the updater.
+//
+// The lock is a stable, separate file: writeState replaces update.json with a
+// rename, so locking update.json itself would let a second process lock the
+// replacement while the first still held the old inode. An O_EXCL create is
+// atomic on Unix and Windows alike, which keeps this free of build-tagged
+// implementations; a lock left behind by a killed process is reclaimed once it
+// is older than lockStale.
+func (c *Checker) tryLock() (func(), bool) {
+	if c.StatePath == "" {
+		return nil, false
+	}
+	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o700); err != nil {
+		return nil, false
+	}
+	path := c.lockPath()
+	for attempt := 0; attempt < 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(path) }, true
+		}
+		if !os.IsExist(err) {
+			return nil, false
+		}
+		info, statErr := os.Stat(path)
+		if statErr != nil || time.Since(info.ModTime()) < c.lockStaleAfter() {
+			return nil, false
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
+func (c *Checker) lockPath() string {
+	return strings.TrimSuffix(c.StatePath, ".json") + ".lock"
+}
+
+func (c *Checker) lockStaleAfter() time.Duration {
+	if c.lockStale > 0 {
+		return c.lockStale
+	}
+	return defaultLockStale
+}
+
+func newLeaseID() (string, error) {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 func (c *Checker) fetch(ctx context.Context, currentVersion string) (Release, error) {
@@ -154,11 +335,18 @@ func result(current string, release Release) Result {
 		LatestVersion:   release.Version,
 		ReleaseURL:      release.URL,
 		PublishedAt:     release.PublishedAt,
-		Upgrade: UpgradeInstructions{
-			Homebrew: "brew upgrade omni",
-			Other:    "curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | sh",
-		},
+		Upgrade:         upgradeInstructions(runtime.GOOS),
 	}
+}
+
+// upgradeInstructions keeps the advice runnable on the platform being advised:
+// install.sh refuses to run on Windows, so Windows users are pointed at the
+// release downloads instead.
+func upgradeInstructions(goos string) UpgradeInstructions {
+	if goos == "windows" {
+		return UpgradeInstructions{Other: "download the latest release from " + releasesPage}
+	}
+	return UpgradeInstructions{Homebrew: "brew upgrade omni", Other: installCommand}
 }
 
 func (c *Checker) readState() (state, error) {

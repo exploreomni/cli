@@ -42,8 +42,11 @@ The binary is written to `./bin/omni`.
 
 In an interactive terminal, Omni checks for a newer stable release at most
 once every 24 hours and prints an upgrade notice after a successful command.
-The check is best-effort and is skipped in CI and when output is redirected.
-Set `OMNI_NO_UPDATE_NOTIFIER=1` to disable it.
+A failed or interrupted check backs off for 15 minutes rather than retrying on
+the next command, and concurrent runs coordinate through a lock file in the
+cache directory, so several shells make one request between them. The check is
+best-effort and is skipped in CI and whenever output isn't human-formatted on a
+terminal. Set `OMNI_NO_UPDATE_NOTIFIER=1` to disable it.
 
 To check explicitly, including from an agent or script:
 

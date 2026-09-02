@@ -30,11 +30,20 @@ func init() {
 
 func main() {
 	checker := updatecheck.New()
+	var updater automaticUpdate
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Started here, not from os.Args: cobra has resolved the command
+			// and parsed its flags, so eligibility sees the real command and
+			// the real --format (including -ojson and --FORMAT json). The
+			// hook runs immediately before RunE, so the check still overlaps
+			// with the work the user asked for. --help and --version never
+			// reach it; cobra answers those before the hooks run.
+			updater = startAutomaticUpdate(checker, version, cmd, os.Stdout, os.Stderr)
+
 			// Skip auth for config commands
 			if cmd.Name() == "init" || cmd.Name() == "show" || cmd.Name() == "use" || cmd.Name() == "login" || cmd.Name() == "logout" || cmd.Name() == "config" {
 				return nil
@@ -89,10 +98,9 @@ func main() {
 	// help flag, including for `omni models list-branches --help`, where the
 	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
 	// command that ran whether that's what happened.
-	automaticUpdate := startAutomaticUpdate(checker, version, os.Args[1:], os.Stdout, os.Stderr)
 	cmd, err := root.ExecuteC()
 	success := err == nil && !openapi.UnknownSubcommand(cmd)
-	automaticUpdate.finish(success, os.Stderr)
+	updater.finish(success, os.Stderr)
 	if !success {
 		os.Exit(1)
 	}

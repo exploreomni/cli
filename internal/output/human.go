@@ -516,4 +516,3 @@ func humanizeKey(s string) string {
 	}
 	return strings.Join(fields, " ")
 }
-
