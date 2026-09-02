@@ -126,3 +126,39 @@ func TestUpdateCheckFailureHuman(t *testing.T) {
 		t.Fatalf("stderr = %q", got)
 	}
 }
+
+// The hand-written update group must behave like the generated ones: a bare
+// group or a mistyped subcommand is an error on stderr with an empty stdout,
+// not help printed to stdout with exit 0.
+func TestUpdateGroupRequiresSubcommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"bare group", []string{"update"}, "requires a subcommand"},
+		{"typo", []string{"update", "chekc"}, `unknown subcommand "chekc"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &cobra.Command{Use: "omni"}
+			addGlobalFlags(root)
+			addUpdateCommand(root, &fakeReleaseChecker{}, "v1.2.0")
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected an error, got nil (stdout %q)", stdout.String())
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err.Error(), tt.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}

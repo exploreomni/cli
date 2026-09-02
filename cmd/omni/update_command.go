@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/exploreomni/omni-cli/internal/updatecheck"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -20,10 +21,8 @@ type releaseChecker interface {
 }
 
 func addUpdateCommand(root *cobra.Command, checker releaseChecker, currentVersion string) {
-	updateCmd := &cobra.Command{
-		Use:   "update",
-		Short: "Check for Omni CLI updates",
-	}
+	// Same unknown-subcommand handling as the generated groups.
+	updateCmd := openapi.NewGroupCommand("update", "Check for Omni CLI updates")
 	updateCmd.AddCommand(&cobra.Command{
 		Use:   "check",
 		Short: "Check whether a newer Omni CLI release is available",

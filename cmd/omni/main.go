@@ -36,12 +36,8 @@ func main() {
 		Short:   "Omni CLI — programmatic access to the Omni API",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Started here, not from os.Args: cobra has resolved the command
-			// and parsed its flags, so eligibility sees the real command and
-			// the real --format (including -ojson and --FORMAT json). The
-			// hook runs immediately before RunE, so the check still overlaps
-			// with the work the user asked for. --help and --version never
-			// reach it; cobra answers those before the hooks run.
+			// This hook runs immediately before RunE, so the check overlaps
+			// with the work the user asked for.
 			updater = startAutomaticUpdate(checker, version, cmd, os.Stdout, os.Stderr)
 
 			// Skip auth for config commands
