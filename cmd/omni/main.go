@@ -11,6 +11,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/exploreomni/omni-cli/internal/updatecheck"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -29,7 +30,7 @@ func init() {
 }
 
 func main() {
-	auth.SetVersion(version)
+	useragent.Set(version)
 
 	checker := updatecheck.New()
 	var updater automaticUpdate

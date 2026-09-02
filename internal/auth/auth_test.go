@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 // These tests use httptest.NewServer to spin up a local HTTP server, then
@@ -18,8 +19,8 @@ import (
 // The Omni API requires Bearer token auth and JSON content type.
 func TestDo_SetsHeaders(t *testing.T) {
 	// Restore the package default; nothing has set a version at this point.
-	t.Cleanup(func() { SetVersion("dev") })
-	SetVersion("9.9.9")
+	t.Cleanup(func() { useragent.Set("dev") })
+	useragent.Set("9.9.9")
 
 	var gotHeaders http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,29 +51,6 @@ func TestDo_SetsHeaders(t *testing.T) {
 	}
 	if got := gotHeaders.Get("User-Agent"); got != "omni-cli/9.9.9" {
 		t.Errorf("User-Agent = %q, want %q", got, "omni-cli/9.9.9")
-	}
-}
-
-func TestSetVersion(t *testing.T) {
-	// Restore the package default; nothing has set a version at this point.
-	t.Cleanup(func() { SetVersion("dev") })
-
-	tests := []struct {
-		version string
-		want    string
-	}{
-		{"1.2.3", "omni-cli/1.2.3"},
-		{"v1.2.3", "omni-cli/1.2.3"},
-		{" v1.2.3 ", "omni-cli/1.2.3"},
-		{"dev", "omni-cli"},
-		{"(devel)", "omni-cli"},
-		{"", "omni-cli"},
-	}
-	for _, tt := range tests {
-		SetVersion(tt.version)
-		if got := UserAgent(); got != tt.want {
-			t.Errorf("SetVersion(%q): UserAgent() = %q, want %q", tt.version, got, tt.want)
-		}
 	}
 }
 

@@ -11,17 +11,6 @@ import (
 	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
-// SetVersion sets the version reported in the User-Agent header. Dev and
-// unknown builds keep the bare product token.
-func SetVersion(version string) {
-	useragent.Set(version)
-}
-
-// UserAgent returns the User-Agent header sent with API requests.
-func UserAgent() string {
-	return useragent.String()
-}
-
 // Do executes an authenticated HTTP request against the Omni API.
 func Do(cfg *config.ResolvedConfig, method, path string, body []byte) (*http.Response, error) {
 	return DoWithContentType(cfg, method, path, body, "application/json")
