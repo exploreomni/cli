@@ -49,8 +49,15 @@ func resolveCommand(t *testing.T, args ...string) *cobra.Command {
 	root.SetGlobalNormalizationFunc(openapi.NormalizeFlagName)
 
 	models := &cobra.Command{Use: "models"}
-	models.AddCommand(&cobra.Command{Use: "list", RunE: func(*cobra.Command, []string) error { return nil }})
+	list := &cobra.Command{Use: "list", RunE: func(*cobra.Command, []string) error { return nil }}
+	openapi.RegisterSchemaFlag(list, func(*cobra.Command, openapi.SchemaFlags) error { return nil })
+	models.AddCommand(list)
 	root.AddCommand(models)
+	configCmd := &cobra.Command{Use: "config"}
+	show := configShowCmd()
+	show.RunE = func(*cobra.Command, []string) error { return nil }
+	configCmd.AddCommand(show)
+	root.AddCommand(configCmd)
 	root.AddCommand(&cobra.Command{Use: "agent-help", RunE: func(*cobra.Command, []string) error { return nil }})
 	addUpdateCommand(root, &fakeReleaseChecker{}, "v1.2.0")
 
@@ -115,6 +122,10 @@ func TestInteractiveHumanOutputHonoursEveryFormatSpelling(t *testing.T) {
 		{[]string{"models", "list", "-ojson"}, false},
 		{[]string{"models", "list", "--FORMAT", "json"}, false},
 		{[]string{"models", "list", "--Format=json"}, false},
+		{[]string{"models", "list", "--schema"}, false},
+		{[]string{"models", "list", "--schema", "--format", "human"}, false},
+		{[]string{"config", "show"}, false},
+		{[]string{"config", "show", "--format", "human"}, false},
 	}
 	for _, tt := range tests {
 		cmd := resolveCommand(t, tt.args...)
@@ -180,6 +191,49 @@ func TestAutomaticUpdateNoticeRequiresAClaim(t *testing.T) {
 	}
 }
 
+func TestAutomaticUpdateFinishDoesNotWaitForTheCheck(t *testing.T) {
+	cancelled := make(chan struct{})
+	result := make(chan updateOutcome, 1)
+	u := automaticUpdate{
+		cancel: func() { close(cancelled) }, result: result,
+		checker: &fakeAutomaticChecker{}, enabled: true, version: "v1.2.0", now: time.Now,
+	}
+	done := make(chan struct{})
+	go func() {
+		u.finish(true, &bytes.Buffer{})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		// Let a blocking implementation exit before failing the test.
+		result <- updateOutcome{}
+		<-done
+		t.Fatal("finish waited for the best-effort update check")
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("finish did not cancel the update check")
+	}
+}
+
+func TestHomebrewDetectionIsLazy(t *testing.T) {
+	checker := &fakeAutomaticChecker{claim: true}
+	ch := make(chan updateOutcome, 1)
+	ch <- updateOutcome{result: updatecheck.Result{UpdateAvailable: false}}
+	called := false
+	u := automaticUpdate{
+		cancel: func() {}, result: ch, checker: checker, enabled: true,
+		version: "v1.2.0", isHomebrew: func() bool { called = true; return true }, now: time.Now,
+	}
+	u.finish(true, &bytes.Buffer{})
+	if called {
+		t.Fatal("Homebrew detection ran without a ready update notice")
+	}
+}
+
 func TestAutomaticUpdateIsSilentOnFailure(t *testing.T) {
 	checker := &fakeAutomaticChecker{claim: true}
 	cases := []struct {
@@ -218,7 +272,7 @@ func TestRecentHomebrewReleaseIsSuppressed(t *testing.T) {
 	}}
 	u := automaticUpdate{
 		cancel: func() {}, result: ch, checker: checker, enabled: true,
-		version: "v1.2.0", homebrew: true, now: func() time.Time { return now },
+		version: "v1.2.0", isHomebrew: func() bool { return true }, now: func() time.Time { return now },
 	}
 	var stderr bytes.Buffer
 	u.finish(true, &stderr)

@@ -40,8 +40,8 @@ The binary is written to `./bin/omni`.
 
 ### Updates
 
-In an interactive terminal, Omni checks for a newer stable release at most
-once every 24 hours and prints an upgrade notice after a successful command.
+In an interactive terminal, Omni waits 24 hours after a successful check for a
+newer stable release and prints an upgrade notice after a successful command.
 A failed or interrupted check backs off for 15 minutes rather than retrying on
 the next command, and concurrent runs coordinate through a lock file in the
 cache directory, so several shells make one request between them. The check is

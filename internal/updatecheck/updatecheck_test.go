@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -59,7 +60,6 @@ func newTestChecker(t *testing.T, statePath string, clk *clock, rt roundTripFunc
 		Endpoint:  "https://example.test/latest",
 		StatePath: statePath,
 		Now:       clk.Now,
-		lockStale: 50 * time.Millisecond,
 	}
 }
 
@@ -140,6 +140,43 @@ func TestAutomaticCheckIsThrottled(t *testing.T) {
 	}
 	if requests != 2 {
 		t.Fatalf("requests = %d, want a second request after 24 hours", requests)
+	}
+}
+
+func TestAutomaticCheckFastPathDoesNotCreateTheLock(t *testing.T) {
+	clk := newClock()
+	checker := newTestChecker(t, filepath.Join(t.TempDir(), "update.json"), clk, func(*http.Request) (*http.Response, error) {
+		t.Fatal("a throttled check must not make a request")
+		return nil, nil
+	})
+	wantRelease := Release{Version: "v1.3.0", URL: "https://example.test/v1.3.0"}
+	if err := checker.writeState(state{
+		NextCheckAt:   clk.Now().Add(checkInterval),
+		LatestRelease: wantRelease,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checker.CheckAutomatic(context.Background(), "v1.2.0")
+	if err != nil || got.LatestVersion != wantRelease.Version {
+		t.Fatalf("result = %+v, err = %v", got, err)
+	}
+	if _, err := os.Stat(checker.lockPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("throttled fast path touched the lock file: %v", err)
+	}
+}
+
+func TestAutomaticCheckIsDisabledWithoutAStatePath(t *testing.T) {
+	clk := newClock()
+	var requests int
+	checker := newTestChecker(t, "", clk, func(*http.Request) (*http.Response, error) {
+		requests++
+		return releaseResponse(200, releaseBody), nil
+	})
+
+	got, err := checker.CheckAutomatic(context.Background(), "v1.2.0")
+	if err != nil || got.UpdateAvailable || requests != 0 {
+		t.Fatalf("result = %+v, err = %v, requests = %d", got, err, requests)
 	}
 }
 
@@ -348,6 +385,25 @@ func TestNotificationThrottle(t *testing.T) {
 	}
 }
 
+func TestNotificationFastPathDoesNotCreateTheLock(t *testing.T) {
+	clk := newClock()
+	checker := newTestChecker(t, filepath.Join(t.TempDir(), "update.json"), clk, nil)
+	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://example.test/release"})
+	if err := checker.writeState(state{
+		NotifiedVersion: r.LatestVersion,
+		NotifiedAt:      clk.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if checker.ClaimNotification(r) {
+		t.Fatal("a recently claimed notification should stay suppressed")
+	}
+	if _, err := os.Stat(checker.lockPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("notification fast path touched the lock file: %v", err)
+	}
+}
+
 func TestAutomaticCheckFallsBackToTheCachedRelease(t *testing.T) {
 	clk := newClock()
 	statePath := filepath.Join(t.TempDir(), "update.json")
@@ -382,23 +438,72 @@ func TestLockIsSeparateFromTheStateFile(t *testing.T) {
 	if !ok {
 		t.Fatal("expected to take the lock")
 	}
-	if _, ok := checker.tryLock(); ok {
+	contender := newTestChecker(t, statePath, clk, nil)
+	if _, ok := contender.tryLock(); ok {
 		t.Fatal("the lock should not be handed out twice")
 	}
 	unlock()
-	unlock2, ok := checker.tryLock()
+	before, err := os.Stat(checker.lockPath())
+	if err != nil {
+		t.Fatalf("the stable lock file was removed on unlock: %v", err)
+	}
+
+	unlock2, ok := contender.tryLock()
 	if !ok {
 		t.Fatal("expected the released lock to be available")
 	}
-	unlock2()
-
-	// A lock left behind by a killed process is eventually reclaimed.
-	if _, ok := checker.tryLock(); !ok {
-		t.Fatal("expected to take the lock")
+	after, err := os.Stat(checker.lockPath())
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("lock acquisition replaced the stable lock file: %v", err)
 	}
-	time.Sleep(2 * checker.lockStaleAfter())
-	if _, ok := checker.tryLock(); !ok {
-		t.Fatal("expected the stale lock to be reclaimed")
+	unlock2()
+}
+
+func TestLockIsReleasedWhenOwnerExits(t *testing.T) {
+	const childStatePathEnv = "OMNI_UPDATECHECK_TEST_LOCK_CHILD_STATE"
+	if statePath := os.Getenv(childStatePathEnv); statePath != "" {
+		checker := &Checker{StatePath: statePath}
+		if _, ok := checker.tryLock(); !ok {
+			os.Exit(2)
+		}
+		// Simulate abrupt process termination: do not call the unlock callback.
+		os.Exit(0)
+	}
+
+	statePath := filepath.Join(t.TempDir(), "update.json")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestLockIsReleasedWhenOwnerExits$")
+	cmd.Env = append(os.Environ(), childStatePathEnv+"="+statePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("lock-owner subprocess: %v\n%s", err, output)
+	}
+
+	checker := &Checker{StatePath: statePath}
+	unlock, ok := checker.tryLock()
+	if !ok {
+		t.Fatal("the OS did not release the lock when its owner exited")
+	}
+	unlock()
+}
+
+func TestStatePathFromCacheDir(t *testing.T) {
+	cacheDir := t.TempDir()
+	if got, want := statePathFromCacheDir(cacheDir, nil), filepath.Join(cacheDir, "omni-cli", "update.json"); got != want {
+		t.Fatalf("statePathFromCacheDir() = %q, want %q", got, want)
+	}
+	for _, tc := range []struct {
+		name string
+		dir  string
+		err  error
+	}{
+		{name: "empty", dir: ""},
+		{name: "relative", dir: filepath.Join("relative", "cache")},
+		{name: "error", dir: cacheDir, err: errors.New("cache unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statePathFromCacheDir(tc.dir, tc.err); got != "" {
+				t.Fatalf("statePathFromCacheDir() = %q, want disabled", got)
+			}
+		})
 	}
 }
 

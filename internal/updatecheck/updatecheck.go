@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 const (
@@ -30,10 +32,6 @@ const (
 	checkInterval  = 24 * time.Hour
 	failureBackoff = 15 * time.Minute
 	leaseDuration  = 30 * time.Second
-
-	// defaultLockStale is how long a lock file is honoured before it is
-	// treated as abandoned by a process that died while holding it.
-	defaultLockStale = 30 * time.Second
 )
 
 // Release is the subset of a GitHub release used by the updater.
@@ -60,9 +58,9 @@ type Result struct {
 	PublishedAt     time.Time           `json:"-"`
 }
 
-// state is the durable scheduler behind the automatic check. NextCheckAt alone
-// decides whether a check may run, and it is written *before* any networking,
-// so a cancelled or killed process still leaves a throttle behind.
+// state is the durable scheduler behind the automatic check. NextCheckAt is the
+// persistent throttle, and it is written *before* any networking, so a
+// cancelled or killed process still leaves a delay behind.
 // LeaseID/LeaseUntil name the process currently allowed to record a result:
 // the ID stops a slow owner from clobbering state claimed by a newer one, and
 // the deadline lets a crashed owner's claim be reclaimed.
@@ -82,11 +80,6 @@ type Checker struct {
 	Endpoint  string
 	StatePath string
 	Now       func() time.Time
-
-	// lockStale overrides defaultLockStale in tests. It is compared against
-	// the lock file's modification time, so it is measured on the real clock
-	// rather than on Now.
-	lockStale time.Duration
 }
 
 // New returns a checker suitable for CLI use.
@@ -99,12 +92,17 @@ func New() *Checker {
 	}
 }
 
-// DefaultStatePath returns the per-user update-check state file.
+// DefaultStatePath returns the per-user update-check state file, or an empty
+// path when the platform cache directory is unavailable. An empty path disables
+// automatic checks while leaving explicit checks usable.
 func DefaultStatePath() string {
 	dir, err := os.UserCacheDir()
-	if err != nil || dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".cache")
+	return statePathFromCacheDir(dir, err)
+}
+
+func statePathFromCacheDir(dir string, err error) string {
+	if err != nil || dir == "" || !filepath.IsAbs(dir) {
+		return ""
 	}
 	return filepath.Join(dir, "omni-cli", "update.json")
 }
@@ -122,11 +120,18 @@ func (c *Checker) Check(ctx context.Context, currentVersion string) (Result, err
 }
 
 // CheckAutomatic is the background check run alongside an interactive command.
-// It makes at most one request per checkInterval across every process sharing
-// the state file, and falls back to the cached release whenever a check isn't
-// due, the state is claimed elsewhere, or the request fails.
+// It waits checkInterval after a successful request and failureBackoff after a
+// failed one across every process sharing the state file. It falls back to the
+// cached release whenever a check isn't due, the state is claimed elsewhere,
+// or the request fails.
 func (c *Checker) CheckAutomatic(ctx context.Context, currentVersion string) (Result, error) {
-	cached, _ := c.readState()
+	if c.StatePath == "" {
+		return result(currentVersion, Release{}), nil
+	}
+	cached, readErr := c.readState()
+	if readErr == nil && automaticCheckDeferred(cached, c.now()) {
+		return result(currentVersion, cached.LatestRelease), nil
+	}
 	lease, claimed := c.claimCheck()
 	if !claimed {
 		return result(currentVersion, cached.LatestRelease), nil
@@ -150,7 +155,12 @@ func (c *Checker) CheckAutomatic(ctx context.Context, currentVersion string) (Re
 // recording under one lock is what stops concurrent commands from each
 // announcing the same release.
 func (c *Checker) ClaimNotification(r Result) bool {
-	if !r.UpdateAvailable {
+	if !r.UpdateAvailable || c.StatePath == "" {
+		return false
+	}
+	cached, readErr := c.readState()
+	now := c.now()
+	if readErr == nil && notificationRecentlyClaimed(cached, r, now) {
 		return false
 	}
 	unlock, ok := c.tryLock()
@@ -160,8 +170,8 @@ func (c *Checker) ClaimNotification(r Result) bool {
 	defer unlock()
 
 	s, _ := c.readState()
-	now := c.now()
-	if s.NotifiedVersion == r.LatestVersion && !s.NotifiedAt.IsZero() && now.Sub(s.NotifiedAt) < checkInterval {
+	now = c.now()
+	if notificationRecentlyClaimed(s, r, now) {
 		return false
 	}
 	s.NotifiedVersion = r.LatestVersion
@@ -180,10 +190,7 @@ func (c *Checker) claimCheck() (string, bool) {
 
 	s, _ := c.readState()
 	now := c.now()
-	if !s.NextCheckAt.IsZero() && now.Before(s.NextCheckAt) {
-		return "", false
-	}
-	if s.LeaseID != "" && now.Before(s.LeaseUntil) {
+	if automaticCheckDeferred(s, now) {
 		return "", false
 	}
 	id, err := newLeaseID()
@@ -200,6 +207,16 @@ func (c *Checker) claimCheck() (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+func automaticCheckDeferred(s state, now time.Time) bool {
+	return (!s.NextCheckAt.IsZero() && now.Before(s.NextCheckAt)) ||
+		(s.LeaseID != "" && now.Before(s.LeaseUntil))
+}
+
+func notificationRecentlyClaimed(s state, r Result, now time.Time) bool {
+	return s.NotifiedVersion == r.LatestVersion &&
+		!s.NotifiedAt.IsZero() && now.Sub(s.NotifiedAt) < checkInterval
 }
 
 // finishCheck records the outcome of the check claimed under lease. A failure
@@ -249,10 +266,9 @@ func (c *Checker) recordCheck(release Release) {
 //
 // The lock is a stable, separate file: writeState replaces update.json with a
 // rename, so locking update.json itself would let a second process lock the
-// replacement while the first still held the old inode. An O_EXCL create is
-// atomic on Unix and Windows alike, which keeps this free of build-tagged
-// implementations; a lock left behind by a killed process is reclaimed once it
-// is older than lockStale.
+// replacement while the first still held the old inode. The file itself is
+// never removed; an OS-backed advisory lock provides ownership and is released
+// automatically if its process exits.
 func (c *Checker) tryLock() (func(), bool) {
 	if c.StatePath == "" {
 		return nil, false
@@ -260,36 +276,16 @@ func (c *Checker) tryLock() (func(), bool) {
 	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o700); err != nil {
 		return nil, false
 	}
-	path := c.lockPath()
-	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			_ = f.Close()
-			return func() { _ = os.Remove(path) }, true
-		}
-		if !os.IsExist(err) {
-			return nil, false
-		}
-		info, statErr := os.Stat(path)
-		if statErr != nil || time.Since(info.ModTime()) < c.lockStaleAfter() {
-			return nil, false
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, false
-		}
+	lock := flock.New(c.lockPath(), flock.SetPermissions(0o600))
+	locked, err := lock.TryLock()
+	if err != nil || !locked {
+		return nil, false
 	}
-	return nil, false
+	return func() { _ = lock.Unlock() }, true
 }
 
 func (c *Checker) lockPath() string {
 	return strings.TrimSuffix(c.StatePath, ".json") + ".lock"
-}
-
-func (c *Checker) lockStaleAfter() time.Duration {
-	if c.lockStale > 0 {
-		return c.lockStale
-	}
-	return defaultLockStale
 }
 
 func newLeaseID() (string, error) {

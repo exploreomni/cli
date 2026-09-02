@@ -162,8 +162,9 @@ accepted as a flag, so it can't leak into shell history.`,
 
 func configShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show",
-		Short: "Display current configuration",
+		Use:         "show",
+		Short:       "Display current configuration",
+		Annotations: map[string]string{machineOutputAnnotation: "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Args are validated: failures below are runtime errors, not usage errors.
 			cmd.SilenceUsage = true

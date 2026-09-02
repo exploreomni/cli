@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/openapi"
 	"github.com/exploreomni/omni-cli/internal/updatecheck"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -26,14 +27,16 @@ type updateOutcome struct {
 }
 
 type automaticUpdate struct {
-	cancel   context.CancelFunc
-	result   <-chan updateOutcome
-	checker  automaticReleaseChecker
-	enabled  bool
-	version  string
-	homebrew bool
-	now      func() time.Time
+	cancel     context.CancelFunc
+	result     <-chan updateOutcome
+	checker    automaticReleaseChecker
+	enabled    bool
+	version    string
+	isHomebrew func() bool
+	now        func() time.Time
 }
+
+const machineOutputAnnotation = "omni.machine-output"
 
 // startAutomaticUpdate begins a background check alongside the command the user
 // asked for. It runs from the root's PersistentPreRunE, so cmd is the command
@@ -51,7 +54,7 @@ func startAutomaticUpdate(checker automaticReleaseChecker, currentVersion string
 	}()
 	return automaticUpdate{
 		cancel: cancel, result: result, checker: checker, enabled: true,
-		version: currentVersion, homebrew: isHomebrewInstall(), now: time.Now,
+		version: currentVersion, isHomebrew: isHomebrewInstall, now: time.Now,
 	}
 }
 
@@ -60,12 +63,21 @@ func (u automaticUpdate) finish(success bool, stderr io.Writer) {
 		return
 	}
 	u.cancel()
-	outcome := <-u.result
-	if !success || outcome.err != nil || !outcome.result.UpdateAvailable {
+	if !success {
+		return
+	}
+	var outcome updateOutcome
+	select {
+	case outcome = <-u.result:
+	default:
+		return
+	}
+	if outcome.err != nil || !outcome.result.UpdateAvailable {
 		return
 	}
 
-	if u.homebrew && recentHomebrewRelease(outcome.result, u.now()) {
+	homebrew := u.isHomebrew != nil && u.isHomebrew()
+	if homebrew && recentHomebrewRelease(outcome.result, u.now()) {
 		return
 	}
 	// Claim before printing: the claim is what makes concurrent commands
@@ -74,7 +86,7 @@ func (u automaticUpdate) finish(success bool, stderr io.Writer) {
 		return
 	}
 	fmt.Fprintf(stderr, "\nA newer Omni CLI is available: %s -> %s\n", displayVersion(u.version), displayVersion(outcome.result.LatestVersion))
-	fmt.Fprintf(stderr, "To upgrade, %s\n", upgradeHint(outcome.result.Upgrade, u.homebrew))
+	fmt.Fprintf(stderr, "To upgrade, %s\n", upgradeHint(outcome.result.Upgrade, homebrew))
 	fmt.Fprintf(stderr, "%s\n", outcome.result.ReleaseURL)
 }
 
@@ -101,11 +113,15 @@ func automaticUpdatesEnabled(currentVersion string, cmd *cobra.Command, stdout, 
 // stderr is meant for. The format comes from the parsed flag, so every spelling
 // cobra accepts (-o json, -ojson, --format=json, --FORMAT json) is honoured.
 func interactiveHumanOutput(cmd *cobra.Command, isTTY bool) bool {
-	if !isTTY || cmd == nil {
+	if !isTTY || cmd == nil || commandUsesMachineOutput(cmd) {
 		return false
 	}
 	formatFlag, _ := cmd.Flags().GetString("format")
 	return config.ResolveOutputFormat(formatFlag, isTTY) == config.FormatHuman
+}
+
+func commandUsesMachineOutput(cmd *cobra.Command) bool {
+	return cmd.Annotations[machineOutputAnnotation] == "true" || openapi.IsSchemaRequest(cmd)
 }
 
 func automaticUpdatesAllowed(currentVersion string, cmd *cobra.Command, interactiveHuman bool, getenv func(string) string) bool {

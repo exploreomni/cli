@@ -17,6 +17,11 @@ import (
 // recursing.
 const maxSchemaDepth = 8
 
+// schemaFlagAnnotation records the actual name of a command's schema-discovery
+// flag. The preferred --schema name can be occupied by an API parameter, in
+// which case RegisterSchemaFlag chooses a collision-free fallback.
+const schemaFlagAnnotation = "omni.openapi.schema-flag"
+
 // depthNote replaces a schema node that sits past the expansion budget. Both the
 // spec describer and the depth limiter for hand-written commands' static
 // documents emit it, so truncation reads identically everywhere.
@@ -112,6 +117,10 @@ func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlag
 		Field:  freeFlagName(cmd, "field", "schema-field"),
 		Depth:  freeFlagName(cmd, "depth", "schema-depth"),
 	}
+	if cmd.Annotations == nil {
+		cmd.Annotations = make(map[string]string)
+	}
+	cmd.Annotations[schemaFlagAnnotation] = names.Schema
 
 	cmd.Flags().Bool(names.Schema, false,
 		renameNote("print this command's args, flags, request body and response shape, then exit (no API call)", "schema", names.Schema))
@@ -158,6 +167,17 @@ func RegisterSchemaFlag(cmd *cobra.Command, emit func(*cobra.Command, SchemaFlag
 	}
 
 	return names
+}
+
+// IsSchemaRequest reports whether cmd is handling its local, JSON-only schema
+// discovery mode. RegisterSchemaFlag records the resolved flag name so this
+// remains correct when an API parameter forces --schema to --schema-doc.
+func IsSchemaRequest(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	name, ok := cmd.Annotations[schemaFlagAnnotation]
+	return ok && schemaRequested(cmd, name)
 }
 
 // freeFlagName returns preferred if no flag owns it, otherwise fallback, and
