@@ -223,7 +223,8 @@ func TestStaticSchemaDocs_DepthTruncates(t *testing.T) {
 
 // A deprecated operation's --schema output must be pure JSON on stdout: cobra
 // would otherwise print its deprecation notice ahead of the document. PUT
-// /api/v1/documents/{identifier} is deprecated in the shipped spec.
+// /api/v1/documents/{identifier}/transfer-ownership is deprecated in the
+// shipped spec.
 func TestDeprecatedCommand_SchemaEmitsCleanJSON(t *testing.T) {
 	root := specRoot(t)
 	var out, errBuf bytes.Buffer
@@ -231,7 +232,7 @@ func TestDeprecatedCommand_SchemaEmitsCleanJSON(t *testing.T) {
 	root.SilenceErrors = true
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
-	root.SetArgs([]string{"documents", "put", "--schema", "--compact"})
+	root.SetArgs([]string{"documents", "transfer-ownership", "--schema", "--compact"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute --schema: %v\n%s%s", err, out.String(), errBuf.String())
 	}

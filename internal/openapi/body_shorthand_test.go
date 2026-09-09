@@ -232,7 +232,6 @@ func TestShorthand_BooleanFlagTypesComeFromSpec(t *testing.T) {
 		{operationID: "aiGenerateQuery", fieldPath: "runQuery"},
 		{operationID: "aiGenerateQuery", fieldPath: "workbookUrl"},
 		{operationID: "aiJobSubmit", fieldPath: "progressWebhookEnabled"},
-		{operationID: "documentsUpdate", fieldPath: "clearExistingDraft"},
 	}
 
 	for _, tt := range tests {
@@ -570,28 +569,6 @@ func TestShorthand_FoldersCreate(t *testing.T) {
 	}
 	if body["scope"] != "organization" {
 		t.Errorf("scope = %v, want organization", body["scope"])
-	}
-}
-
-func TestShorthand_DocumentsUpdate_FlagsOnly(t *testing.T) {
-	var captured APIRequest
-	exec := func(req APIRequest) error { captured = req; return nil }
-
-	op := operationFromRealSpec(t, "documentsUpdate")
-
-	cmd := buildCommand(op, exec)
-	cmd.SetArgs([]string{"doc-123", "--name", "New Name", "--clear-existing-draft", "true"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-
-	var body map[string]interface{}
-	json.Unmarshal(captured.Body, &body)
-	if body["name"] != "New Name" {
-		t.Errorf("name = %v, want 'New Name'", body["name"])
-	}
-	if body["clearExistingDraft"] != true {
-		t.Errorf("clearExistingDraft = %v, want true", body["clearExistingDraft"])
 	}
 }
 
@@ -1046,8 +1023,8 @@ func TestShorthand_RegistryNotEmpty(t *testing.T) {
 	if len(bodyShorthands) == 0 {
 		t.Fatal("bodyShorthands registry is empty")
 	}
-	if len(bodyShorthands) != 19 {
-		t.Errorf("expected 19 shorthand entries, got %d", len(bodyShorthands))
+	if len(bodyShorthands) != 18 {
+		t.Errorf("expected 18 shorthand entries, got %d", len(bodyShorthands))
 	}
 }
 

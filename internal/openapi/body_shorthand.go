@@ -214,15 +214,6 @@ var bodyShorthands = map[string]*BodyShorthand{
 	},
 
 	// Tier 4: Flags-only promotion (no new positional args)
-	"documentsUpdate": {
-		Flags: []FlagMapping{
-			{FlagName: "name", FieldPath: "name", Description: "new document name"},
-			{FlagName: "description", FieldPath: "description", Description: "document description"},
-			{FlagName: "clear-existing-draft", FieldPath: "clearExistingDraft", Description: "clear existing draft before updating"},
-		},
-		ExampleShort: `omni documents update <identifier> --name "New Name"`,
-		ExampleJSON:  `omni documents update <identifier> --body '{"name":"New Name"}'`,
-	},
 	"modelsGitSync": {
 		Flags: []FlagMapping{
 			{FlagName: "commit-message", FieldPath: "commitMessage", Description: "commit message for the git sync"},
