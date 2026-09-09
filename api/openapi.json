@@ -38652,7 +38652,7 @@
               "string",
               "null"
             ],
-            "description": "Database table name if uploaded to database scratch schema"
+            "description": "Database table name if uploaded to database scratch schema. While a save of an input-column dataset is in flight, the named table may not exist yet; rows for such datasets are managed through their workbook, not this API."
           },
           "model_id": {
             "type": [
