@@ -571,6 +571,11 @@
             "additionalProperties": {},
             "description": "Query execution results as a JSON object. Only present when runQuery is true (the default) and the query executed successfully. The structure contains the query result data."
           },
+          "rowLimitHit": {
+            "type": "boolean",
+            "description": "True when the executed query returned as many rows as its limit allowed, so the result is probably partial and a larger limit in the prompt would return more. Only present when the query ran.",
+            "example": false
+          },
           "topic": {
             "type": [
               "string",
@@ -4391,7 +4396,11 @@
         "type": "object",
         "properties": {
           "controls": {
-            "description": "Control configuration object. Keys are control IDs, values contain controlType, filterId, label, etc."
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardControlEntry"
+            },
+            "description": "Control configuration, ordered. Each entry has an `id` and a CONTROL_TYPE `type`, plus the fields that type carries (a field-selection control its `field` and `options`, a period-over-period one its `computations`, and so on)."
           },
           "filterOrder": {
             "type": "array",
@@ -4405,7 +4414,11 @@
             ]
           },
           "filters": {
-            "description": "Filter configuration object. Keys are filter IDs, values contain fieldName, viewName, kind, defaultValue, etc."
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DashboardFilterEntry"
+            },
+            "description": "Filter configuration object. Keys are filter IDs; each value has a FILTER_TYPE `type` plus that type's fields — fieldName, viewName, kind, defaultValue, etc."
           },
           "identifier": {
             "type": "string",
@@ -4414,9 +4427,58 @@
           }
         },
         "required": [
+          "controls",
           "filterOrder",
+          "filters",
           "identifier"
         ]
+      },
+      "DashboardControlEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "FIELD_SELECTION",
+              "MULTI_FIELD_SELECTION",
+              "FIELD_PICKER",
+              "PERIOD_OVER_PERIOD",
+              "MULTI_FIELD_FILTER",
+              "DYNAMIC_FILTER",
+              "TOP_N"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "additionalProperties": {}
+      },
+      "DashboardFilterEntry": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "date",
+              "boolean",
+              "null",
+              "composite",
+              "query",
+              "user_attribute"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": {}
       },
       "DashboardsUpdateFiltersBody": {
         "type": "object",
@@ -5651,6 +5713,13 @@
           "name": {
             "type": "string",
             "description": "Document name."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them (`app` creates only). The document was still created and published. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
           }
         },
         "required": [
@@ -5662,6 +5731,9 @@
       "DocumentsV2CreateBody": {
         "type": "object",
         "properties": {
+          "app": {
+            "$ref": "#/components/schemas/DocumentsV2CreateApp"
+          },
           "containers": {
             "$ref": "#/components/schemas/ContainersOnCreate"
           },
@@ -5721,7 +5793,116 @@
           "modelId",
           "name"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "app",
+                "containers"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "app",
+                "controls"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "app",
+                "settings"
+              ]
+            }
+          }
+        ]
+      },
+      "DocumentsV2CreateApp": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2097152,
+            "description": "The complete app HTML document, capped at 2 MiB of UTF-8 (maxLength counts characters — the byte cap is what the server enforces). Every write appends an immutable revision."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DocumentsV2AppSettings"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "additionalProperties": false,
+        "description": "App slice of a create (alpha): creates the document as an app document, suppressing the dashboard bootstrap. Same shape as the app PUT body — the complete `html` plus an optional full `settings` replacement (locked-down defaults when omitted). Mutually exclusive with `containers`, `controls`, and `settings`."
+      },
+      "DocumentsV2AppSettings": {
+        "type": "object",
+        "properties": {
+          "allowClipboard": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowDefaultMapProviders": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowDownloads": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowExternalNavigation": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowInternalNavigation": {
+            "type": "boolean",
+            "default": false
+          },
+          "externalNavOpensInNewTab": {
+            "type": "boolean",
+            "default": true
+          },
+          "frameDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "frameDomainsEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "navAllowedDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "navAllowedDomainsEnabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "safeDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "safeDomainsEnabled": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "description": "The app's sandbox settings: capability toggles plus the safe-domain and navigation allowlists. A write replaces the whole object; omitted fields take their locked-down defaults. Host lists are normalized (deduped, invalid or Omni-owned hosts dropped) before they are stored."
       },
       "ContainersOnCreate": {
         "type": [
@@ -26909,7 +27090,7 @@
           "url"
         ],
         "additionalProperties": false,
-        "description": "Present only for app documents. The app's HTML and settings live at the `url` sub-resource; the document body carries nothing app-scoped."
+        "description": "Present only for app documents, and only while apps are enabled for the organization. The app's HTML and settings live at the `url` sub-resource (`PUT` / `PATCH …/draft/app` or `…/draft/{draftIdentifier}/app`); the document body carries nothing app-scoped."
       },
       "Containers": {
         "type": "array",
@@ -31245,7 +31426,7 @@
           }
         },
         "additionalProperties": false,
-        "description": "Accepted so a GET of an app document round-trips through PATCH; nothing in it is written. A `url` that does not address this document's app is rejected with 409. App content and settings are written only at the `…/app` sub-resource."
+        "description": "Accepted so a GET of an app document round-trips through PATCH; nothing in it is written. A `url` that does not address this document's app is rejected with 409. App content and settings are written only at the app sub-resource routes (`PUT` / `PATCH …/draft/app` or `…/draft/{draftIdentifier}/app`)."
       },
       "DocumentsV2PatchDraftBody": {
         "type": "object",
@@ -31319,60 +31500,7 @@
           "settings"
         ]
       },
-      "DocumentsV2AppSettings": {
-        "type": "object",
-        "properties": {
-          "allowClipboard": {
-            "type": "boolean",
-            "default": false
-          },
-          "allowDefaultMapProviders": {
-            "type": "boolean",
-            "default": false
-          },
-          "allowDownloads": {
-            "type": "boolean",
-            "default": false
-          },
-          "allowExternalNavigation": {
-            "type": "boolean",
-            "default": false
-          },
-          "allowInternalNavigation": {
-            "type": "boolean",
-            "default": false
-          },
-          "externalNavOpensInNewTab": {
-            "type": "boolean",
-            "default": true
-          },
-          "navAllowedDomains": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": []
-          },
-          "navAllowedDomainsEnabled": {
-            "type": "boolean",
-            "default": false
-          },
-          "safeDomains": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": []
-          },
-          "safeDomainsEnabled": {
-            "type": "boolean",
-            "default": false
-          }
-        },
-        "additionalProperties": false,
-        "description": "The app's sandbox settings: capability toggles plus the safe-domain and navigation allowlists. A write replaces the whole object; omitted fields take their locked-down defaults. Host lists are normalized (deduped, invalid or Omni-owned hosts dropped) before they are stored."
-      },
-      "DocumentsV2PutAppResponse": {
+      "DocumentsV2AppWriteResponse": {
         "allOf": [
           {
             "$ref": "#/components/schemas/DocumentsV2PatchDraftResponse"
@@ -31388,7 +31516,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them. The write itself succeeded."
+                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them. The write itself succeeded. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
               }
             },
             "required": [
@@ -31430,6 +31558,66 @@
         },
         "required": [
           "html"
+        ],
+        "additionalProperties": false
+      },
+      "DocumentsV2PatchAppBody": {
+        "type": "object",
+        "properties": {
+          "htmlEdits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentsV2HtmlEdit"
+            },
+            "minItems": 1,
+            "maxItems": 20,
+            "description": "Targeted edits applied in order against the current HTML, all-or-nothing: a failed edit (not found, ambiguous, or result over the 2 MiB cap) rejects the request with 400 naming the edit, and nothing is applied. At most 20 edits per request — each edit scans the whole document."
+          },
+          "settings": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DocumentsV2AppSettings"
+              },
+              {
+                "description": "When present, replaces the app settings; omitted fields take their locked-down defaults. When absent, the current settings are kept."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "htmlEdits"
+            ]
+          },
+          {
+            "required": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "DocumentsV2HtmlEdit": {
+        "type": "object",
+        "properties": {
+          "replace": {
+            "type": "string",
+            "description": "Text that replaces the matched `search` text. May be empty (deletion)."
+          },
+          "replaceAll": {
+            "type": "boolean",
+            "description": "Replace every occurrence of `search` instead of requiring a unique match."
+          },
+          "search": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact substring of the app's current HTML, copied verbatim with enough surrounding context to be unique (unless `replaceAll`)."
+          }
+        },
+        "required": [
+          "replace",
+          "search"
         ],
         "additionalProperties": false
       },
@@ -33010,6 +33198,63 @@
         },
         "required": [
           "permits"
+        ]
+      },
+      "FoldersUpdatePermissionSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the permission settings were updated successfully"
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "FoldersUpdatePermissionSettingsBody": {
+        "type": "object",
+        "properties": {
+          "organizationAccessBoost": {
+            "type": "boolean",
+            "description": "Whether everyone in the organization gets access boost on this folder. Setting it true requires an organization role that grants access, either sent in the same request or already on the folder; otherwise the request is rejected with 400. Rejected with 403 when the organization has AccessBoost turned off, or when a user-scoped key lacks boost provisioning."
+          },
+          "organizationRole": {
+            "$ref": "#/components/schemas/ValidOrganizationContentRole"
+          }
+        },
+        "additionalProperties": false,
+        "minProperties": 1
+      },
+      "ValidOrganizationContentRole": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "string",
+            "enum": [
+              "NO_ACCESS"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "VIEWER"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "EDITOR"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "MANAGER"
+            ]
+          }
         ]
       },
       "FoldersAddPermissionsResponse": {
@@ -36259,6 +36504,25 @@
         },
         "additionalProperties": false
       },
+      "ModelsGitRotateWebhookSecretResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ModelsGitGetResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "webhookSecret": {
+                "type": "string",
+                "description": "The new webhook secret. Returned only here — read it back later with GET /git?include=webhookSecret."
+              }
+            },
+            "required": [
+              "webhookSecret"
+            ]
+          }
+        ]
+      },
       "ModelsContentValidatorGetResponse": {
         "type": "object",
         "properties": {
@@ -38388,7 +38652,7 @@
               "string",
               "null"
             ],
-            "description": "Database table name if uploaded to database scratch schema"
+            "description": "Database table name if uploaded to database scratch schema. While a save of an input-column dataset is in flight, the named table may not exist yet; rows for such datasets are managed through their workbook, not this API."
           },
           "model_id": {
             "type": [
@@ -42081,7 +42345,7 @@
                               "string",
                               "null"
                             ],
-                            "description": "Warehouse (Snowflake) or HTTP path (Databricks)",
+                            "description": "Warehouse (Snowflake), HTTP path (Databricks), or workgroup (Athena)",
                             "example": "COMPUTE_WH"
                           }
                         },
@@ -42393,7 +42657,7 @@
                   },
                   "warehouse": {
                     "type": "string",
-                    "description": "Required for Snowflake (specify the warehouse) and Databricks (specify the HTTP path). May be omitted for Snowflake OAuth connections, in which case each user's Snowflake default warehouse applies.",
+                    "description": "Required for Snowflake (specify the warehouse) and Databricks (specify the HTTP path). May be omitted for Snowflake OAuth connections, in which case each user's Snowflake default warehouse applies. Optional for Athena (specify the workgroup); defaults to \"primary\".",
                     "example": "COMPUTE_WH"
                   },
                   "wifAudience": {
@@ -42871,7 +43135,7 @@
                             "string",
                             "null"
                           ],
-                          "description": "Warehouse (Snowflake) or HTTP path (Databricks)",
+                          "description": "Warehouse (Snowflake), HTTP path (Databricks), or workgroup (Athena)",
                           "example": "COMPUTE_WH"
                         }
                       },
@@ -43220,7 +43484,7 @@
                   },
                   "warehouse": {
                     "type": "string",
-                    "description": "Warehouse (Snowflake) or HTTP path (Databricks)",
+                    "description": "Warehouse (Snowflake), HTTP path (Databricks), or workgroup (Athena)",
                     "example": "COMPUTE_WH"
                   }
                 },
@@ -45419,11 +45683,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Dashboard identifier (short ID or UUID)",
+              "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
               "example": "12db1a0a"
             },
             "required": true,
-            "description": "Dashboard identifier (short ID or UUID)",
+            "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
             "name": "identifier",
             "in": "path"
           },
@@ -45491,11 +45755,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Dashboard identifier (short ID or UUID)",
+              "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
               "example": "12db1a0a"
             },
             "required": true,
-            "description": "Dashboard identifier (short ID or UUID)",
+            "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
             "name": "identifier",
             "in": "path"
           },
@@ -45555,11 +45819,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Dashboard identifier (short ID or UUID)",
+              "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
               "example": "12db1a0a"
             },
             "required": true,
-            "description": "Dashboard identifier (short ID or UUID)",
+            "description": "A published dashboard's identifier, or one of its draft identifiers (short ID or UUID). A draft renders its unpublished content against the branch it was taken on.",
             "name": "identifier",
             "in": "path"
           },
@@ -47177,7 +47441,7 @@
     },
     "/api/v2/documents": {
       "post": {
-        "description": "Create a brand-new document and publish it live. Accepts creation metadata (`modelId`, `name`, optional `identifier` / `description` / `folderId`) plus the same content slice as the PATCH body — `queryPresentations`, `controls`, `settings`, `containers`. The server mints internal tile identifiers, so callers omit `miniUuid`. Tiles in `queryPresentations` are merged by key over the single empty seed tile at key `\"1\"`; write to `\"1\"` (or send it as `null`) to replace the seed.\n\nWhen `containers` is omitted, every dashboard-eligible tile is auto-placed in a default layout. When `containers` is present, it fully defines the layout — tiles it does not reference are stored but not rendered. Send `containers: null` to create a workbook-only document with no dashboard (`controls` and `settings` must then be omitted); an empty `containers: []` is rejected.\n\nThe new document is published live before the response returns. As a first publish of brand-new content it is not subject to the org’s `requirePullRequestToPublish` policy (which gates edits to existing content).",
+        "description": "Create a brand-new document and publish it live. Accepts creation metadata (`modelId`, `name`, optional `identifier` / `description` / `folderId`) plus the same content slice as the PATCH body — `queryPresentations`, `controls`, `settings`, `containers`. The server mints internal tile identifiers, so callers omit `miniUuid`. Tiles in `queryPresentations` are merged by key over the single empty seed tile at key `\"1\"`; write to `\"1\"` (or send it as `null`) to replace the seed.\n\nWhen `containers` is omitted, every dashboard-eligible tile is auto-placed in a default layout. When `containers` is present, it fully defines the layout — tiles it does not reference are stored but not rendered. Send `containers: null` to create a workbook-only document with no dashboard (`controls` and `settings` must then be omitted); an empty `containers: []` is rejected.\n\nTo create an **app document** in the same single call (alpha, like the app sub-resource routes), send `app: { html, settings? }` — the same shape as the app PUT body, with the same validation (byte cap, strict body) and gates (org app toggle; user-scoped keys need the role’s `allowCreateApps` on the model, or on its parent shared model when `modelId` is a `SHARED_EXTENSION`). `app` suppresses the dashboard bootstrap — the document arrives workbook-only plus the app — so combining it with `containers` (including `null`), `controls`, or `settings` is rejected at the schema (400). Host warnings ride the response `warnings` exactly like the app PUT: writes never reject on host policy.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.\n\nThe new document is published live before the response returns. As a first publish of brand-new content it is not subject to the org’s `requirePullRequestToPublish` policy (which gates edits to existing content).",
         "operationId": "documentsV2Create",
         "summary": "Create document",
         "tags": [
@@ -47195,7 +47459,7 @@
         },
         "responses": {
           "201": {
-            "description": "Document created and published successfully.",
+            "description": "Document created and published successfully. For an `app` create, `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them.",
             "content": {
               "application/json": {
                 "schema": {
@@ -47205,16 +47469,16 @@
             }
           },
           "400": {
-            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded), or the `identifier` is already in use."
+            "description": "Invalid request body or schema validation error (e.g. unknown top-level field, name too long, query presentation cap exceeded, `app` combined with a dashboard-scoped field, an empty or oversized `app.html` — the cap is 2 MiB), or the `identifier` is already in use."
           },
           "401": {
             "description": "Authentication required."
           },
           "403": {
-            "description": "Insufficient permissions to create a document on this model."
+            "description": "Insufficient permissions to create a document on this model. For an `app` create, also: apps not enabled for the organization, or (user-scoped keys) the role does not allow creating apps."
           },
           "404": {
-            "description": "Base model or branch not found."
+            "description": "Base model not found."
           },
           "405": {
             "description": "Method not allowed."
@@ -47748,7 +48012,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DocumentsV2PutAppResponse"
+                  "$ref": "#/components/schemas/DocumentsV2AppWriteResponse"
                 }
               }
             }
@@ -47773,6 +48037,145 @@
           },
           "422": {
             "description": "The draft is a dashboard, not an app; remove the dashboard first (`DELETE …/draft/{draftIdentifier}/dashboard`)."
+          }
+        }
+      },
+      "patch": {
+        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nApply targeted edits to the app on an existing draft without resending the HTML body: any subset of `htmlEdits` (exact-substring search/replace operations, applied in order) and `settings` (full replacement). All-or-nothing — an edit that matches zero times, matches more than once without `replaceAll`, or would push the HTML past the 2 MiB cap rejects the whole request with 400 naming the edit, and nothing is applied.\n\nContent addressing buys sequential staleness detection, not concurrency safety: if the text an edit targets moved between your read and your write, the edit fails to match and nothing is applied. There is no version precondition, compare-and-swap, or lock behind it, so two writers patching the same app at the same time can still overwrite each other, orthogonal edits included — serialize writes to one app when that matters. PATCH never creates the app: a draft with no app is a 409 (create it with `PUT`).\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
+        "operationId": "documentsV2PatchApp",
+        "summary": "Edit app content on a draft",
+        "tags": [
+          "Documents"
+        ],
+        "x-experimental": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Draft workbook identifier (see `PATCH /api/v2/documents/{identifier}/draft`).",
+              "example": "def456"
+            },
+            "required": true,
+            "description": "Draft workbook identifier (see `PATCH /api/v2/documents/{identifier}/draft`).",
+            "name": "draftIdentifier",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Published document identifier.",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Published document identifier.",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentsV2PatchAppBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edits applied on the draft. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsV2AppWriteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body (unknown field, neither `htmlEdits` nor `settings`, or more than 20 `htmlEdits`), or a failed `htmlEdits` entry (not found, ambiguous, or result over the 2 MiB cap). Nothing is applied."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Insufficient permissions: no write access to the document, apps not enabled for the organization, or (user-scoped keys) the role does not allow creating apps."
+          },
+          "404": {
+            "description": "Document or draft not found."
+          },
+          "405": {
+            "description": "Method not allowed."
+          },
+          "409": {
+            "description": "The target is not a published document, or the draft has no app to patch."
+          },
+          "422": {
+            "description": "The draft is a dashboard, not an app."
+          }
+        }
+      },
+      "delete": {
+        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nRemove the app from an existing draft, leaving a workbook-only document — the app-side mirror of `DELETE …/dashboard`, with the same contract: no body (the route is draft-scoped, so publish stays the checkpoint behind it). Operates only on the draft named by `draftIdentifier`; no auto-publish, so nothing changes on the published document until `POST …/draft/publish`. Idempotent: a draft that is already workbook-only returns 200 unchanged.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
+        "operationId": "documentsV2RemoveApp",
+        "summary": "Remove app from a draft",
+        "tags": [
+          "Documents"
+        ],
+        "x-experimental": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Draft workbook identifier (see `PATCH /api/v2/documents/{identifier}/draft`).",
+              "example": "def456"
+            },
+            "required": true,
+            "description": "Draft workbook identifier (see `PATCH /api/v2/documents/{identifier}/draft`).",
+            "name": "draftIdentifier",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Published document identifier.",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Published document identifier.",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App removed on the draft (or a no-op when already workbook-only).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsV2PatchDraftResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Insufficient permissions: no write access to the document, apps not enabled for the organization, or (user-scoped keys) the role does not allow creating apps."
+          },
+          "404": {
+            "description": "Document or draft not found."
+          },
+          "405": {
+            "description": "Method not allowed."
+          },
+          "409": {
+            "description": "The target is not a published document."
+          },
+          "422": {
+            "description": "The draft is a dashboard, not an app; there is no app to remove."
           }
         }
       }
@@ -47877,7 +48280,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DocumentsV2PutAppResponse"
+                  "$ref": "#/components/schemas/DocumentsV2AppWriteResponse"
                 }
               }
             }
@@ -47899,6 +48302,71 @@
           },
           "409": {
             "description": "The target is not a published document (drafts only attach to published documents)."
+          },
+          "422": {
+            "description": "The document is a dashboard, not an app."
+          }
+        }
+      },
+      "patch": {
+        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nCreate (or reuse) the document's main draft and apply targeted app edits in one call — the PATCH counterpart of `PUT …/draft/app`, with the same body and all-or-nothing semantics as `PATCH …/draft/{draftIdentifier}/app`. Never creates the app: a document with no published app is a 409, checked before any draft is minted.\n\nContent addressing buys sequential staleness detection, not concurrency safety: if the text an edit targets moved between your read and your write, the edit fails to match and nothing is applied. There is no version precondition, compare-and-swap, or lock behind it, so two writers patching the same app at the same time can still overwrite each other, orthogonal edits included — serialize writes to one app when that matters.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
+        "operationId": "documentsV2PatchAppAutoDraft",
+        "summary": "Create-or-reuse the draft and edit app content",
+        "tags": [
+          "Documents"
+        ],
+        "x-experimental": true,
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Document identifier — either the URL slug (e.g. `abc123`) or the canonical workbook UUID.",
+              "example": "abc123"
+            },
+            "required": true,
+            "description": "Document identifier — either the URL slug (e.g. `abc123`) or the canonical workbook UUID.",
+            "name": "identifier",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentsV2PatchAppBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft created (or reused) and edits applied; the response carries the `draftIdentifier`. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsV2AppWriteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body (unknown field, neither `htmlEdits` nor `settings`, or more than 20 `htmlEdits`), or a failed `htmlEdits` entry (not found, ambiguous, or result over the 2 MiB cap). Nothing is applied."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "Insufficient permissions: no write access to the document, apps not enabled for the organization, or (user-scoped keys) the role does not allow creating apps."
+          },
+          "404": {
+            "description": "Document not found."
+          },
+          "405": {
+            "description": "Method not allowed."
+          },
+          "409": {
+            "description": "The target is not a published document, or there is no app to patch."
           },
           "422": {
             "description": "The document is a dashboard, not an app."
@@ -49624,6 +50092,62 @@
           },
           "404": {
             "description": "Folder or user not found"
+          }
+        }
+      },
+      "put": {
+        "description": "Set the role every member of the organization holds on a folder, without naming users or groups. `organizationRole` accepts NO_ACCESS, VIEWER, EDITOR, or MANAGER, or null to clear it. The role cascades to every descendant folder and document, so a single call can re-permission a whole tree.",
+        "operationId": "foldersUpdatePermissionSettings",
+        "summary": "Update folder permission settings",
+        "tags": [
+          "Folders"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Unique identifier for the folder",
+              "example": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "required": true,
+            "description": "Unique identifier for the folder",
+            "name": "folderId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FoldersUpdatePermissionSettingsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Permission settings updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FoldersUpdatePermissionSettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body - an unrecognized field, an invalid organization role, neither organizationRole nor organizationAccessBoost provided, or organizationAccessBoost set true without an organization role that grants access"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied - MANAGER role required, AccessBoost is turned off for the organization, or a user-scoped key lacks boost provisioning"
+          },
+          "404": {
+            "description": "Folder not found"
           }
         }
       },
@@ -52895,6 +53419,54 @@
           },
           "422": {
             "description": "Model is not a GitHub App connection"
+          }
+        }
+      }
+    },
+    "/api/v1/models/{modelId}/git/rotate-webhook-secret": {
+      "post": {
+        "description": "Rotate the pull-request webhook signing secret and return the git configuration with the new webhookSecret, so the read → rotate → re-apply lifecycle can be scripted. Takes no request body. The response is the only place the new secret is returned; read it back later with GET /api/v1/models/{modelId}/git?include=webhookSecret. The old secret stops validating immediately, so webhook deliveries fail signature verification until the new value is set in the git provider. Models that share a git repository share one secret — rotating through any of them invalidates it for all.",
+        "operationId": "modelsGitRotateWebhookSecret",
+        "summary": "Rotate webhook secret",
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Model UUID",
+              "example": "123e4567-e89b-12d3-a456-426614174000"
+            },
+            "required": true,
+            "description": "Model UUID",
+            "name": "modelId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Secret rotated; response includes the new webhookSecret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsGitRotateWebhookSecretResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "Model not found or git not configured"
+          },
+          "422": {
+            "description": "Model is not a shared model"
           }
         }
       }
