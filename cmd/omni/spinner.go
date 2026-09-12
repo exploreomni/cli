@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"time"
@@ -43,6 +44,10 @@ func (h *spinnerHandle) Stop() {
 	}
 	close(h.stop)
 	h.s.Stop()
+	// The library erases what it last wrote; clear the whole line as well,
+	// so a phrase swapped in between its last frame and the erase can't
+	// leave a tail behind on the line the output is about to start on.
+	fmt.Fprint(os.Stderr, "\r\033[2K")
 }
 
 // maybeStartSpinner returns a running spinner, or nil if the environment

@@ -27,8 +27,8 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("API returned HTTP %d", e.status)
 }
 
-func outputResponse(resp *http.Response, format string, compact bool) error {
-	return outputResponseTo(os.Stdout, os.Stderr, resp, format, compact)
+func outputResponse(resp *http.Response, format string, compact bool, chart *output.ChartOptions) error {
+	return outputResponseTo(os.Stdout, os.Stderr, resp, format, compact, chart)
 }
 
 // outputResponseTo writes a response to explicit streams, upholding two
@@ -37,7 +37,11 @@ func outputResponse(resp *http.Response, format string, compact bool) error {
 // not an error, so it passes through to stdout byte for byte. The body is read
 // in full before anything is written, so a truncated read can't leave half a
 // payload on stdout ahead of a non-zero exit.
-func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format string, compact bool) error {
+//
+// chart, when non-nil, means the caller asked for a chart of something that
+// isn't a query stream — an error, since nothing else carries the field
+// metadata a chart is drawn from.
+func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format string, compact bool, chart *output.ChartOptions) error {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		// Still an envelope: JSON-mode stderr has to stay parseable even when
@@ -70,6 +74,10 @@ func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format stri
 	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && !json.Valid(trimmed) {
 		_, err := stdout.Write(data)
 		return err
+	}
+
+	if chart != nil {
+		return fmt.Errorf("--chart plots query results: this response is not a query stream")
 	}
 
 	if format == config.FormatHuman {
