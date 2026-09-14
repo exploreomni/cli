@@ -133,8 +133,7 @@ func addGlobalFlags(root *cobra.Command) {
 func addResultFlags(cmd *cobra.Command) {
 	f := cmd.PersistentFlags()
 	f.Bool("workbook", false, "also open the query in an ephemeral workbook and print its link")
-	f.String("chart", "", "draw query results as a chart (--chart or --chart=bar)")
-	f.Lookup("chart").NoOptDefVal = output.ChartKindBar
+	f.Bool("chart", false, "draw query results as a bar chart")
 	f.String("chart-label", "", "only this dimension labels the rows, by field or label (default: every dimension)")
 	f.String("chart-value", "", "only this measure gets bars, by field or label (default: every measure)")
 	f.Int("chart-rows", output.DefaultChartRows, "most rows to draw before summarising the rest")
@@ -144,12 +143,8 @@ func addResultFlags(cmd *cobra.Command) {
 // explicitly chosen JSON format (flag, env, config — not a pipe's auto
 // detection) refuses a chart.
 func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions, error) {
-	kind, err := cmd.Flags().GetString("chart")
-	if err != nil || kind == "" {
+	if on, err := cmd.Flags().GetBool("chart"); err != nil || !on {
 		return nil, nil
-	}
-	if kind != output.ChartKindBar {
-		return nil, fmt.Errorf("unknown chart kind %q (supported: %s)", kind, output.ChartKindBar)
 	}
 	if chosenFormat == config.FormatJSON {
 		return nil, fmt.Errorf("--chart cannot be combined with JSON output: a chart is not JSON")
@@ -158,7 +153,6 @@ func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions
 	value, _ := cmd.Flags().GetString("chart-value")
 	rows, _ := cmd.Flags().GetInt("chart-rows")
 	return &output.ChartOptions{
-		Kind:    kind,
 		Label:   label,
 		Value:   value,
 		Width:   terminalWidth(),

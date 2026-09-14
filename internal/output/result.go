@@ -149,9 +149,6 @@ func pivotKey(set *result.Set, p *result.Pivoted, key []any) string {
 // --chart-value narrows the bars to one measure; --chart-label the
 // dimensions to one.
 func ResultChart(w io.Writer, set *result.Set, opts ChartOptions) error {
-	if opts.Kind != "" && opts.Kind != ChartKindBar {
-		return fmt.Errorf("unknown chart kind %q (supported: %s)", opts.Kind, ChartKindBar)
-	}
 	if len(set.Rows) == 0 {
 		fmt.Fprintln(w, "No results.")
 		return nil

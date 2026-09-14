@@ -151,7 +151,7 @@ available; binary values in its JSON object are interpreted as file paths.
 
 ## Common Flags
   --compact       Non-indented JSON output
-  --chart[=bar]   Draw query run / query wait results as a terminal bar table:
+  --chart         Draw query run / query wait results as a terminal bar table:
                   every dimension a column, every measure a column of bars on
                   its own scale; a query with pivots is drawn pivoted. Leave
                   resultType out of the body. Cannot be combined with an

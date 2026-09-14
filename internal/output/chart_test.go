@@ -243,7 +243,6 @@ func TestChart_Errors(t *testing.T) {
 		{"unknown value column", ChartOptions{Value: "nope"}, "is not a column"},
 		{"non-numeric value column", ChartOptions{Value: "country"}, "holds no numbers"},
 		{"unknown label column", ChartOptions{Label: "nope"}, "is not a column"},
-		{"unknown kind", ChartOptions{Kind: "pie"}, "unknown chart kind"},
 		// Bars labelled by their own values say nothing.
 		{"label is the value column", ChartOptions{Value: "sessions", Label: "sessions"}, "is the column being plotted"},
 	}

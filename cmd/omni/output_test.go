@@ -360,16 +360,14 @@ func TestChartOptions(t *testing.T) {
 		errs   bool
 	}{
 		{name: "absent", args: nil},
-		{name: "bare flag defaults to bar", args: []string{"--chart"}, want: &output.ChartOptions{Kind: "bar"}},
-		{name: "explicit kind", args: []string{"--chart=bar"}, want: &output.ChartOptions{Kind: "bar"}},
+		{name: "flag", args: []string{"--chart"}, want: &output.ChartOptions{}},
 		{
 			name: "columns",
 			args: []string{"--chart", "--chart-label", "region", "--chart-value", "revenue"},
-			want: &output.ChartOptions{Kind: "bar", Label: "region", Value: "revenue"},
+			want: &output.ChartOptions{Label: "region", Value: "revenue"},
 		},
 		{name: "rejected with json", args: []string{"--chart"}, format: "json", errs: true},
-		{name: "unknown kind, before any request", args: []string{"--chart=pie"}, errs: true},
-		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{Kind: "bar"}},
+		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

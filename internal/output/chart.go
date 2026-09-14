@@ -9,11 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const ChartKindBar = "bar"
-
 // ChartOptions describes a requested chart; zero values mean the defaults.
 type ChartOptions struct {
-	Kind    string
 	Label   string
 	Value   string
 	Width   int

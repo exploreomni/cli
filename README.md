@@ -271,7 +271,7 @@ Piping is fine — `omni ... --chart | less` still draws, since that JSON is aut
 
 | Flag | Description |
 |------|-------------|
-| `--chart[=bar]` | Draw query results as a bar table |
+| `--chart` | Draw query results as a bar table |
 | `--chart-value FIELD` | Only this measure, by field name or label (default: every measure) |
 | `--chart-label FIELD` | Only this dimension as the row label (default: every dimension) |
 | `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
