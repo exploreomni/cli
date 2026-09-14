@@ -344,7 +344,8 @@ func upgradeInstructions(goos string) UpgradeInstructions {
 	if goos == "windows" {
 		return UpgradeInstructions{Other: "download the latest release from " + releasesPage}
 	}
-	return UpgradeInstructions{Homebrew: "brew upgrade omni", Other: installCommand}
+	// brew upgrade only auto-refreshes taps every 24h, so it can miss a fresh release.
+	return UpgradeInstructions{Homebrew: "brew update && brew upgrade omni", Other: installCommand}
 }
 
 func (c *Checker) readState() (state, error) {
