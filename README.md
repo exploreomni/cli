@@ -28,6 +28,16 @@ Pre-built binaries for macOS, Linux, and Windows are available on the [Releases 
 | Linux    | amd64, arm64  |
 | Windows  | amd64         |
 
+### Verifying release artifacts
+
+Release archives and `checksums.txt` are signed with [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) (Sigstore under the hood). The install script and Homebrew formula already verify SHA-256 checksums; attestations let you additionally prove the artifact was built by this repo's `release.yml` workflow.
+
+Verify a downloaded archive with the GitHub CLI:
+
+```bash
+gh attestation verify omni_1.2.3_linux_amd64.tar.gz --repo exploreomni/cli
+```
+
 ### Build from source
 
 ```bash
