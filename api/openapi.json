@@ -76,6 +76,10 @@
       "name": "SCIM"
     },
     {
+      "description": "Reusable instructions the agent can run (experimental)",
+      "name": "Skills"
+    },
+    {
       "description": "Unstable API routes - subject to change",
       "name": "Unstable"
     },
@@ -1414,6 +1418,18 @@
           "result": {
             "$ref": "#/components/schemas/AiJobActionQueryResult"
           },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "complete",
+              "partial",
+              "skipped",
+              "failed"
+            ],
+            "description": "How the tool call ended: `pending` while it runs, `complete` when it did what was asked, `partial` when it did some of it and says what is missing, `skipped` when there was nothing to do, `failed` otherwise. Distinct from `result.status`, which says whether a generated query ran.",
+            "example": "complete"
+          },
           "timestamp": {
             "type": "string",
             "description": "ISO 8601 timestamp when this action occurred.",
@@ -2521,6 +2537,10 @@
               {
                 "type": "object",
                 "properties": {
+                  "interpretation": {
+                    "type": "string",
+                    "description": "A plain-language explanation of how the authored query implements the requested condition."
+                  },
                   "query": {
                     "$ref": "#/components/schemas/RoutineConditionQuery"
                   },
@@ -2529,6 +2549,7 @@
                   }
                 },
                 "required": [
+                  "interpretation",
                   "query",
                   "verification"
                 ]
@@ -2618,10 +2639,7 @@
         "description": "The generated semantic query Omni stores and evaluates for this condition. This can be inspected or passed to the query API."
       },
       "RoutineConditionVerification": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": "object",
         "properties": {
           "conditionMetNow": {
             "type": "boolean",
@@ -2637,7 +2655,7 @@
         "required": [
           "rowCount"
         ],
-        "description": "What Omni observed when it ran the condition query during creation, or null when condition.verify was false."
+        "description": "What Omni observed when it verified the condition query during creation."
       },
       "RoutineConditionApiError400": {
         "type": "object",
@@ -2783,21 +2801,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2000,
-            "description": "The delivery condition in plain language. Omni composes a semantic query from this text.",
+            "description": "The delivery condition in plain language. Omni authors and verifies a semantic query from this text.",
             "example": "there are failed orders"
-          },
-          "verify": {
-            "type": "boolean",
-            "default": true,
-            "description": "Whether Omni should run the generated condition query before saving. Defaults to true. Verification confirms that the query runs against the warehouse and establishes the comparison baseline. Set false to save without running the query; the next scheduled evaluation then establishes the baseline for change-based conditions.",
-            "example": true
           }
         },
         "required": [
           "conditionPrompt"
         ],
         "additionalProperties": false,
-        "description": "Delivers only when this condition holds. Omni composes a semantic query from the text and, by default, verifies it before creating the routine. Omit for a routine that delivers on every scheduled run."
+        "description": "Delivers only when this condition holds. Omni authors and verifies a semantic query from the text before creating the routine. Omit for a routine that delivers on every scheduled run."
       },
       "RoutineDestination": {
         "oneOf": [
@@ -3157,27 +3169,19 @@
               }
             ]
           },
+          "interpretation": {
+            "type": "string",
+            "description": "A plain-language explanation of a condition authored by this request. Absent when the stored condition was not re-authored."
+          },
           "verification": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "properties": {
-              "conditionMetNow": {
-                "type": "boolean",
-                "description": "Whether the condition held when Omni verified it. Present only for RESULTS_PRESENT and RESULTS_MISSING.",
-                "example": false
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RoutineConditionVerification"
               },
-              "rowCount": {
-                "type": "integer",
-                "description": "Rows the condition query returned when Omni verified it.",
-                "example": 0
+              {
+                "description": "What Omni observed while verifying the replacement condition. Absent when the request did not derive a condition."
               }
-            },
-            "required": [
-              "rowCount"
-            ],
-            "description": "What Omni observed while verifying the replacement condition, null when condition.verify was false, and absent when the request did not derive a condition."
+            ]
           }
         },
         "required": [
@@ -3200,21 +3204,15 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2000,
-                "description": "The delivery condition in plain language. Omni composes a semantic query from this text.",
+                "description": "The delivery condition in plain language. Omni authors and verifies a semantic query from this text.",
                 "example": "there are failed orders"
-              },
-              "verify": {
-                "type": "boolean",
-                "default": true,
-                "description": "Whether Omni should run the generated condition query before saving. Defaults to true. Verification confirms that the query runs against the warehouse and establishes the comparison baseline. Set false to save without running the query; the next scheduled evaluation then establishes the baseline for change-based conditions.",
-                "example": true
               }
             },
             "required": [
               "conditionPrompt"
             ],
             "additionalProperties": false,
-            "description": "Replaces the delivery condition: Omni recomposes the condition query, verifies it by default, resets the comparison baseline, and cancels any in-flight condition evaluation so a run started under the old condition cannot deliver. Pass null to remove the condition, making the routine deliver on every scheduled run. Omit to leave the stored condition unchanged. Resending the stored condition text unchanged is a no-op."
+            "description": "Replaces the delivery condition: Omni authors and verifies the condition query, resets the comparison baseline, and cancels any in-flight condition evaluation so a run started under the old condition cannot deliver. Pass null to remove the condition, making the routine deliver on every scheduled run. Omit to leave the stored condition unchanged. Resending the stored condition text unchanged is a no-op."
           },
           "description": {
             "type": [
@@ -4771,7 +4769,7 @@
             "description": "Enable facet filters on the dashboard"
           },
           "filterConfig": {
-            "description": "Dashboard filter configuration"
+            "$ref": "#/components/schemas/OmniDashboardFilterConfiguration"
           },
           "filterOrder": {
             "type": "array",
@@ -4784,11 +4782,10 @@
             "$ref": "#/components/schemas/DocumentIdentifier"
           },
           "metadata": {
-            "description": "Dashboard metadata"
+            "$ref": "#/components/schemas/V1DashboardMetadata"
           },
           "metadataVersion": {
-            "type": "string",
-            "description": "Dashboard metadata version (required when metadata is provided)"
+            "$ref": "#/components/schemas/DashboardMetadataVersion"
           },
           "modelId": {
             "type": "string",
@@ -4804,6 +4801,31 @@
               "type": "object",
               "properties": {
                 "aiConfig": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "object",
+                      "properties": {
+                        "aiContext": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "subTitle": {
+                      "type": "object",
+                      "properties": {
+                        "aiContext": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
                   "description": "AI configuration"
                 },
                 "chartType": {
@@ -4829,29 +4851,10 @@
                   "description": "Whether to prefer chart view"
                 },
                 "query": {
-                  "type": "object",
-                  "properties": {
-                    "fields": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Query fields"
-                    },
-                    "table": {
-                      "type": "string",
-                      "description": "Query table/topic"
-                    }
-                  },
-                  "required": [
-                    "fields",
-                    "table"
-                  ],
-                  "additionalProperties": {},
-                  "description": "Query definition"
+                  "$ref": "#/components/schemas/ApiQueryDefinition"
                 },
                 "resultConfig": {
-                  "description": "Result configuration"
+                  "$ref": "#/components/schemas/ApiResultConfig"
                 },
                 "subTitle": {
                   "type": "string",
@@ -4883,11 +4886,387 @@
           "name"
         ]
       },
+      "OmniDashboardFilterConfiguration": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "string",
+                    "number",
+                    "date",
+                    "boolean",
+                    "null",
+                    "composite",
+                    "query",
+                    "user_attribute"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "FIELD_SELECTION",
+                    "MULTI_FIELD_SELECTION",
+                    "FIELD_PICKER",
+                    "PERIOD_OVER_PERIOD",
+                    "MULTI_FIELD_FILTER",
+                    "DYNAMIC_FILTER",
+                    "TOP_N"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "type"
+              ],
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "description": "Dashboard filter configuration"
+      },
       "DocumentIdentifier": {
         "type": "string",
         "minLength": 2,
         "maxLength": 48,
         "description": "Optional document identifier. If omitted, an identifier is auto-generated. Must be unique within the organization."
+      },
+      "V1DashboardMetadata": {
+        "type": "object",
+        "properties": {
+          "hiddenTiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of hidden tiles"
+          },
+          "layouts": {
+            "$ref": "#/components/schemas/DashboardLayouts"
+          },
+          "textTiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TextTile"
+            },
+            "description": "Text tiles in dashboard"
+          },
+          "tileControlMap": {
+            "$ref": "#/components/schemas/TileControlOrFilterMap"
+          },
+          "tileFilterMap": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TileControlOrFilterMap"
+              },
+              {
+                "description": "Tile filter mappings"
+              }
+            ]
+          },
+          "tileSettings": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TileSettings"
+            },
+            "description": "Tile-specific settings"
+          }
+        },
+        "required": [
+          "hiddenTiles",
+          "layouts",
+          "textTiles",
+          "tileControlMap",
+          "tileFilterMap",
+          "tileSettings"
+        ],
+        "description": "Dashboard metadata"
+      },
+      "DashboardLayouts": {
+        "type": "object",
+        "properties": {
+          "lg": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "i": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "h": {
+                  "type": "number"
+                },
+                "w": {
+                  "type": "number"
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "minW": {
+                  "type": "number"
+                },
+                "maxW": {
+                  "type": "number"
+                },
+                "minH": {
+                  "type": "number"
+                },
+                "maxH": {
+                  "type": "number"
+                },
+                "moved": {
+                  "type": "boolean"
+                },
+                "static": {
+                  "type": "boolean"
+                },
+                "isDraggable": {
+                  "type": "boolean"
+                },
+                "isResizable": {
+                  "type": "boolean"
+                },
+                "resizeHandles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "w",
+                      "s",
+                      "e",
+                      "n",
+                      "sw",
+                      "nw",
+                      "se",
+                      "ne"
+                    ]
+                  }
+                },
+                "isBounded": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "i",
+                "h",
+                "w",
+                "x",
+                "y"
+              ]
+            },
+            "description": "Large screen layout"
+          },
+          "sm": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "i": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "h": {
+                  "type": "number"
+                },
+                "w": {
+                  "type": "number"
+                },
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "minW": {
+                  "type": "number"
+                },
+                "maxW": {
+                  "type": "number"
+                },
+                "minH": {
+                  "type": "number"
+                },
+                "maxH": {
+                  "type": "number"
+                },
+                "moved": {
+                  "type": "boolean"
+                },
+                "static": {
+                  "type": "boolean"
+                },
+                "isDraggable": {
+                  "type": "boolean"
+                },
+                "isResizable": {
+                  "type": "boolean"
+                },
+                "resizeHandles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "w",
+                      "s",
+                      "e",
+                      "n",
+                      "sw",
+                      "nw",
+                      "se",
+                      "ne"
+                    ]
+                  }
+                },
+                "isBounded": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "i",
+                "h",
+                "w",
+                "x",
+                "y"
+              ]
+            },
+            "description": "Small screen layout"
+          }
+        },
+        "required": [
+          "lg"
+        ]
+      },
+      "TextTile": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Text content"
+          },
+          "miniUuid": {
+            "type": "string",
+            "description": "Tile identifier"
+          }
+        },
+        "required": [
+          "content",
+          "miniUuid"
+        ]
+      },
+      "TileControlOrFilterMap": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/TileControlOrFilterMapSetting"
+        },
+        "description": "Tile control mappings"
+      },
+      "TileControlOrFilterMapSetting": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          ]
+        }
+      },
+      "TileSettings": {
+        "type": "object",
+        "properties": {
+          "hideBorder": {
+            "type": "boolean",
+            "description": "Hide tile border"
+          },
+          "hideSubTitle": {
+            "type": "boolean",
+            "description": "Hide subtitle"
+          },
+          "hideTitle": {
+            "type": "boolean",
+            "description": "Hide title"
+          },
+          "showDescription": {
+            "type": "boolean",
+            "description": "Show description"
+          }
+        }
+      },
+      "DashboardMetadataVersion": {
+        "type": "number",
+        "enum": [
+          2
+        ],
+        "description": "Dashboard metadata version (required when metadata is provided)"
+      },
+      "ApiQueryDefinition": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Query fields"
+          },
+          "table": {
+            "type": "string",
+            "description": "Query table/topic"
+          }
+        },
+        "required": [
+          "fields",
+          "table"
+        ],
+        "additionalProperties": {},
+        "description": "Query definition"
+      },
+      "ApiResultConfig": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": {},
+        "description": "Result configuration"
       },
       "ApiVisConfig": {
         "type": [
@@ -4947,14 +5326,14 @@
             "description": "Document description"
           },
           "documentMetadata": {
-            "description": "Document metadata"
+            "$ref": "#/components/schemas/DocumentMetadataObject"
           },
           "facetFilters": {
             "type": "boolean",
             "description": "Whether facet filters are enabled"
           },
           "filterConfig": {
-            "description": "Dashboard filter configuration"
+            "$ref": "#/components/schemas/OmniDashboardFilterConfiguration"
           },
           "filterOrder": {
             "type": "array",
@@ -4973,7 +5352,9 @@
           },
           "queryPresentations": {
             "type": "array",
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/DocumentsGetQueryPresentation"
+            },
             "description": "Query presentations"
           },
           "refreshInterval": {
@@ -4986,12 +5367,2794 @@
         },
         "required": [
           "facetFilters",
+          "filterConfig",
           "filterOrder",
           "modelId",
           "name",
           "queryPresentations",
           "refreshInterval"
         ]
+      },
+      "DocumentMetadataObject": {
+        "type": "object",
+        "properties": {
+          "generatedDescription": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "fingerprint": {
+                "type": "string"
+              },
+              "generatedAt": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "description",
+              "fingerprint",
+              "generatedAt",
+              "title"
+            ]
+          },
+          "presentation": {
+            "$ref": "#/components/schemas/DocumentPresentation"
+          }
+        },
+        "description": "Document metadata"
+      },
+      "DocumentPresentation": {
+        "type": "object",
+        "properties": {
+          "filters": {
+            "type": "object",
+            "properties": {
+              "collapsible": {
+                "type": "boolean",
+                "description": "Whether filters are collapsible"
+              },
+              "defaultExpanded": {
+                "type": "boolean",
+                "description": "Whether filters are expanded by default"
+              },
+              "fixedControlBar": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the control bar is fixed to the top of the dashboard while scrolling"
+              }
+            },
+            "default": {
+              "collapsible": true,
+              "defaultExpanded": false,
+              "fixedControlBar": false
+            },
+            "required": [
+              "collapsible",
+              "defaultExpanded"
+            ],
+            "description": "Filter presentation settings"
+          }
+        },
+        "description": "Presentation settings"
+      },
+      "DocumentsGetQueryPresentation": {
+        "type": "object",
+        "properties": {
+          "aiConfig": {
+            "description": "AI configuration, as stored"
+          },
+          "chartType": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "area",
+              "areaStacked",
+              "areaStackedPercentage",
+              "bar",
+              "barLine",
+              "barGrouped",
+              "barStacked",
+              "barStackedPercentage",
+              "boxplot",
+              "code",
+              "column",
+              "columnGrouped",
+              "columnStacked",
+              "columnStackedPercentage",
+              "heatmap",
+              "kpi",
+              "line",
+              "lineColor",
+              "map",
+              "regionMap",
+              "markdown",
+              "omni-ai-summary-markdown",
+              "pie",
+              "funnel",
+              "sankey",
+              "point",
+              "pointColor",
+              "pointSize",
+              "pointSizeColor",
+              "singleRecord",
+              "omni-spreadsheet",
+              "summaryValue",
+              "svgMap",
+              "table",
+              "treemap"
+            ],
+            "description": "Chart type"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description"
+          },
+          "id": {
+            "type": "string",
+            "description": "Query presentation ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Query presentation name"
+          },
+          "prefersChart": {
+            "type": "boolean",
+            "description": "Whether to prefer chart view"
+          },
+          "query": {
+            "$ref": "#/components/schemas/OmniQuery"
+          },
+          "queryIdentifierMapKey": {
+            "type": "string",
+            "description": "Key in the query identifier map"
+          },
+          "resultConfig": {
+            "description": "Result configuration, as stored"
+          },
+          "subTitle": {
+            "type": "string",
+            "description": "Subtitle"
+          },
+          "topicName": {
+            "type": "string",
+            "description": "Topic name"
+          },
+          "visConfig": {
+            "$ref": "#/components/schemas/ApiVisConfig"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "query",
+          "queryIdentifierMapKey"
+        ]
+      },
+      "OmniQuery": {
+        "type": "object",
+        "properties": {
+          "aiGenerated": {
+            "type": "boolean",
+            "description": "True when AI generated this query’s SQL; the AI SQL is shown in the advanced SQL box."
+          },
+          "branch_id": {
+            "type": "string",
+            "description": "Branch model ID when querying against a model branch."
+          },
+          "calculations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "allow_refs_to_unselected_fields": {
+                  "type": "boolean",
+                  "description": "Set by the Kotlin parser when this calc references fields not selected at the top level (AI SQL-gen produces these; UI-authored calcs do not)."
+                },
+                "anchor_row": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "description": "The 1-indexed row the Excel-style formula was authored against, so row-relative references resolve to the intended offsets — e.g. a percent-of-previous \"=B4/B5\" authored on row 5. Only used when sql_expression is omitted; defaults to 1 (B1 = this row)."
+                },
+                "calc_name": {
+                  "type": "string",
+                  "description": "Internal identifier for the calculation, used as the column alias."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Description of the calculation."
+                },
+                "format": {
+                  "type": "string",
+                  "description": "Number/date format string (e.g. \"#,##0.00\")."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Display label shown in the UI."
+                },
+                "original_formula": {
+                  "type": "string",
+                  "description": "The calculation formula. Prefer referencing selected fields by name (e.g. \"=SUM(orders.revenue)\") — name references are stable under column reordering and have no row semantics. Excel-style references also work: column letters map to the query's fields in table order (A = the first field) with rows anchored at row 1 (set anchor_row to author row-relative references against a different row), and calc columns can only be referenced by letter. When sql_expression is omitted, the server parses this formula on write and rejects the request if it does not parse."
+                },
+                "outside_pivot": {
+                  "type": "boolean",
+                  "description": "When true, the calculation is evaluated outside the pivot grouping."
+                },
+                "pushdown": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Per-calc override for whether to evaluate before the row limit. `null` defers to the model-level default."
+                },
+                "sql": {
+                  "type": "string",
+                  "description": "Compiled SQL string produced from the formula."
+                },
+                "sql_expression": {
+                  "description": "Parsed SQL expression tree (serialized, server-internal format). Omit it to have the server parse original_formula instead."
+                },
+                "swallow_errors": {
+                  "type": "boolean",
+                  "description": "When true, calculation errors are silently swallowed instead of surfaced."
+                }
+              },
+              "required": [
+                "calc_name"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Table calculations attached to this query."
+          },
+          "column_limit": {
+            "type": "number",
+            "description": "Max number of pivot columns to return."
+          },
+          "column_totals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "aggregation"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "description": "Column-level aggregation totals, keyed by field name."
+          },
+          "controls": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "display": {
+                      "type": "string",
+                      "enum": [
+                        "SELECT",
+                        "BUTTON_TOGGLE"
+                      ]
+                    },
+                    "field": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "FIELD",
+                        "TIMEFRAME"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "isDimension": {
+                            "type": "boolean"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "topicLabel": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "viewLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      }
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "FIELD_SELECTION"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "field",
+                    "kind",
+                    "options",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "display": {
+                      "type": "string",
+                      "enum": [
+                        "SELECT",
+                        "BUTTON_TOGGLE"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      }
+                    },
+                    "selectionMap": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "MULTI_FIELD_SELECTION"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "options",
+                    "selectionMap",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "computations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "filterId": {
+                            "type": "string"
+                          },
+                          "isDynamicPreviousPeriod": {
+                            "type": "boolean"
+                          },
+                          "periodsAgo": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "timeUnitName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "periodsAgo",
+                          "timeUnitName"
+                        ]
+                      }
+                    },
+                    "filterFieldName": {
+                      "type": "string"
+                    },
+                    "filterId": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "PERIOD_OVER_PERIOD"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "computations",
+                    "filterFieldName",
+                    "id",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "fieldOrder": {
+                      "type": "string",
+                      "enum": [
+                        "query",
+                        "control"
+                      ]
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "isDimension": {
+                            "type": "boolean"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "topicLabel": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "viewLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "value"
+                        ]
+                      }
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "FIELD_PICKER"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "options",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "conjunction": {
+                      "type": "string",
+                      "enum": [
+                        "OR"
+                      ]
+                    },
+                    "filters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "fieldName": {
+                            "type": "string"
+                          },
+                          "filter": {
+                            "$ref": "#/components/schemas/JsonValue"
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "fieldName",
+                          "filter",
+                          "id"
+                        ]
+                      }
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "MULTI_FIELD_FILTER"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "conjunction",
+                    "filters",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "fieldSelection": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "full-model"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "auto"
+                              ]
+                            },
+                            "topics": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "topics"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "fields": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "fieldName": {
+                                    "type": "string"
+                                  },
+                                  "topicName": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "fieldName"
+                                ]
+                              }
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "specific"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "fields",
+                            "mode"
+                          ]
+                        }
+                      ]
+                    },
+                    "includeViewNameInLabels": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "DYNAMIC_FILTER"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "fieldSelection",
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "defaultValue": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "field": {
+                      "type": "string"
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "min": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "TOP_N"
+                      ]
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "defaultValue",
+                    "field",
+                    "type",
+                    "value"
+                  ]
+                }
+              ]
+            },
+            "description": "Interactive controls (field selectors, PoP controls) attached to this query."
+          },
+          "cube_metadata": {
+            "type": "object",
+            "properties": {
+              "cube_name": {
+                "type": "string"
+              },
+              "hash_key": {
+                "type": "string"
+              },
+              "topic_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cube_name",
+              "hash_key",
+              "topic_name"
+            ],
+            "additionalProperties": {},
+            "description": "Cube-specific metadata (topic name, cube name, hash key) for cube-backed queries."
+          },
+          "custom_summary_types": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Per-field custom summary functions (e.g. SUM, AVG, COUNT)."
+          },
+          "dbtFileName": {
+            "type": "string",
+            "description": "dbt file name when this query is backed by a dbt model."
+          },
+          "dbtMode": {
+            "type": "boolean",
+            "description": "Whether this query is in dbt mode."
+          },
+          "default_group_by": {
+            "type": "boolean",
+            "description": "When true, all dimensions are implicitly included in GROUP BY, unless the model's default_group_by setting (never or primary_key) suppresses it."
+          },
+          "dimensionIndex": {
+            "type": "number",
+            "description": "Index of the primary dimension used for result ordering."
+          },
+          "executableSQL": {
+            "type": "string",
+            "description": "Server-compiled SQL string (read-only, set by the backend)."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Model field names selected for the query (dimensions + measures)."
+          },
+          "fill_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields whose missing date/time values should be filled with nulls to create continuous series."
+          },
+          "filters": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "case_insensitive": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "CONTAINS",
+                        "ENDS_WITH",
+                        "STARTS_WITH",
+                        "EQUALS",
+                        "IS_EMPTY",
+                        "SQL_LIKE"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type",
+                    "values"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_inclusive": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "LESS_THAN",
+                        "GREATER_THAN",
+                        "EQUALS",
+                        "BETWEEN"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "number"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type",
+                    "values"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "isFiscal": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "IS_ON_DAY_OF_WEEK",
+                        "IS_ON_DAY_OF_QUARTER",
+                        "IS_IN_MONTH_OF_YEAR",
+                        "IS_ON_DAY_OF_YEAR",
+                        "IS_AT_HOUR_OF_DAY",
+                        "IS_IN_QUARTER_OF_YEAR",
+                        "IS_IN_WEEK_OF_YEAR",
+                        "IS_ON_DAY_OF_MONTH",
+                        "BETWEEN",
+                        "ON_OR_AFTER",
+                        "BEFORE",
+                        "TIME_FOR_INTERVAL_DURATION",
+                        "TIME_FOR_UNIT_DURATION",
+                        "QUERY_OFFSET"
+                      ]
+                    },
+                    "left_side": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "offset_interval_string": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "right_side": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "date"
+                      ]
+                    },
+                    "ui_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ANY_TIME",
+                        "BEFORE",
+                        "BETWEEN",
+                        "MONTH_OF_YEAR",
+                        "PAST",
+                        "YEAR",
+                        "DAY",
+                        "IS_ON_DAY_OF_WEEK",
+                        "ON_OR_AFTER",
+                        "IS_IN_THE_MONTH",
+                        "IS_IN_THE_QUARTER",
+                        "IS_IN_THE_FISCAL_QUARTER",
+                        "IS_IN_THE_FISCAL_YEAR",
+                        "TIME_FOR_INTERVAL_DURATION",
+                        "TIME_FOR_UNIT_DURATION",
+                        "CUSTOM",
+                        null
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "null"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "treat_nulls_as_false": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "boolean"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "disregard_limit": {
+                      "type": "boolean"
+                    },
+                    "field_name": {
+                      "type": "string"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "query_id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "query"
+                      ]
+                    },
+                    "view_query": {
+                      "type": "object",
+                      "properties": {
+                        "fields": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "filters": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "default": {}
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "sorts": {
+                          "type": "array",
+                          "items": {},
+                          "default": []
+                        },
+                        "table": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fields"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "user_attribute"
+                      ]
+                    },
+                    "user_attribute_name": {
+                      "type": "string"
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "user_attribute_name"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "conjunction": {
+                      "type": "string",
+                      "enum": [
+                        "OR",
+                        "AND"
+                      ]
+                    },
+                    "filters": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CompositeFilter"
+                      }
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "composite"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "conjunction",
+                    "filters",
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                }
+              ]
+            },
+            "description": "Query filters keyed by filter ID."
+          },
+          "filtersUsedInSql": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "case_insensitive": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "CONTAINS",
+                        "ENDS_WITH",
+                        "STARTS_WITH",
+                        "EQUALS",
+                        "IS_EMPTY",
+                        "SQL_LIKE"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type",
+                    "values"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_inclusive": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "LESS_THAN",
+                        "GREATER_THAN",
+                        "EQUALS",
+                        "BETWEEN"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "number"
+                      ]
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type",
+                    "values"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "isFiscal": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "IS_ON_DAY_OF_WEEK",
+                        "IS_ON_DAY_OF_QUARTER",
+                        "IS_IN_MONTH_OF_YEAR",
+                        "IS_ON_DAY_OF_YEAR",
+                        "IS_AT_HOUR_OF_DAY",
+                        "IS_IN_QUARTER_OF_YEAR",
+                        "IS_IN_WEEK_OF_YEAR",
+                        "IS_ON_DAY_OF_MONTH",
+                        "BETWEEN",
+                        "ON_OR_AFTER",
+                        "BEFORE",
+                        "TIME_FOR_INTERVAL_DURATION",
+                        "TIME_FOR_UNIT_DURATION",
+                        "QUERY_OFFSET"
+                      ]
+                    },
+                    "left_side": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "offset_interval_string": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "right_side": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "date"
+                      ]
+                    },
+                    "ui_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "ANY_TIME",
+                        "BEFORE",
+                        "BETWEEN",
+                        "MONTH_OF_YEAR",
+                        "PAST",
+                        "YEAR",
+                        "DAY",
+                        "IS_ON_DAY_OF_WEEK",
+                        "ON_OR_AFTER",
+                        "IS_IN_THE_MONTH",
+                        "IS_IN_THE_QUARTER",
+                        "IS_IN_THE_FISCAL_QUARTER",
+                        "IS_IN_THE_FISCAL_YEAR",
+                        "TIME_FOR_INTERVAL_DURATION",
+                        "TIME_FOR_UNIT_DURATION",
+                        "CUSTOM",
+                        null
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "null"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "treat_nulls_as_false": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "boolean"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "disregard_limit": {
+                      "type": "boolean"
+                    },
+                    "field_name": {
+                      "type": "string"
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "query_id": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "query"
+                      ]
+                    },
+                    "view_query": {
+                      "type": "object",
+                      "properties": {
+                        "fields": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "filters": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "default": {}
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "sorts": {
+                          "type": "array",
+                          "items": {},
+                          "default": []
+                        },
+                        "table": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "fields"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "user_attribute"
+                      ]
+                    },
+                    "user_attribute_name": {
+                      "type": "string"
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "user_attribute_name"
+                  ],
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cancel_query_filter": {
+                      "type": "boolean"
+                    },
+                    "ignore_if_unjoinable": {
+                      "type": "boolean"
+                    },
+                    "conjunction": {
+                      "type": "string",
+                      "enum": [
+                        "OR",
+                        "AND"
+                      ]
+                    },
+                    "filters": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CompositeFilter"
+                      }
+                    },
+                    "is_negative": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "composite"
+                      ]
+                    },
+                    "appliedLabels": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "base_view": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "fieldName": {
+                      "type": "string"
+                    },
+                    "filterControlType": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "multiValueEquals",
+                            "singleValueEquals"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "singleDay",
+                            "timeframe"
+                          ]
+                        }
+                      ]
+                    },
+                    "hidden": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "requiredScope": {
+                      "type": "string",
+                      "enum": [
+                        "dashboard",
+                        "tiles"
+                      ]
+                    },
+                    "topic": {
+                      "type": "string"
+                    },
+                    "watchedContainerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "conjunction",
+                    "filters",
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                }
+              ]
+            },
+            "description": "Filters that were embedded directly in raw SQL (read-only)."
+          },
+          "imported_model_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Model IDs (UUIDs) the query reaches through its composite topic's imports — the topic's import_models entries, which must be model ids, not names. Authorization requires the run gate on each; omit only for queries that do not touch imported topics."
+          },
+          "join_paths_from_topic_name": {
+            "type": "string",
+            "description": "Topic name that determines join path precedence for parsed SQL queries."
+          },
+          "join_via_map": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Virtual topic join path overrides, keyed by view name to ordered join path."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Row limit for the query."
+          },
+          "manualSort": {
+            "type": "boolean",
+            "description": "When true, the user has explicitly set a custom sort order."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "order": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": {}
+            },
+            "description": "Per-field display metadata (format, label, order)."
+          },
+          "modelId": {
+            "type": "string",
+            "description": "The model ID this query runs against."
+          },
+          "model_extension_id": {
+            "type": "string",
+            "description": "ID of a model extension layered on top of the base model."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Row offset for pagination."
+          },
+          "parsed": {
+            "type": "boolean",
+            "description": "Whether this raw SQL query has been parsed into a semantic query."
+          },
+          "periodOverPeriodTransposed": {
+            "type": "boolean",
+            "description": "Whether the period-over-period comparison columns are transposed."
+          },
+          "period_over_period_computations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_filter_field_name": {
+                  "type": "string",
+                  "description": "The date dimension field this comparison is anchored to."
+                },
+                "date_filter_id": {
+                  "type": "string",
+                  "description": "ID of the date filter being offset (if backed by a dashboard filter)."
+                },
+                "is_dynamic_previous_period": {
+                  "type": "boolean",
+                  "description": "When true, the previous period is calculated dynamically relative to the current filter range."
+                },
+                "periods_ago": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "description": "How many periods back to compare (e.g. 1 = previous period). Null if not set."
+                },
+                "time_unit_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Time grain for the offset (e.g. \"month\", \"year\"). Null if not set."
+                }
+              },
+              "required": [
+                "date_filter_field_name",
+                "periods_ago",
+                "time_unit_name"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Period-over-period comparison configurations."
+          },
+          "pivots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Field names to pivot on (columns become values)."
+          },
+          "rewriteSql": {
+            "type": "boolean",
+            "description": "When true, the backend should rewrite/optimize the SQL."
+          },
+          "row_totals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "aggregation"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "description": "Row-level aggregation totals, keyed by field name."
+          },
+          "sorts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column_name": {
+                  "type": "string",
+                  "description": "The model field name to sort by."
+                },
+                "is_column_sort": {
+                  "type": "boolean",
+                  "description": "When true, this sort targets a pivoted column rather than a row dimension."
+                },
+                "pivot_value_map": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": "Maps pivot field names to specific pivot values, scoping the sort to a single pivot column."
+                },
+                "sort_descending": {
+                  "type": "boolean",
+                  "description": "When true, sort order is descending."
+                },
+                "subtotal_sort": {
+                  "type": "string",
+                  "description": "Field name whose subtotal row should be used as the sort key."
+                }
+              },
+              "required": [
+                "column_name",
+                "sort_descending"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Sort clauses applied to the query result set."
+          },
+          "sqlSortsEnabled": {
+            "type": "boolean",
+            "description": "Whether user-created sorts are enabled on a raw SQL query."
+          },
+          "staticQueryReferences": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Pre-computed query references for AI chat context. Inner shape is `OmniQuery & { model_id: string }`; left as `unknown` to avoid a recursive zod schema. Validated structurally by consumers when they execute the referenced sub-queries."
+          },
+          "table": {
+            "type": "string",
+            "description": "Base view (table) name in the model."
+          },
+          "transposed_measures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Measure field names that have been transposed into rows."
+          },
+          "userEditedSQL": {
+            "type": "string",
+            "description": "User-authored raw SQL (empty string when not in SQL mode)."
+          },
+          "version": {
+            "type": "number",
+            "description": "Schema version for migration support."
+          }
+        },
+        "required": [
+          "calculations",
+          "column_totals",
+          "fields",
+          "fill_fields",
+          "filters",
+          "modelId",
+          "pivots",
+          "row_totals",
+          "sorts",
+          "table",
+          "userEditedSQL"
+        ],
+        "additionalProperties": {}
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        ],
+        "description": "Arbitrary JSON value (string, number, boolean, null, object, or array)."
       },
       "SuccessResponse": {
         "type": "object",
@@ -5038,6 +8201,7 @@
               "required": [
                 "id",
                 "name",
+                "query",
                 "queryIdentifierMapKey",
                 "url"
               ]
@@ -5083,6 +8247,10 @@
             "$ref": "#/components/schemas/DocumentAbilities"
           },
           "permits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocumentPermit"
+            },
             "description": "User permits for the document. Present only when userId is provided."
           }
         },
@@ -5157,6 +8325,105 @@
           "requirePullRequestToPublish"
         ],
         "description": "Document-level ability values, as stored on the document"
+      },
+      "DocumentPermit": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "For a user permit, the user's email address, or an SSO embed user's embed email. For an organization-wide permit, \"Organization\" or \"Organization - via Folder\". Absent for user groups."
+          },
+          "direct": {
+            "$ref": "#/components/schemas/PermitLayer"
+          },
+          "folder": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PermitLayer"
+              },
+              {
+                "description": "Access inherited from a folder"
+              }
+            ]
+          },
+          "folderInfo": {
+            "$ref": "#/components/schemas/FolderInfo"
+          },
+          "id": {
+            "type": "string",
+            "description": "User or user group ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "User or user group name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "userGroup"
+            ],
+            "description": "Principal type: user or userGroup"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ]
+      },
+      "PermitLayer": {
+        "type": "object",
+        "properties": {
+          "accessBoost": {
+            "type": "boolean",
+            "description": "Whether this layer boosts access"
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Derived; an OWNER role also implies ownership"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "NO_ACCESS",
+              "VIEWER",
+              "EXPLORER",
+              "EDITOR",
+              "MANAGER",
+              "OWNER"
+            ],
+            "description": "Content role"
+          }
+        },
+        "required": [
+          "accessBoost",
+          "role"
+        ],
+        "description": "Access granted directly on the document"
+      },
+      "FolderInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Folder ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Folder name"
+          },
+          "path": {
+            "type": "string",
+            "description": "Folder path"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "path"
+        ],
+        "description": "The folder the inherited access came from"
       },
       "DocumentsUpdatePermissionSettingsBody": {
         "type": "object",
@@ -5631,13 +8898,162 @@
           },
           "principals": {
             "type": "array",
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/AccessPrincipal"
+            },
             "description": "List of users and groups with access"
           }
         },
         "required": [
           "pageInfo",
           "principals"
+        ]
+      },
+      "AccessPrincipal": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserAccessPrincipal"
+          },
+          {
+            "$ref": "#/components/schemas/GroupAccessPrincipal"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "user": "#/components/schemas/UserAccessPrincipal",
+            "userGroup": "#/components/schemas/GroupAccessPrincipal"
+          }
+        }
+      },
+      "UserAccessPrincipal": {
+        "type": "object",
+        "properties": {
+          "accessBoost": {
+            "type": "boolean",
+            "description": "Whether access is boosted for this principal"
+          },
+          "accessSource": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "folder"
+            ],
+            "description": "Where the access came from: direct or folder"
+          },
+          "folderInfo": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FolderInfo"
+              },
+              {
+                "description": "The folder the access came from"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "User or user group ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "User or user group name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "NO_ACCESS",
+              "VIEWER",
+              "EXPLORER",
+              "EDITOR",
+              "MANAGER",
+              "OWNER"
+            ],
+            "description": "Content role"
+          },
+          "email": {
+            "type": "string",
+            "description": "User email"
+          },
+          "isOwner": {
+            "type": "boolean",
+            "description": "Whether the user owns the document"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          }
+        },
+        "required": [
+          "accessBoost",
+          "accessSource",
+          "id",
+          "name",
+          "role",
+          "type"
+        ]
+      },
+      "GroupAccessPrincipal": {
+        "type": "object",
+        "properties": {
+          "accessBoost": {
+            "type": "boolean",
+            "description": "Whether access is boosted for this principal"
+          },
+          "accessSource": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "folder"
+            ],
+            "description": "Where the access came from: direct or folder"
+          },
+          "folderInfo": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FolderInfo"
+              },
+              {
+                "description": "The folder the access came from"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "User or user group ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "User or user group name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "NO_ACCESS",
+              "VIEWER",
+              "EXPLORER",
+              "EDITOR",
+              "MANAGER",
+              "OWNER"
+            ],
+            "description": "Content role"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "userGroup"
+            ]
+          }
+        },
+        "required": [
+          "accessBoost",
+          "accessSource",
+          "id",
+          "name",
+          "role",
+          "type"
         ]
       },
       "DocumentsListFavoritesResponse": {
@@ -24075,49 +27491,6 @@
           "config"
         ]
       },
-      "JsonValue": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "null"
-          },
-          {
-            "type": "object",
-            "additionalProperties": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          {
-            "type": "array",
-            "items": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        ],
-        "description": "Arbitrary JSON value (string, number, boolean, null, object, or array)."
-      },
       "QueryPresentationsPatchExternal": {
         "type": "object",
         "properties": {
@@ -31516,7 +34889,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them. The write itself succeeded. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
+                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them, and a map-provider setting the organization's app policy turns off for every app. The write itself succeeded. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
               }
             },
             "required": [
@@ -34671,43 +38044,144 @@
           "topics": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "base_view_name": {
-                  "type": "string",
-                  "description": "Base view name for the topic"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ModelsListedTopic"
                 },
-                "description": {
-                  "type": "string",
-                  "description": "Topic description"
-                },
-                "group_label": {
-                  "type": "string",
-                  "description": "Group label"
-                },
-                "hidden": {
-                  "type": "boolean",
-                  "description": "Whether the topic is hidden"
-                },
-                "label": {
-                  "type": "string",
-                  "description": "Topic label"
-                },
-                "name": {
-                  "type": "string",
-                  "description": "Topic name"
+                {
+                  "$ref": "#/components/schemas/ModelsListedCompositeTopic"
                 }
-              },
-              "required": [
-                "base_view_name",
-                "name"
               ]
             },
-            "description": "List of topics"
+            "description": "List of topics, regular and composite"
           }
         },
         "required": [
           "success",
+          "topics"
+        ]
+      },
+      "ModelsListedTopic": {
+        "type": "object",
+        "properties": {
+          "base_view_name": {
+            "type": "string",
+            "description": "Base view name for the topic"
+          },
+          "description": {
+            "type": "string",
+            "description": "Topic description"
+          },
+          "group_label": {
+            "type": "string",
+            "description": "Group label"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Whether the topic is hidden"
+          },
+          "is_composite": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Absent (or false) on a regular topic"
+          },
+          "label": {
+            "type": "string",
+            "description": "Topic label"
+          },
+          "name": {
+            "type": "string",
+            "description": "Topic name"
+          }
+        },
+        "required": [
+          "base_view_name",
+          "name"
+        ]
+      },
+      "ModelsListedCompositeTopic": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Composite topic description"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Whether the composite topic is hidden"
+          },
+          "import_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelsCompositeTopicImportModel"
+            },
+            "description": "Models this composite topic imports topics from"
+          },
+          "is_composite": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Marks a composite topic, which combines other topics"
+          },
+          "label": {
+            "type": "string",
+            "description": "Composite topic label"
+          },
+          "name": {
+            "type": "string",
+            "description": "Composite topic name"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the component topics"
+          }
+        },
+        "required": [
+          "is_composite",
+          "name",
+          "topics"
+        ]
+      },
+      "ModelsCompositeTopicImportModel": {
+        "type": "object",
+        "properties": {
+          "model_ref": {
+            "type": "string",
+            "description": "Id of the model the topics are imported from"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "alias": {
+                  "type": "string",
+                  "description": "Local alias for the imported topic"
+                },
+                "ignored": {
+                  "type": "boolean",
+                  "description": "Whether the imported topic is ignored"
+                },
+                "topic": {
+                  "type": "string",
+                  "description": "Name of the topic in the source model"
+                }
+              },
+              "required": [
+                "topic"
+              ]
+            },
+            "description": "Topics imported from the source model"
+          }
+        },
+        "required": [
+          "model_ref",
           "topics"
         ]
       },
@@ -34719,251 +38193,13 @@
             "description": "Whether the operation succeeded"
           },
           "topic": {
-            "type": "object",
-            "properties": {
-              "base_view_name": {
-                "type": "string",
-                "description": "Base view name for the topic"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelsGetTopicRegular"
               },
-              "description": {
-                "type": "string",
-                "description": "Topic description"
-              },
-              "group_label": {
-                "type": "string",
-                "description": "Group label"
-              },
-              "hidden": {
-                "type": "boolean",
-                "description": "Whether the topic is hidden"
-              },
-              "label": {
-                "type": "string",
-                "description": "Topic label"
-              },
-              "name": {
-                "type": "string",
-                "description": "Topic name"
-              },
-              "relationships": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "bidirectional": {
-                      "type": "boolean"
-                    },
-                    "extension_model_id": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "ignored": {
-                      "type": "boolean"
-                    },
-                    "join_type": {
-                      "type": "string"
-                    },
-                    "left_view_alias": {
-                      "type": "string"
-                    },
-                    "left_view_label": {
-                      "type": "string"
-                    },
-                    "left_view_name": {
-                      "type": "string"
-                    },
-                    "original_on_sql": {
-                      "type": "string"
-                    },
-                    "right_view_alias": {
-                      "type": "string"
-                    },
-                    "right_view_label": {
-                      "type": "string"
-                    },
-                    "right_view_name": {
-                      "type": "string"
-                    },
-                    "sql": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "yaml_path_prefix": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "join_type",
-                    "left_view_name",
-                    "original_on_sql",
-                    "right_view_name",
-                    "sql",
-                    "type"
-                  ]
-                },
-                "description": "Relationships for the topic"
-              },
-              "views": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "ai_context": {
-                      "type": "string"
-                    },
-                    "aliases": {
-                      "type": [
-                        "array",
-                        "null"
-                      ],
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "catalog": {
-                      "type": "string"
-                    },
-                    "default_drill_fields": {
-                      "type": [
-                        "array",
-                        "null"
-                      ],
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "description": {
-                      "type": "string"
-                    },
-                    "dimensions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "field_name": {
-                            "type": "string",
-                            "description": "Field name"
-                          }
-                        },
-                        "required": [
-                          "field_name"
-                        ],
-                        "additionalProperties": {}
-                      }
-                    },
-                    "display_order": {
-                      "type": "number"
-                    },
-                    "extension_model_id": {
-                      "type": "string"
-                    },
-                    "fields_limited": {
-                      "type": [
-                        "boolean",
-                        "null"
-                      ]
-                    },
-                    "filter_only_fields": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "field_name": {
-                            "type": "string",
-                            "description": "Field name"
-                          }
-                        },
-                        "required": [
-                          "field_name"
-                        ],
-                        "additionalProperties": {}
-                      }
-                    },
-                    "folder": {
-                      "type": "string"
-                    },
-                    "hidden": {
-                      "type": "boolean"
-                    },
-                    "ide_file_name": {
-                      "type": "string"
-                    },
-                    "ignored": {
-                      "type": "boolean"
-                    },
-                    "is_pseudo_display_view": {
-                      "type": "boolean"
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "measures": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "field_name": {
-                            "type": "string",
-                            "description": "Field name"
-                          }
-                        },
-                        "required": [
-                          "field_name"
-                        ],
-                        "additionalProperties": {}
-                      }
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "schema": {
-                      "type": "string"
-                    },
-                    "schema_label": {
-                      "type": "string"
-                    },
-                    "table_name": {
-                      "type": "string"
-                    },
-                    "tags": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "topic_scope": {
-                      "type": "string"
-                    },
-                    "yaml_path": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "dimensions",
-                    "filter_only_fields",
-                    "ide_file_name",
-                    "measures",
-                    "name",
-                    "yaml_path"
-                  ],
-                  "additionalProperties": {}
-                },
-                "description": "Views available in the topic"
+              {
+                "$ref": "#/components/schemas/ModelsGetTopicComposite"
               }
-            },
-            "required": [
-              "base_view_name",
-              "name",
-              "relationships",
-              "views"
             ],
             "description": "Topic details with relationships and views"
           }
@@ -34972,6 +38208,570 @@
           "success",
           "topic"
         ]
+      },
+      "ModelsGetTopicRegular": {
+        "type": "object",
+        "properties": {
+          "base_view_name": {
+            "type": "string",
+            "description": "Base view name for the topic"
+          },
+          "description": {
+            "type": "string",
+            "description": "Topic description"
+          },
+          "group_label": {
+            "type": "string",
+            "description": "Group label"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Whether the topic is hidden"
+          },
+          "is_composite": {
+            "type": "boolean",
+            "enum": [
+              false
+            ],
+            "description": "Absent (or false) on a regular topic"
+          },
+          "label": {
+            "type": "string",
+            "description": "Topic label"
+          },
+          "name": {
+            "type": "string",
+            "description": "Topic name"
+          },
+          "relationships": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bidirectional": {
+                  "type": "boolean"
+                },
+                "extension_model_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "ignored": {
+                  "type": "boolean"
+                },
+                "join_type": {
+                  "type": "string"
+                },
+                "left_view_alias": {
+                  "type": "string"
+                },
+                "left_view_label": {
+                  "type": "string"
+                },
+                "left_view_name": {
+                  "type": "string"
+                },
+                "original_on_sql": {
+                  "type": "string"
+                },
+                "right_view_alias": {
+                  "type": "string"
+                },
+                "right_view_label": {
+                  "type": "string"
+                },
+                "right_view_name": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "yaml_path_prefix": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "join_type",
+                "left_view_name",
+                "original_on_sql",
+                "right_view_name",
+                "sql",
+                "type"
+              ]
+            },
+            "description": "Relationships for the topic"
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ai_context": {
+                  "type": "string"
+                },
+                "aliases": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "catalog": {
+                  "type": "string"
+                },
+                "default_drill_fields": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": {
+                  "type": "string"
+                },
+                "dimensions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "display_order": {
+                  "type": "number"
+                },
+                "extension_model_id": {
+                  "type": "string"
+                },
+                "fields_limited": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "filter_only_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "hidden": {
+                  "type": "boolean"
+                },
+                "ide_file_name": {
+                  "type": "string"
+                },
+                "ignored": {
+                  "type": "boolean"
+                },
+                "is_pseudo_display_view": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "measures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "schema": {
+                  "type": "string"
+                },
+                "schema_label": {
+                  "type": "string"
+                },
+                "table_name": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "topic_scope": {
+                  "type": "string"
+                },
+                "yaml_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "dimensions",
+                "filter_only_fields",
+                "ide_file_name",
+                "measures",
+                "name",
+                "yaml_path"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Views available in the topic"
+          }
+        },
+        "required": [
+          "base_view_name",
+          "name",
+          "relationships",
+          "views"
+        ]
+      },
+      "ModelsGetTopicComposite": {
+        "type": "object",
+        "properties": {
+          "ai_context": {
+            "type": "string",
+            "description": "Modeler-written context for AI features"
+          },
+          "always_join_all_topics": {
+            "type": "boolean",
+            "description": "When true, queries join every component topic instead of pruning unused ones"
+          },
+          "cache_policy": {
+            "type": "string",
+            "description": "Named cache policy; unset resolves to the strictest component topic policy"
+          },
+          "default_filters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "description": "Filters applied to every query on the topic"
+          },
+          "description": {
+            "type": "string",
+            "description": "Composite topic description"
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "Whether the composite topic is hidden"
+          },
+          "import_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelsCompositeTopicImportModel"
+            },
+            "description": "Models this composite topic imports topics from"
+          },
+          "is_composite": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Marks a composite topic, which combines other topics"
+          },
+          "label": {
+            "type": "string",
+            "description": "Composite topic label"
+          },
+          "name": {
+            "type": "string",
+            "description": "Composite topic name"
+          },
+          "relationships": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bidirectional": {
+                  "type": "boolean"
+                },
+                "extension_model_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "ignored": {
+                  "type": "boolean"
+                },
+                "join_type": {
+                  "type": "string"
+                },
+                "left_view_alias": {
+                  "type": "string"
+                },
+                "left_view_label": {
+                  "type": "string"
+                },
+                "left_view_name": {
+                  "type": "string"
+                },
+                "original_on_sql": {
+                  "type": "string"
+                },
+                "right_view_alias": {
+                  "type": "string"
+                },
+                "right_view_label": {
+                  "type": "string"
+                },
+                "right_view_name": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "yaml_path_prefix": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "join_type",
+                "left_view_name",
+                "original_on_sql",
+                "right_view_name",
+                "sql",
+                "type"
+              ]
+            },
+            "description": "Relationships for the composite topic"
+          },
+          "sample_queries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "description": "Modeler-curated example queries for the topic"
+          },
+          "shared_dimensions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "description": "Dimensions coalesced across the component topics"
+          },
+          "shared_views": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Views shared across the component topics"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the component topics"
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ai_context": {
+                  "type": "string"
+                },
+                "aliases": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "catalog": {
+                  "type": "string"
+                },
+                "default_drill_fields": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "description": {
+                  "type": "string"
+                },
+                "dimensions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "display_order": {
+                  "type": "number"
+                },
+                "extension_model_id": {
+                  "type": "string"
+                },
+                "fields_limited": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "filter_only_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "hidden": {
+                  "type": "boolean"
+                },
+                "ide_file_name": {
+                  "type": "string"
+                },
+                "ignored": {
+                  "type": "boolean"
+                },
+                "is_pseudo_display_view": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "measures": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "field_name": {
+                        "type": "string",
+                        "description": "Field name"
+                      }
+                    },
+                    "required": [
+                      "field_name"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "name": {
+                  "type": "string"
+                },
+                "schema": {
+                  "type": "string"
+                },
+                "schema_label": {
+                  "type": "string"
+                },
+                "table_name": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "topic_scope": {
+                  "type": "string"
+                },
+                "yaml_path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "dimensions",
+                "filter_only_fields",
+                "ide_file_name",
+                "measures",
+                "name",
+                "yaml_path"
+              ],
+              "additionalProperties": {}
+            },
+            "description": "Views available in the composite topic"
+          }
+        },
+        "required": [
+          "is_composite",
+          "name",
+          "relationships",
+          "topics",
+          "views"
+        ],
+        "additionalProperties": {}
       },
       "ModelsUpdateTopicBody": {
         "type": "object",
@@ -36595,6 +40395,10 @@
             "type": "integer",
             "description": "Number of workbook models replaced"
           },
+          "skipped_foreign_tabs_count": {
+            "type": "integer",
+            "description": "Number of tabs left alone because they query a shared model other than this one"
+          },
           "skipped_pr_required_count": {
             "type": "integer",
             "description": "Number of documents skipped due to pull request requirements"
@@ -36980,13 +40784,13 @@
           "cache": {
             "type": "string",
             "enum": [
-              "disabled",
-              "normal",
-              "refresh",
-              "refresh_all"
+              "Standard",
+              "SkipRequery",
+              "SkipCache",
+              "SkipCacheAndRebuildExtracts"
             ],
-            "description": "Cache policy for query execution. Controls whether to use cached results.",
-            "example": "normal"
+            "description": "Cache policy for query execution. Must be one of: Standard (standard caching behavior; default), SkipRequery (uses cached results if available, but does not requery), SkipCache (bypasses the cache and always executes fresh queries), SkipCacheAndRebuildExtracts (bypasses the cache and rebuilds any extracts the query reads from).",
+            "example": "SkipCache"
           },
           "environmentConnectionId": {
             "type": "string",
@@ -37014,6 +40818,11 @@
               "xlsx"
             ],
             "description": "Output format for the results. If not specified, returns base64-encoded Arrow format."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone identifier to override the user's configured timezone for this query. Only takes effect when the connection has user-specific timezones enabled.",
+            "example": "America/Los_Angeles"
           },
           "userId": {
             "type": "string",
@@ -38398,6 +42207,249 @@
           "schemas"
         ]
       },
+      "SkillsListResponse": {
+        "type": "object",
+        "properties": {
+          "pageInfo": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillSummary"
+            }
+          }
+        },
+        "required": [
+          "pageInfo",
+          "records"
+        ]
+      },
+      "SkillSummary": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of when the skill was created",
+            "example": "2026-01-15T10:00:00.000Z"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/SkillCreator"
+          },
+          "description": {
+            "type": "string",
+            "description": "What the skill is for. Shown in the skills list, and given to the agent when it chooses between skills.",
+            "example": "Summarizes the quarter and flags anything off trend."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the skill",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Slash-command handle, stored without the slash. Lowercase letters, numbers and hyphens, starting with a letter or number; up to 48 characters.",
+            "example": "quarterly-report"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the skill",
+            "example": "Quarterly report"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the last edit",
+            "example": "2026-02-01T09:30:00.000Z"
+          }
+        },
+        "required": [
+          "createdAt",
+          "creator",
+          "description",
+          "id",
+          "identifier",
+          "name",
+          "updatedAt"
+        ]
+      },
+      "SkillCreator": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Creator membership ID, and the value `?creatorId=` filters on. Null when the creator has no membership or pending invitation in this organization.",
+            "example": "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+          },
+          "name": {
+            "type": "string",
+            "description": "Creator display name",
+            "example": "Ada Lovelace"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "description": "Who created the skill"
+      },
+      "Skill": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of when the skill was created",
+            "example": "2026-01-15T10:00:00.000Z"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/SkillCreator"
+          },
+          "description": {
+            "type": "string",
+            "description": "What the skill is for. Shown in the skills list, and given to the agent when it chooses between skills.",
+            "example": "Summarizes the quarter and flags anything off trend."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the skill",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Slash-command handle, stored without the slash. Lowercase letters, numbers and hyphens, starting with a letter or number; up to 48 characters.",
+            "example": "quarterly-report"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the skill",
+            "example": "Quarterly report"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the last edit",
+            "example": "2026-02-01T09:30:00.000Z"
+          },
+          "body": {
+            "type": "string",
+            "description": "The instructions injected into the agent's context when the skill runs.",
+            "example": "Pull revenue by month for the last four quarters, then..."
+          }
+        },
+        "required": [
+          "createdAt",
+          "creator",
+          "description",
+          "id",
+          "identifier",
+          "name",
+          "updatedAt",
+          "body"
+        ]
+      },
+      "SkillCreateBody": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000,
+            "description": "The instructions injected into the agent's context when the skill runs; up to 20000 characters.",
+            "example": "Pull revenue by month for the last four quarters, then..."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "What the skill is for; up to 1024 characters.",
+            "example": "Summarizes the quarter and flags anything off trend."
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Slash-command handle, stored without the slash. Lowercase letters, numbers and hyphens, starting with a letter or number; up to 48 characters."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Human-readable name; up to 256 characters.",
+            "example": "Quarterly report"
+          }
+        },
+        "required": [
+          "body",
+          "description",
+          "identifier",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "SkillUpdateBody": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000,
+            "description": "The instructions injected into the agent's context when the skill runs; up to 20000 characters.",
+            "example": "Pull revenue by month for the last four quarters, then..."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "What the skill is for; up to 1024 characters.",
+            "example": "Summarizes the quarter and flags anything off trend."
+          },
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Slash-command handle, stored without the slash. Lowercase letters, numbers and hyphens, starting with a letter or number; up to 48 characters."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Human-readable name; up to 256 characters.",
+            "example": "Quarterly report"
+          }
+        },
+        "additionalProperties": false,
+        "minProperties": 1
+      },
+      "SkillDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deletedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp the skill was deleted at",
+            "example": "2026-02-01T09:30:00.000Z"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the deleted skill"
+          }
+        },
+        "required": [
+          "deletedAt",
+          "id"
+        ]
+      },
       "DocumentExportResponse": {
         "type": "object",
         "properties": {
@@ -39472,6 +43524,7 @@
                 "USE_IDE",
                 "USE_WORKBOOKS",
                 "CREATE_APPS",
+                "USE_ROUTINES",
                 "UPDATE",
                 "UPDATE_RESTRICTED"
               ]
@@ -41124,7 +45177,7 @@
         }
       },
       "post": {
-        "description": "Create a routine that runs a saved prompt on a schedule and delivers the AI response through a single destination — email (one or more recipients / user groups) or Slack (a single channel or direct message). Each scheduled run executes once using the routine owner's permissions, and every recipient receives the same result. Supply `condition` to deliver only when a stated condition holds. Omni returns the generated semantic query and, by default, runs it once before creation to verify it and establish the initial comparison baseline. Set `condition.verify` to false to skip that query run. Organization API keys can pass `?userId=<membershipId>` to create the routine for a specific organization member.",
+        "description": "Create a routine that runs a saved prompt on a schedule and delivers the AI response through a single destination — email (one or more recipients / user groups) or Slack (a single channel or direct message). Each scheduled run executes once using the routine owner's permissions, and every recipient receives the same result. Supply `condition` to deliver only when a stated condition holds. Omni returns the authored semantic query and verifies it once before creation to establish the initial comparison baseline. Organization API keys can pass `?userId=<membershipId>` to create the routine for a specific organization member.",
         "operationId": "routineCreate",
         "summary": "Create a routine",
         "tags": [
@@ -41165,7 +45218,7 @@
             }
           },
           "400": {
-            "description": "Invalid request body, recipient configuration, schedule, or timezone. Also returned when the destination type is disabled by the organization's delivery destination settings, when the schedule is more frequent than the organization allows, when Omni could not compose a working condition query, or when requested verification failed. Condition failures include a stable `code`: `not_expressible`, `no_query`, `malformed_query`, or `dry_run_failed`. Nothing is created on any of these.",
+            "description": "Invalid request body, recipient configuration, schedule, or timezone. Also returned when the destination type is disabled by the organization's delivery destination settings, when the schedule is more frequent than the organization allows, when Omni could not author or verify a working condition query. Condition failures include a stable `code`: `not_expressible`, `no_query`, `malformed_query`, or `dry_run_failed`. Nothing is created on any of these.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41195,7 +45248,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, the request supplied a `condition` but conditional routines are not enabled for the organization, or the target user is an embed user (embed users cannot own routines).",
+            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, the acting user lacks routines access (the Use routines role permission) on the routine model, the request supplied a `condition` but conditional routines are not enabled for the organization, or the target user is an embed user (embed users cannot own routines).",
             "content": {
               "application/json": {
                 "schema": {
@@ -41301,7 +45354,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, or a user-scoped API key tried to access another user's routine.",
+            "description": "AI routines or AI query generation are not enabled for the organization, the acting user lacks routines access (the Use routines role permission) on every model, or a user-scoped API key tried to access another user's routine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41375,7 +45428,7 @@
             }
           },
           "400": {
-            "description": "Invalid routine ID, request body, recipient configuration, schedule, or timezone. Also returned when a supplied destination's type is disabled by the organization's delivery destination settings, when Omni could not compose a working replacement condition, or when requested verification failed. Condition failures include a stable `code`: `not_expressible`, `no_query`, `malformed_query`, or `dry_run_failed`. Nothing is updated on these failures.",
+            "description": "Invalid routine ID, request body, recipient configuration, schedule, or timezone. Also returned when a supplied destination's type is disabled by the organization's delivery destination settings, or when Omni could not author or verify a working replacement condition. Condition failures include a stable `code`: `not_expressible`, `no_query`, `malformed_query`, or `dry_run_failed`. Nothing is updated on these failures.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41405,7 +45458,7 @@
             }
           },
           "403": {
-            "description": "AI routines, AI query generation, or conditional routines are not enabled for the organization; the routine owner lacks AI access to its model; or a user-scoped API key tried to update another user's routine.",
+            "description": "AI routines, AI query generation, or conditional routines are not enabled for the organization, the routine owner lacks routines access (the Use routines role permission) on the routine model, or a user-scoped API key tried to update another user's routine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41499,7 +45552,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, or a user-scoped API key tried to delete another user's routine.",
+            "description": "AI routines or AI query generation are not enabled for the organization, the acting user lacks routines access (the Use routines role permission) on every model, or a user-scoped API key tried to delete another user's routine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41585,7 +45638,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, or a user-scoped API key tried to run another user's routine.",
+            "description": "AI routines or AI query generation are not enabled for the organization, the acting user lacks routines access (the Use routines role permission) on every model, or a user-scoped API key tried to run another user's routine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -41605,7 +45658,7 @@
             }
           },
           "409": {
-            "description": "A run is already in progress for this routine.",
+            "description": "A run is already in progress for this routine, or the routine delivers to a destination type the organization has disabled.",
             "content": {
               "application/json": {
                 "schema": {
@@ -47965,7 +52018,7 @@
         }
       },
       "put": {
-        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nReplace the app HTML on an existing draft — creating the app when the draft is workbook-only — optionally replacing the app `settings` in the same call. Operates only on the draft named by `draftIdentifier`, which the caller creates first via `PATCH …/draft`; a published app is never addressable for writing, so every edit is draft-then-publish by construction. No auto-publish — publish via `POST …/draft/publish`.\n\nLast-write-wins, like every app write in the UI: the body is applied as given, with no expected-version precondition. Every write appends an immutable `app_history` revision, so nothing is lost — only the head moves.\n\nWrites never reject on host policy. External `<script src>` / `<link rel=\"stylesheet\">` hosts outside the organization’s app policy (resolved over the settings this write produces) come back as non-blocking `warnings` — the render-time CSP is the enforcement, and a disallowed host is inert until an org admin allows it.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
+        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nReplace the app HTML on an existing draft — creating the app when the draft is workbook-only — optionally replacing the app `settings` in the same call. Operates only on the draft named by `draftIdentifier`, which the caller creates first via `PATCH …/draft`; a published app is never addressable for writing, so every edit is draft-then-publish by construction. No auto-publish — publish via `POST …/draft/publish`.\n\nLast-write-wins, like every app write in the UI: the body is applied as given, with no expected-version precondition. Every write appends an immutable `app_history` revision, so nothing is lost — only the head moves.\n\nWrites never reject on app policy. External `<script src>` / `<link rel=\"stylesheet\">` hosts outside the organization’s app policy (resolved over the settings this write produces) come back as non-blocking `warnings` — the render-time CSP is the enforcement, and a disallowed host is inert until an org admin allows it. The same array warns when `settings.allowDefaultMapProviders` is on but the organization turns map providers off for every app; the setting persists and no tile loads until an admin turns them back on.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
         "operationId": "documentsV2PutApp",
         "summary": "Replace app content on a draft",
         "tags": [
@@ -48008,7 +52061,7 @@
         },
         "responses": {
           "200": {
-            "description": "App written on the draft. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them.",
+            "description": "App written on the draft. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider setting the organization turns off.",
             "content": {
               "application/json": {
                 "schema": {
@@ -48276,7 +52329,7 @@
         },
         "responses": {
           "200": {
-            "description": "Draft created (or reused) and app written; the response carries the `draftIdentifier`. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them.",
+            "description": "Draft created (or reused) and app written; the response carries the `draftIdentifier`. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider setting the organization turns off.",
             "content": {
               "application/json": {
                 "schema": {
@@ -53564,6 +57617,16 @@
           {
             "schema": {
               "type": "boolean",
+              "description": "Deep-validate every query by planning it, even when the content is large enough that the validator would otherwise only check field, view, and topic references. Slower on large models."
+            },
+            "required": false,
+            "description": "Deep-validate every query by planning it, even when the content is large enough that the validator would otherwise only check field, view, and topic references. Slower on large models.",
+            "name": "force_full_validation",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean",
               "description": "Whether to include personal folders in validation"
             },
             "required": false,
@@ -54122,12 +58185,23 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response.",
+              "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
               "example": "job_abc123,job_def456"
             },
-            "required": true,
-            "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response.",
+            "required": false,
+            "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
             "name": "jobIds",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "deprecated": true,
+              "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job IDs."
+            },
+            "required": false,
+            "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job IDs.",
+            "name": "job_ids",
             "in": "query"
           }
         ],
@@ -55833,6 +59907,357 @@
           },
           "404": {
             "description": "Group not found"
+          }
+        }
+      }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReturns the skills the caller can see: every skill in the organization for an org admin, and the caller's own otherwise. Bodies are omitted; fetch a single skill to read one.",
+        "operationId": "skillsList",
+        "summary": "List skills",
+        "tags": [
+          "Skills"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor for pagination (from previous response nextCursor)",
+              "example": "eyJpZCI6IjEyMzQ1In0"
+            },
+            "required": false,
+            "description": "Cursor for pagination (from previous response nextCursor)",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100, integer)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Number of results per page (1-100, integer)",
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
+            },
+            "required": false,
+            "description": "Sort direction for results",
+            "name": "sortDirection",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "name",
+                "updatedAt"
+              ],
+              "default": "updatedAt",
+              "description": "Field to sort results by"
+            },
+            "required": false,
+            "description": "Field to sort results by",
+            "name": "sortField",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Target user membership ID (for org-scoped API keys)"
+            },
+            "required": false,
+            "description": "Target user membership ID (for org-scoped API keys)",
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter by creator membership ID — `creator.id` from a listed skill, or your own `membershipId` from `GET /api/v1/whoami`. Applies within what the caller can already see, so it narrows a result set and never widens one."
+            },
+            "required": false,
+            "description": "Filter by creator membership ID — `creator.id` from a listed skill, or your own `membershipId` from `GET /api/v1/whoami`. Applies within what the caller can already see, so it narrows a result set and never widens one.",
+            "name": "creatorId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 48,
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list.",
+              "example": "quarterly-report"
+            },
+            "required": false,
+            "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list.",
+            "name": "identifier",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters"
+          },
+          "403": {
+            "description": "Invalid bearer token, or skills are not enabled for the caller"
+          },
+          "404": {
+            "description": "`creatorId` names no member of this organization"
+          }
+        }
+      },
+      "post": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nCreates a skill owned by the calling user. A handle already held by a live skill in the organization is a 409.",
+        "operationId": "skillsCreate",
+        "summary": "Create a skill",
+        "tags": [
+          "Skills"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillCreateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, a blank field, or a value over its length limit (the message names the limit)"
+          },
+          "403": {
+            "description": "Invalid bearer token, or skills are not enabled for the caller"
+          },
+          "405": {
+            "description": "Method not allowed"
+          },
+          "409": {
+            "description": "The identifier is already taken in this organization"
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{skillId}": {
+      "get": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReturns one skill, including the body given to the agent when the skill runs.",
+        "operationId": "skillsGet",
+        "summary": "Get a skill",
+        "tags": [
+          "Skills"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Skill UUID",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Skill UUID",
+            "name": "skillId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Target user membership ID (for org-scoped API keys)"
+            },
+            "required": false,
+            "description": "Target user membership ID (for org-scoped API keys)",
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed `skillId` (must be a UUID)"
+          },
+          "403": {
+            "description": "Skills are not enabled for the caller, or the skill belongs to someone else and the caller is not an org admin"
+          },
+          "404": {
+            "description": "No live skill with this id in the organization"
+          }
+        }
+      },
+      "patch": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nEdits a skill in place. Omitted fields are left alone.",
+        "operationId": "skillsUpdate",
+        "summary": "Edit a skill",
+        "tags": [
+          "Skills"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Skill UUID",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Skill UUID",
+            "name": "skillId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Target user membership ID (for org-scoped API keys)"
+            },
+            "required": false,
+            "description": "Target user membership ID (for org-scoped API keys)",
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillUpdateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, malformed `skillId`, an empty update, a blank field, or a value over its length limit"
+          },
+          "403": {
+            "description": "Skills are not enabled for the caller, or the skill belongs to someone else and the caller is not an org admin"
+          },
+          "404": {
+            "description": "No live skill with this id in the organization"
+          },
+          "405": {
+            "description": "Method not allowed"
+          },
+          "409": {
+            "description": "The identifier is already taken in this organization"
+          }
+        }
+      },
+      "delete": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nSoft-deletes a skill: it disappears from every read and its handle is free for reuse.",
+        "operationId": "skillsDelete",
+        "summary": "Delete a skill",
+        "tags": [
+          "Skills"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Skill UUID",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "Skill UUID",
+            "name": "skillId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Target user membership ID (for org-scoped API keys)"
+            },
+            "required": false,
+            "description": "Target user membership ID (for org-scoped API keys)",
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The skill was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDeleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed `skillId` (must be a UUID)"
+          },
+          "403": {
+            "description": "Skills are not enabled for the caller, or the skill belongs to someone else and the caller is not an org admin"
+          },
+          "404": {
+            "description": "No live skill with this id in the organization"
+          },
+          "405": {
+            "description": "Method not allowed"
           }
         }
       }
