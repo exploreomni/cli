@@ -524,7 +524,7 @@ func TestUpgradeInstructionsArePlatformSpecific(t *testing.T) {
 	}
 	for _, goos := range []string{"darwin", "linux"} {
 		got := upgradeInstructions(goos)
-		if got.Homebrew != "brew upgrade omni" || got.Other != installCommand {
+		if got.Homebrew != "brew update && brew upgrade omni" || got.Other != installCommand {
 			t.Fatalf("%s instructions = %+v", goos, got)
 		}
 	}

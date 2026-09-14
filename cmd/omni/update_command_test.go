@@ -30,7 +30,7 @@ func TestUpdateCheckJSON(t *testing.T) {
 		LatestVersion:   "v1.3.0",
 		ReleaseURL:      "https://example.test/v1.3.0",
 		Upgrade: updatecheck.UpgradeInstructions{
-			Homebrew: "brew upgrade omni",
+			Homebrew: "brew update && brew upgrade omni",
 			Other:    "install command",
 		},
 	}}

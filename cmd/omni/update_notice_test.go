@@ -160,7 +160,7 @@ func TestAutomaticUpdateNotice(t *testing.T) {
 		UpdateAvailable: true,
 		LatestVersion:   "v1.3.0",
 		ReleaseURL:      "https://example.test/v1.3.0",
-		Upgrade:         updatecheck.UpgradeInstructions{Homebrew: "brew upgrade omni", Other: "install command"},
+		Upgrade:         updatecheck.UpgradeInstructions{Homebrew: "brew update && brew upgrade omni", Other: "install command"},
 	}
 	ch := make(chan updateOutcome, 1)
 	ch <- updateOutcome{result: result}
@@ -282,8 +282,8 @@ func TestRecentHomebrewReleaseIsSuppressed(t *testing.T) {
 }
 
 func TestUpgradeHint(t *testing.T) {
-	unix := updatecheck.UpgradeInstructions{Homebrew: "brew upgrade omni", Other: "curl ... | sh"}
-	if got := upgradeHint(unix, true); got != "run: brew upgrade omni" {
+	unix := updatecheck.UpgradeInstructions{Homebrew: "brew update && brew upgrade omni", Other: "curl ... | sh"}
+	if got := upgradeHint(unix, true); got != "run: brew update && brew upgrade omni" {
 		t.Errorf("homebrew hint = %q", got)
 	}
 	if got := upgradeHint(unix, false); got != "run: curl ... | sh" {
