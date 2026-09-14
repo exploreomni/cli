@@ -135,9 +135,9 @@ func addResultFlags(cmd *cobra.Command) {
 	f.Bool("workbook", false, "also open the query in an ephemeral workbook and print its link")
 	f.String("chart", "", "draw query results as a chart (--chart or --chart=bar)")
 	f.Lookup("chart").NoOptDefVal = output.ChartKindBar
-	f.String("chart-label", "", "field or label to name bars by (default: the first dimension)")
-	f.String("chart-value", "", "field or label to plot (default: the first measure)")
-	f.Int("chart-rows", output.DefaultChartRows, "most bars to draw before summarising the rest")
+	f.String("chart-label", "", "only this dimension labels the rows, by field or label (default: every dimension)")
+	f.String("chart-value", "", "only this measure gets bars, by field or label (default: every measure)")
+	f.Int("chart-rows", output.DefaultChartRows, "most rows to draw before summarising the rest")
 	f.String("chart-style", output.StyleBar, "bar style: bar, block (solid, finer ends), line, fill (value inside the bar; rows touch)")
 }
 
@@ -179,11 +179,22 @@ func prepareBody(chart, workbook bool, format string, cmd *cobra.Command, body [
 	if workbook && !openapi.BodyDeclares(cmd, "workbookUrl") {
 		return nil, fmt.Errorf("--workbook is not supported by %s", cmd.CommandPath())
 	}
-	if len(bytes.TrimSpace(body)) == 0 || !openapi.BodyDeclares(cmd, "resultType") && !workbook {
+	if len(bytes.TrimSpace(body)) == 0 {
+		if workbook {
+			return nil, fmt.Errorf("--workbook needs a JSON request body to set workbookUrl on; pass one with --body or on stdin")
+		}
+		return body, nil
+	}
+	if !openapi.BodyDeclares(cmd, "resultType") && !workbook {
 		return body, nil
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
+		// Silently dropping the flag would send the request without
+		// workbookUrl and leave the user wondering where their link went.
+		if workbook {
+			return nil, fmt.Errorf("--workbook needs a JSON object as the request body: %w", err)
+		}
 		return body, nil
 	}
 	changed := false

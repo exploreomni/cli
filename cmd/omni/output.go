@@ -68,16 +68,19 @@ func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format stri
 		return nil
 	}
 
+	// Anything reaching here with a chart asked for isn't a query stream —
+	// checked before the passthrough below, so a CSV is refused rather than
+	// written out with --chart quietly ignored.
+	if chart != nil {
+		return fmt.Errorf("--chart plots query results: this response is not a query stream")
+	}
+
 	// Non-JSON payloads (`query run`'s text/ndjson stream, or CSV/XLSX when
 	// its body sets resultType) go out unchanged: no re-indenting, no appended newline,
 	// so a redirect to a file reproduces the response byte for byte.
 	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && !json.Valid(trimmed) {
 		_, err := stdout.Write(data)
 		return err
-	}
-
-	if chart != nil {
-		return fmt.Errorf("--chart plots query results: this response is not a query stream")
 	}
 
 	if format == config.FormatHuman {

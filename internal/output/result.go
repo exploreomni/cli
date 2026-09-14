@@ -8,13 +8,19 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/exploreomni/omni-cli/internal/result"
 )
 
-// ResultTable renders a decoded query result with the model's labels and formats.
+// ResultTable renders a decoded query result with the model's labels and
+// formats, pivoted when the query pivots.
 func ResultTable(w io.Writer, set *result.Set) {
 	if len(set.Rows) == 0 {
 		fmt.Fprintln(w, "No results.")
+		return
+	}
+	if p := set.Pivot(); p != nil {
+		pivotTable(w, set, p)
 		return
 	}
 	headers := make([]string, len(set.Columns))
@@ -22,20 +28,9 @@ func ResultTable(w io.Writer, set *result.Set) {
 		headers[i] = c.Label
 	}
 
-	t := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(styleBorder).
-		Headers(headers...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return styleHeader
-			}
-			if col >= 0 && col < len(set.Columns) && !set.Columns[col].IsDimension {
-				return styleNum
-			}
-			return styleCell
-		})
-
+	t := resultTable(headers, func(col int) bool {
+		return col < len(set.Columns) && !set.Columns[col].IsDimension
+	})
 	for _, r := range set.Rows {
 		cells := make([]string, len(set.Columns))
 		for i, c := range set.Columns {
@@ -46,8 +41,113 @@ func ResultTable(w io.Writer, set *result.Set) {
 	fmt.Fprintln(w, t.Render())
 }
 
-// ResultChart draws one measure as bars, labelled by one dimension; both
-// default to the model's first and can be named by field name or label.
+// pivotTable lays a pivot out as the Omni app does: the row dimensions on
+// the left, then a column per pivot value and measure, headed by the pivot
+// value over the measure's label.
+func pivotTable(w io.Writer, set *result.Set, p *result.Pivoted) {
+	group := pivotLabel(set, p)
+	var headers []string
+	for i, c := range p.RowDims {
+		top := ""
+		if i == len(p.RowDims)-1 {
+			top = group
+		}
+		headers = append(headers, top+"\n"+set.Columns[c].Label)
+	}
+	for _, key := range p.Keys {
+		for _, m := range p.Measures {
+			headers = append(headers, pivotKey(set, p, key)+"\n"+set.Columns[m].Label)
+		}
+	}
+
+	// Table headers are one line, so the two-line header is the first row,
+	// and of the row borders only the one beneath it is kept.
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(styleBorder).
+		BorderRow(true).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == 0 {
+				return styleHeader
+			}
+			if col >= len(p.RowDims) {
+				return styleNum
+			}
+			return styleCell
+		}).
+		Row(headers...)
+	for _, r := range p.Rows {
+		var cells []string
+		for i, c := range p.RowDims {
+			cells = append(cells, truncateCells(FormatValue(r.Dims[i], set.Columns[c]), 60))
+		}
+		for k := range p.Keys {
+			for j, m := range p.Measures {
+				var v any
+				if r.Cells[k] != nil {
+					v = r.Cells[k][j]
+				}
+				cells = append(cells, FormatValue(v, set.Columns[m]))
+			}
+		}
+		t.Row(cells...)
+	}
+	lines := strings.Split(t.Render(), "\n")
+	kept := lines[:0]
+	separators := 0
+	for i, line := range lines {
+		if i > 0 && i < len(lines)-1 && strings.HasPrefix(ansi.Strip(line), "├") {
+			if separators++; separators > 1 {
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	fmt.Fprintln(w, strings.Join(kept, "\n"))
+	if p.Omitted > 0 {
+		fmt.Fprintln(w, styleDim.Render(fmt.Sprintf("… and %d more pivot column%s past the query's column limit", p.Omitted, plural(p.Omitted))))
+	}
+}
+
+func resultTable(headers []string, numeric func(col int) bool) *table.Table {
+	return table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(styleBorder).
+		Headers(headers...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return styleHeader
+			}
+			if col >= 0 && numeric(col) {
+				return styleNum
+			}
+			return styleCell
+		})
+}
+
+// pivotLabel names what the pivot columns are values of, e.g. "Stage".
+func pivotLabel(set *result.Set, p *result.Pivoted) string {
+	labels := make([]string, len(p.PivotDims))
+	for i, c := range p.PivotDims {
+		labels[i] = set.Columns[c].Label
+	}
+	return strings.Join(labels, " · ")
+}
+
+// pivotKey renders one pivot column's values, e.g. "Closed Won".
+func pivotKey(set *result.Set, p *result.Pivoted, key []any) string {
+	parts := make([]string, len(key))
+	for i, v := range key {
+		parts[i] = FormatValue(v, set.Columns[p.PivotDims[i]])
+	}
+	return strings.Join(parts, " · ")
+}
+
+// ResultChart draws the result as the Omni app's bar table: each dimension
+// a column, each measure a column of bars on its own scale. A pivoted query
+// spreads its measures across the pivot values, which share that scale.
+// --chart-value narrows the bars to one measure; --chart-label the
+// dimensions to one.
 func ResultChart(w io.Writer, set *result.Set, opts ChartOptions) error {
 	if opts.Kind != "" && opts.Kind != ChartKindBar {
 		return fmt.Errorf("unknown chart kind %q (supported: %s)", opts.Kind, ChartKindBar)
@@ -56,85 +156,203 @@ func ResultChart(w io.Writer, set *result.Set, opts ChartOptions) error {
 		fmt.Fprintln(w, "No results.")
 		return nil
 	}
-
-	valueIdx, err := pickValue(set, opts.Value)
+	var g *grid
+	var err error
+	if p := set.Pivot(); p != nil {
+		g, err = pivotGrid(set, p, opts)
+	} else {
+		g, err = flatGrid(set, opts)
+	}
 	if err != nil {
 		return err
 	}
-	labelIdx, err := pickLabel(set, opts.Label, valueIdx)
+	renderGrid(w, g, opts)
+	return nil
+}
+
+func flatGrid(set *result.Set, opts ChartOptions) (*grid, error) {
+	values, err := pickValues(set, opts.Value)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	isValue := map[int]bool{}
+	for _, v := range values {
+		isValue[v] = true
+	}
+	var labels []int
+	if opts.Label != "" {
+		i, ok := matchColumn(set.Columns, opts.Label)
+		if !ok {
+			return nil, fmt.Errorf("--chart-label %q is not a column (have: %s)", opts.Label, columnNames(set))
+		}
+		if isValue[i] {
+			return nil, fmt.Errorf("--chart-label %q is the column being plotted; label the bars with a different one", opts.Label)
+		}
+		labels = []int{i}
+	} else {
+		for i, c := range set.Columns {
+			if c.IsDimension && !isValue[i] {
+				labels = append(labels, i)
+			}
+		}
 	}
 
+	rows, omitted := capRows(len(set.Rows), opts)
+	g := &grid{omittedRows: omitted}
+	for _, c := range labels {
+		g.labelHeaders = append(g.labelHeaders, set.Columns[c].Label)
+	}
+	for s, v := range values {
+		g.cols = append(g.cols, gridCol{header: set.Columns[v].Label, scale: s})
+	}
+	for i, r := range set.Rows[:rows] {
+		var ls []string
+		for _, c := range labels {
+			ls = append(ls, FormatValue(r[c], set.Columns[c]))
+		}
+		if len(labels) == 0 {
+			ls = []string{fmt.Sprintf("%d", i+1)}
+		}
+		g.labels = append(g.labels, ls)
+		for s, v := range values {
+			g.cols[s].items = append(g.cols[s].items, chartItem(r[v], set.Columns[v]))
+		}
+	}
+	if len(labels) == 0 {
+		g.labelHeaders = []string{"#"}
+	}
+	return g, nil
+}
+
+func pivotGrid(set *result.Set, p *result.Pivoted, opts ChartOptions) (*grid, error) {
+	measures := p.Measures
+	if opts.Value != "" {
+		i, ok := matchColumn(set.Columns, opts.Value)
+		if !ok {
+			return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", opts.Value, columnNames(set))
+		}
+		j := indexOfInt(p.Measures, i)
+		if j < 0 || !numericColumn(set, i) {
+			return nil, fmt.Errorf("--chart-value %q is not a measure this pivot spreads across its columns", set.Columns[i].Label)
+		}
+		measures = []int{i}
+	}
+	var numeric []int
+	for _, m := range measures {
+		if numericColumn(set, m) {
+			numeric = append(numeric, m)
+		}
+	}
+	if len(numeric) == 0 {
+		return nil, fmt.Errorf("--chart found nothing numeric to plot (have: %s)", columnNames(set))
+	}
+
+	labels := p.RowDims
+	if opts.Label != "" {
+		i, ok := matchColumn(set.Columns, opts.Label)
+		if !ok {
+			return nil, fmt.Errorf("--chart-label %q is not a column (have: %s)", opts.Label, columnNames(set))
+		}
+		if indexOfInt(p.RowDims, i) < 0 {
+			return nil, fmt.Errorf("--chart-label %q is not a row dimension of this pivot", set.Columns[i].Label)
+		}
+		labels = []int{i}
+	}
+
+	rows, omitted := capRows(len(p.Rows), opts)
+	g := &grid{groupLabel: pivotLabel(set, p), omittedRows: omitted, omittedCols: p.Omitted}
+	for _, c := range labels {
+		g.labelHeaders = append(g.labelHeaders, set.Columns[c].Label)
+	}
+	if len(labels) == 0 {
+		g.labelHeaders = []string{"#"}
+	}
+	for _, key := range p.Keys {
+		for s, m := range numeric {
+			g.cols = append(g.cols, gridCol{group: pivotKey(set, p, key), header: set.Columns[m].Label, scale: s})
+		}
+	}
+	for i, r := range p.Rows[:rows] {
+		var ls []string
+		for _, c := range labels {
+			ls = append(ls, FormatValue(r.Dims[indexOfInt(p.RowDims, c)], set.Columns[c]))
+		}
+		if len(labels) == 0 {
+			ls = []string{fmt.Sprintf("%d", i+1)}
+		}
+		g.labels = append(g.labels, ls)
+		col := 0
+		for k := range p.Keys {
+			for _, m := range numeric {
+				var v any
+				if r.Cells[k] != nil {
+					v = r.Cells[k][indexOfInt(p.Measures, m)]
+				}
+				g.cols[col].items = append(g.cols[col].items, chartItem(v, set.Columns[m]))
+				col++
+			}
+		}
+	}
+	return g, nil
+}
+
+func chartItem(v any, c result.Column) chartRow {
+	var it chartRow
+	if f, ok := asFloat(v); ok {
+		it.value, it.present = f, true
+		it.text = FormatValue(v, c)
+	}
+	return it
+}
+
+func capRows(n int, opts ChartOptions) (rows, omitted int) {
 	maxRows := opts.MaxRows
 	if maxRows <= 0 {
 		maxRows = DefaultChartRows
 	}
-	rows, omitted := set.Rows, 0
-	if len(rows) > maxRows {
-		rows, omitted = rows[:maxRows], len(rows)-maxRows
+	if n > maxRows {
+		return maxRows, n - maxRows
 	}
-
-	items := make([]chartRow, 0, len(rows))
-	for i, r := range rows {
-		it := chartRow{label: fmt.Sprintf("%d", i+1)}
-		if labelIdx >= 0 {
-			it.label = FormatValue(r[labelIdx], set.Columns[labelIdx])
-		}
-		if f, ok := asFloat(r[valueIdx]); ok {
-			it.value, it.present = f, true
-			it.text = FormatValue(r[valueIdx], set.Columns[valueIdx])
-		}
-		items = append(items, it)
-	}
-
-	labelHeader := "#"
-	if labelIdx >= 0 {
-		labelHeader = set.Columns[labelIdx].Label
-	}
-	renderBars(w, labelHeader, set.Columns[valueIdx].Label, items, omitted, opts)
-	return nil
+	return n, 0
 }
 
-func pickValue(set *result.Set, want string) (int, error) {
+// pickValues chooses the columns to draw bars for: the one --chart-value
+// names, else every measure, else the first numeric column.
+func pickValues(set *result.Set, want string) ([]int, error) {
 	if want != "" {
 		i, ok := matchColumn(set.Columns, want)
 		if !ok {
-			return 0, fmt.Errorf("--chart-value %q is not a column (have: %s)", want, columnNames(set))
+			return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", want, columnNames(set))
 		}
 		if !numericColumn(set, i) {
-			return 0, fmt.Errorf("--chart-value %q holds no numbers", set.Columns[i].Label)
+			return nil, fmt.Errorf("--chart-value %q holds no numbers", set.Columns[i].Label)
 		}
-		return i, nil
+		return []int{i}, nil
 	}
+	var measures []int
 	for i, c := range set.Columns {
 		if !c.IsDimension && numericColumn(set, i) {
-			return i, nil
+			measures = append(measures, i)
 		}
 	}
-	// No measures at all: the first numeric column stands in.
+	if len(measures) > 0 {
+		return measures, nil
+	}
 	for i := range set.Columns {
 		if numericColumn(set, i) {
-			return i, nil
+			return []int{i}, nil
 		}
 	}
-	return 0, fmt.Errorf("--chart found nothing numeric to plot (have: %s)", columnNames(set))
+	return nil, fmt.Errorf("--chart found nothing numeric to plot (have: %s)", columnNames(set))
 }
 
-func pickLabel(set *result.Set, want string, valueIdx int) (int, error) {
-	if want != "" {
-		i, ok := matchColumn(set.Columns, want)
-		if !ok {
-			return 0, fmt.Errorf("--chart-label %q is not a column (have: %s)", want, columnNames(set))
-		}
-		return i, nil
-	}
-	for i, c := range set.Columns {
-		if c.IsDimension && i != valueIdx {
-			return i, nil
+func indexOfInt(s []int, v int) int {
+	for i, x := range s {
+		if x == v {
+			return i
 		}
 	}
-	return -1, nil
+	return -1
 }
 
 func numericColumn(set *result.Set, i int) bool {
@@ -159,7 +377,8 @@ func columnNames(set *result.Set) string {
 }
 
 // matchColumn finds a column by field name or label: exact, then normalized
-// ("engaged_sessions_percent" ~ "Engaged Sessions %"), then without a view prefix.
+// ("engaged_sessions_percent" ~ "Engaged Sessions %"), then without a view
+// prefix on either side ("count" ~ "deals.count" labelled "Deals Count").
 func matchColumn(columns []result.Column, want string) (int, bool) {
 	for i, c := range columns {
 		if c.Name == want || c.Label == want {
@@ -169,6 +388,11 @@ func matchColumn(columns []result.Column, want string) (int, bool) {
 	norm := normalizeColumn(want)
 	for i, c := range columns {
 		if normalizeColumn(c.Name) == norm || normalizeColumn(c.Label) == norm {
+			return i, true
+		}
+	}
+	for i, c := range columns {
+		if j := strings.LastIndexByte(c.Name, '.'); j >= 0 && normalizeColumn(c.Name[j+1:]) == norm {
 			return i, true
 		}
 	}

@@ -43,7 +43,16 @@ func renderStream(cfg *config.ResolvedConfig, resp *http.Response, format string
 			return err
 		}
 		st.Sets = append(st.Sets, more.Sets...)
+		st.Failures = append(st.Failures, more.Failures...)
 		st.Remaining = more.Remaining
+	}
+
+	// A job that failed doesn't void the ones that didn't: render what
+	// completed, then report the failure and exit non-zero. With nothing
+	// rendered, stdout stays empty and only the failure is reported.
+	failed := st.Err()
+	if len(st.Sets) == 0 && failed != nil {
+		return failed
 	}
 
 	// Render everything before writing anything, so a failure on a later
@@ -67,8 +76,10 @@ func renderStream(cfg *config.ResolvedConfig, resp *http.Response, format string
 	if u := resp.Header.Get("X-Omni-Workbook-Url"); u != "" {
 		output.ChartLink(&out, u)
 	}
-	_, err = stdout.Write(out.Bytes())
-	return err
+	if _, err := stdout.Write(out.Bytes()); err != nil {
+		return err
+	}
+	return failed
 }
 
 func waitForJobs(cfg *config.ResolvedConfig, format string, compact bool, stderr io.Writer, ids []string) (*result.Stream, error) {

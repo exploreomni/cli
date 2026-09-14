@@ -60,15 +60,34 @@ const (
 
 var eighths = [...]string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
 
+// Beside other bar columns a bar can be short: the value is printed next to
+// it, so the bar only has to show proportion.
+const minCellBarWidth = 4
+
 type chartRow struct {
-	label   string
 	text    string // formatted value
 	value   float64
 	present bool
 }
 
-func renderBars(w io.Writer, labelHeader, valueHeader string, items []chartRow, omitted int, opts ChartOptions) {
+// grid is a chart laid out as rows of labels followed by columns of bars.
+type grid struct {
+	groupLabel   string     // what pivot values are, over the label columns; "" unpivoted
+	labelHeaders []string   // one per label column
+	labels       [][]string // [row][label column]
+	cols         []gridCol
+	omittedRows  int
+	omittedCols  int
+}
 
+type gridCol struct {
+	group  string // the pivot value over this column; "" unpivoted
+	header string // the measure's label
+	scale  int    // columns with the same scale share one axis (one measure)
+	items  []chartRow
+}
+
+func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 	width := opts.Width
 	if width <= 0 {
 		width = defaultChartWidth
@@ -78,68 +97,187 @@ func renderBars(w io.Writer, labelHeader, valueHeader string, items []chartRow, 
 	if !ok {
 		st = styles[StyleBar]
 	}
+	// "fill" is a background with no glyph of its own, so without color it
+	// draws rows of blank space — which is what a pipe or a dumb terminal
+	// gets. Solid blocks say the same thing without needing SGR support.
+	if st.inside && !colorEnabled() {
+		st = styles[StyleBlock]
+	}
 
-	valueW := lipgloss.Width(valueHeader)
-	for i := range items {
-		if !items[i].present {
-			items[i].text = "-"
+	// Each measure is scaled on its own, across every column it fills.
+	type bounds struct{ lo, hi float64 }
+	scales := map[int]bounds{}
+	valueW := make([]int, len(g.cols))
+	textW := make([]int, len(g.cols))
+	for c := range g.cols {
+		col := &g.cols[c]
+		b := scales[col.scale]
+		for i := range col.items {
+			it := &col.items[i]
+			if !it.present {
+				it.text = "-"
+			} else if !math.IsNaN(it.value) && !math.IsInf(it.value, 0) {
+				b.lo, b.hi = math.Min(b.lo, it.value), math.Max(b.hi, it.value)
+			}
+			textW[c] = max(textW[c], lipgloss.Width(it.text))
 		}
-		valueW = max(valueW, lipgloss.Width(items[i].text))
-	}
-	if st.inside {
-		valueW = 0
-	}
-
-	// Labels yield to the bar so a row never wraps; measured in cells, not runes.
-	budget := min(maxLabelWidth, width-valueW-2-minBarWidth)
-	budget = max(budget, minLabelWidth)
-
-	labelHeader = truncateCells(labelHeader, budget)
-	labelW := lipgloss.Width(labelHeader)
-	for i := range items {
-		items[i].label = truncateCells(items[i].label, budget)
-		labelW = max(labelW, lipgloss.Width(items[i].label))
+		scales[col.scale] = b
+		if !st.inside {
+			valueW[c] = max(textW[c], lipgloss.Width(col.header))
+		}
 	}
 
-	gutters := 2
-	if st.inside {
-		gutters = 1
+	labelW := make([]int, len(g.labelHeaders))
+	for i, h := range g.labelHeaders {
+		labelW[i] = lipgloss.Width(h)
+		for _, row := range g.labels {
+			labelW[i] = max(labelW[i], lipgloss.Width(row[i]))
+		}
+		labelW[i] = min(labelW[i], maxLabelWidth)
 	}
-	barW := max(width-labelW-valueW-gutters, minBarWidth)
 
-	lo, hi := 0.0, 0.0
-	for _, it := range items {
-		if !it.present || math.IsNaN(it.value) || math.IsInf(it.value, 0) {
+	n := len(g.cols)
+	minBar := func() int {
+		if n == 1 {
+			return minBarWidth
+		}
+		m := minCellBarWidth
+		if st.inside {
+			// A value too long for its bar prints after it, inside the cell.
+			for c := range n {
+				m = max(m, 2*textW[c]+3)
+			}
+		}
+		return m
+	}
+	avail := func() int {
+		used := len(labelW) - 1 + 1 + 2*(n-1) // label gaps, the gap after labels, column gaps
+		for _, lw := range labelW {
+			used += lw
+		}
+		for c := range n {
+			used += valueW[c]
+			if !st.inside {
+				used++
+			}
+		}
+		return width - used
+	}
+	// Labels yield to the bars first, so a row never wraps; then columns go.
+	for avail() < n*minBar() {
+		widest := 0
+		for i := range labelW {
+			if labelW[i] > labelW[widest] {
+				widest = i
+			}
+		}
+		if len(labelW) > 0 && labelW[widest] > minLabelWidth {
+			labelW[widest]--
 			continue
 		}
-		lo = math.Min(lo, it.value)
-		hi = math.Max(hi, it.value)
+		if n == 1 {
+			break
+		}
+		n--
+		g.omittedCols++
+	}
+	barW := max(avail()/n, minBar())
+
+	pad := func(s string, cells int) string {
+		return s + strings.Repeat(" ", max(cells-lipgloss.Width(s), 0))
+	}
+	colW := func(c int) int {
+		if st.inside {
+			return barW
+		}
+		return valueW[c] + 1 + barW
+	}
+	labelArea := func(cells []string) string {
+		parts := make([]string, len(cells))
+		for i, s := range cells {
+			parts[i] = pad(truncateCells(s, labelW[i]), labelW[i])
+		}
+		return strings.Join(parts, " ")
+	}
+	labelAreaW := len(labelW) - 1
+	for _, lw := range labelW {
+		labelAreaW += lw
+	}
+	gap := func(c int) string {
+		if c == 0 {
+			return " "
+		}
+		return "  "
 	}
 
-	label := lipgloss.NewStyle().Width(labelW)
-	value := lipgloss.NewStyle().Width(valueW).Align(lipgloss.Right)
-
-	if st.inside {
-		fmt.Fprintf(w, "%s %s\n", styleDim.Render(label.Render(labelHeader)), styleDim.Render(valueHeader))
-		for _, it := range items {
-			fmt.Fprintf(w, "%s %s\n", label.Render(it.label), filledBar(it, lo, hi, barW))
+	// A pivot's values head the columns they span, above the measure labels.
+	if g.groupLabel != "" {
+		var b strings.Builder
+		b.WriteString(pad(truncateCells(g.groupLabel, labelAreaW), labelAreaW))
+		for c := 0; c < n; {
+			span := colW(c)
+			end := c + 1
+			for end < n && g.cols[end].group == g.cols[c].group {
+				span += 2 + colW(end)
+				end++
+			}
+			b.WriteString(gap(c) + pad(truncateCells(g.cols[c].group, span), span))
+			c = end
 		}
-	} else {
-		fmt.Fprintf(w, "%s %s\n", styleDim.Render(label.Render(labelHeader)), styleDim.Render(value.Render(valueHeader)))
-		for _, it := range items {
+		fmt.Fprintln(w, styleDim.Render(strings.TrimRight(b.String(), " ")))
+	}
+
+	var b strings.Builder
+	b.WriteString(labelArea(g.labelHeaders))
+	for c := range n {
+		b.WriteString(gap(c))
+		if st.inside {
+			b.WriteString(pad(truncateCells(g.cols[c].header, barW), barW))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(g.cols[c].header))
+			b.WriteString(strings.Repeat(" ", 1+barW))
+		}
+	}
+	fmt.Fprintln(w, styleDim.Render(strings.TrimRight(b.String(), " ")))
+
+	for r, row := range g.labels {
+		var line strings.Builder
+		line.WriteString(labelArea(row))
+		for c := range n {
+			it := g.cols[c].items[r]
+			sc := scales[g.cols[c].scale]
+			last := c == n-1
+			line.WriteString(gap(c))
 			var drawn string
 			switch {
+			case st.inside:
+				drawn = filledBar(it, sc.lo, sc.hi, barW)
 			case !it.present:
-			case lo < 0:
-				drawn = twoSidedBar(it.value, lo, hi, barW, st.fill, st.tips)
+			case sc.lo < 0:
+				drawn = twoSidedBar(it.value, sc.lo, sc.hi, barW, st.fill, st.tips)
 			default:
-				drawn = styleBar.Render(blocks(it.value, hi, barW, st.fill, st.tips))
+				drawn = styleBar.Render(blocks(it.value, sc.hi, barW, st.fill, st.tips))
 			}
-			fmt.Fprintf(w, "%s %s %s\n", label.Render(it.label), value.Render(it.text), drawn)
+			if !st.inside {
+				line.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(it.text) + " ")
+			}
+			if !last {
+				drawn = pad(drawn, barW)
+			}
+			line.WriteString(drawn)
 		}
+		fmt.Fprintln(w, strings.TrimRight(line.String(), " "))
 	}
-	if omitted > 0 {
-		fmt.Fprintln(w, styleDim.Render(fmt.Sprintf("… and %d more row%s", omitted, plural(omitted))))
+
+	var notes []string
+	if g.omittedRows > 0 {
+		notes = append(notes, fmt.Sprintf("%d more row%s", g.omittedRows, plural(g.omittedRows)))
+	}
+	if g.omittedCols > 0 {
+		notes = append(notes, fmt.Sprintf("%d more column%s", g.omittedCols, plural(g.omittedCols)))
+	}
+	if len(notes) > 0 {
+		fmt.Fprintln(w, styleDim.Render("… and "+strings.Join(notes, ", ")))
 	}
 }
 

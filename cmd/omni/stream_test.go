@@ -150,14 +150,29 @@ func TestRenderStream_WaitErrorUsesTheEnvelope(t *testing.T) {
 	}
 }
 
-// A failure on a later job leaves nothing on stdout.
-func TestRenderStream_LaterSetErrorWritesNothing(t *testing.T) {
+// One failed job is reported and exits non-zero, but the jobs that did
+// complete are still rendered rather than thrown away with it.
+func TestRenderStream_FailedJobKeepsTheOthers(t *testing.T) {
 	body := `{"jobs_submitted":{"j1":"r1","j2":"r2"}}` + "\n" + completedJob(t, "j1") + "\n" +
 		`{"job_id":"j2","status":"ERROR","error_type":"PLAN","error_message":"No such view"}` + "\n"
 	var stdout bytes.Buffer
 	err := renderStream(&config.ResolvedConfig{}, streamResp(body, nil), "human", false, &output.ChartOptions{Width: 60}, &stdout, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "No such view") {
 		t.Fatalf("expected the second job's error, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Ireland") {
+		t.Errorf("the completed job should still render, got %q", stdout.String())
+	}
+}
+
+// With nothing left to render, stdout stays empty.
+func TestRenderStream_OnlyFailuresWriteNothing(t *testing.T) {
+	body := `{"jobs_submitted":{"j1":"r1"}}` + "\n" +
+		`{"job_id":"j1","status":"ERROR","error_type":"PLAN","error_message":"No such view"}` + "\n"
+	var stdout bytes.Buffer
+	err := renderStream(&config.ResolvedConfig{}, streamResp(body, nil), "human", false, nil, &stdout, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "No such view") {
+		t.Fatalf("expected the job's error, got %v", err)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("nothing should reach stdout, got %q", stdout.String())

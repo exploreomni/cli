@@ -133,16 +133,38 @@ func TestParse_TimedOutStreamReportsRemaining(t *testing.T) {
 	}
 }
 
-func TestParse_FailedJobIsAnError(t *testing.T) {
+func TestParse_FailedJobIsAFailure(t *testing.T) {
 	// The documented shape: error_type and error_message on the job line.
 	body := jobLine(t, "j1", "ERROR", map[string]any{"error_type": "PLAN", "error_message": `No such view "order_items"`})
-	_, err := Parse([]byte(body))
-	if err == nil || !strings.Contains(err.Error(), `PLAN: No such view "order_items"`) {
+	st, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Err(); err == nil || !strings.Contains(err.Error(), `PLAN: No such view "order_items"`) {
 		t.Errorf("expected the API's message, got %v", err)
 	}
 	body = jobLine(t, "j1", "ERROR", map[string]any{"error": map[string]any{"message": "token expired"}})
-	if _, err := Parse([]byte(body)); err == nil || !strings.Contains(err.Error(), "token expired") {
+	st, err = Parse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Err(); err == nil || !strings.Contains(err.Error(), "token expired") {
 		t.Errorf("structured error should still surface, got %v", err)
+	}
+}
+
+func TestParse_OneFailedJobKeepsTheOthers(t *testing.T) {
+	body := jobLine(t, "j1", "COMPLETE", nil) + "\n" +
+		jobLine(t, "j2", "ERROR", map[string]any{"error_message": "boom"})
+	st, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Sets) != 1 || st.Sets[0].JobID != "j1" {
+		t.Errorf("the completed job should still decode, got %d sets", len(st.Sets))
+	}
+	if err := st.Err(); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("the failed job should still be reported, got %v", err)
 	}
 }
 
@@ -155,5 +177,20 @@ func TestParse_UnknownFieldKeepsItsName(t *testing.T) {
 	}
 	if c := st.Sets[0].Columns[1]; c.Label != "events_ext.sessions" || c.Format != "" {
 		t.Errorf("undescribed column = %+v", c)
+	}
+}
+
+func TestParse_CarriesPivots(t *testing.T) {
+	body := jobLine(t, "j1", "COMPLETE", map[string]any{"query": map[string]any{"model_job": map[string]any{
+		"pivots":       []string{"events_ext.event_timestamp[date]"},
+		"column_limit": 50,
+	}}})
+	st, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := st.Sets[0]
+	if len(set.Pivots) != 1 || set.Pivots[0] != "events_ext.event_timestamp[date]" || set.ColumnLimit != 50 {
+		t.Errorf("pivots = %v, column limit = %d", set.Pivots, set.ColumnLimit)
 	}
 }

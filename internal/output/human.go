@@ -247,15 +247,15 @@ func renderTable(w io.Writer, rows []any) {
 	for _, rec := range records {
 		row := make([]string, len(columns))
 		for i, c := range columns {
-			row[i] = truncateCells(formatScalar(rec[c]), 60)
+			row[i] = truncateCells(formatField(c, rec[c]), 60)
 		}
 		t.Row(row...)
 	}
 	fmt.Fprintln(w, t.Render())
 }
 
-// styleFor returns a StyleFunc that dims identifier columns and greys out
-// timestamps, keeping names and other scalars at default foreground.
+// styleFor returns a StyleFunc that mutes identifier and timestamp columns,
+// keeping names and other scalars at default foreground.
 func styleFor(columns []string) func(row, col int) lipgloss.Style {
 	dim, grey, header, base := styleMuted, styleMuted, styleHeader, styleCell
 
@@ -309,7 +309,7 @@ func renderKeyValue(w io.Writer, obj map[string]any) {
 			fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", summarizeComplex(v))
 			continue
 		}
-		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatScalar(v))
+		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatField(k, v))
 	}
 }
 
@@ -405,6 +405,26 @@ func summarizeComplex(v any) string {
 	return ""
 }
 
+// formatField renders a value under the field name it arrived with. An
+// identifier is a value someone copies back into a command, so it keeps its
+// digits ungrouped; everything else reads better with separators.
+func formatField(key string, v any) string {
+	if f, ok := v.(float64); ok && identifierKey(key) {
+		return formatNumberPlain(f)
+	}
+	return formatScalar(v)
+}
+
+// identifierKey reports whether a field name reads as an identifier or a port
+// rather than a magnitude.
+func identifierKey(k string) bool {
+	switch k {
+	case "id", "port", "version":
+		return true
+	}
+	return strings.HasSuffix(k, "Id") || strings.HasSuffix(k, "ID")
+}
+
 func formatScalar(v any) string {
 	switch x := v.(type) {
 	case nil:
@@ -436,6 +456,13 @@ func formatScalar(v any) string {
 // Separators start at five digits so a year stays 2026 rather than 2,026.
 func formatNumber(f float64) string {
 	return formatNumberGrouped(f, 5)
+}
+
+// formatNumberPlain is formatNumber without separators, for scalars in
+// ordinary API responses: nothing there distinguishes a magnitude from an id
+// or a port, and a grouped id is a value someone copies back wrong.
+func formatNumberPlain(f float64) string {
+	return formatNumberGrouped(f, math.MaxInt)
 }
 
 // formatNumberGrouped is formatNumber with the separator threshold exposed.

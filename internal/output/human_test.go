@@ -270,6 +270,22 @@ func TestHumanBytes_LargeFloatInTable(t *testing.T) {
 	}
 }
 
+// An id is a value someone copies back into a command, so it keeps its
+// digits; the measure beside it still reads as a magnitude.
+func TestHumanBytes_IdentifiersAreNotGrouped(t *testing.T) {
+	var buf bytes.Buffer
+	body := []byte(`[{"id":123456,"connectionId":987654,"revenue":1284220.5}]`)
+	if err := HumanBytes(&buf, body); err != nil {
+		t.Fatalf("HumanBytes: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"123456", "987654", "1,284,220.5"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestTruncate_DoesNotSplitRunes(t *testing.T) {
 	s := "متجر إلكتروني - لوحة المبيعات"
 	got := truncateCells(s, 10)

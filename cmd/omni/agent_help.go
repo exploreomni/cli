@@ -151,14 +151,15 @@ available; binary values in its JSON object are interpreted as file paths.
 
 ## Common Flags
   --compact       Non-indented JSON output
-  --chart[=bar]   Draw query run / query wait results as a terminal bar chart:
-                  the first measure by the first dimension, as the model defines
-                  them. Leave resultType out of the body. Cannot be combined
-                  with an explicitly requested JSON format.
-  --chart-label F Dimension to label bars with, by field name or label
-  --chart-value F Measure to plot, by field name or label
-  --chart-rows N  Most bars to draw (default 50)
-  --chart-style S bar (default), block (solid, finer ends), or line
+  --chart[=bar]   Draw query run / query wait results as a terminal bar table:
+                  every dimension a column, every measure a column of bars on
+                  its own scale; a query with pivots is drawn pivoted. Leave
+                  resultType out of the body. Cannot be combined with an
+                  explicitly requested JSON format.
+  --chart-label F Only this dimension labels the rows, by field name or label
+  --chart-value F Only this measure gets bars, by field name or label
+  --chart-rows N  Most rows to draw (default 50)
+  --chart-style S bar (default), block (solid, finer ends), line, or fill
   --workbook      Also open the query in an ephemeral workbook; the link prints
                   under human output, or as {"workbookUrl": ...} on stderr in
                   JSON mode

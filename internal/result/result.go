@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -30,6 +31,11 @@ type Set struct {
 	JobID   string
 	Columns []Column
 	Rows    [][]any // string, int64, float64, bool, time.Time, or nil
+	// Pivots names the columns the query pivots on. The stream carries rows
+	// in long form either way; Pivot reshapes them.
+	Pivots []string
+	// ColumnLimit caps the pivot columns shown, as the query sets it; 0 means none.
+	ColumnLimit int
 }
 
 // Stream is one parsed query/run or query/wait response.
@@ -37,6 +43,38 @@ type Stream struct {
 	Sets []*Set
 	// Remaining lists jobs still running; poll query/wait with them until empty.
 	Remaining []string
+	// Failures lists jobs that did not complete. One bad job doesn't void the
+	// others: the caller renders what decoded and reports these alongside.
+	Failures []Failure
+}
+
+// Failure is one job the API could not complete, or whose result would not decode.
+type Failure struct {
+	JobID   string
+	Status  string
+	Message string
+}
+
+func (f Failure) Error() string {
+	if f.Status == "" {
+		return fmt.Sprintf("query job %s: %s", f.JobID, f.Message)
+	}
+	return fmt.Sprintf("query job %s %s: %s", f.JobID, f.Status, f.Message)
+}
+
+// Err reports the stream's failed jobs as a single error, or nil if none failed.
+func (s *Stream) Err() error {
+	switch len(s.Failures) {
+	case 0:
+		return nil
+	case 1:
+		return s.Failures[0]
+	}
+	msgs := make([]string, len(s.Failures))
+	for i, f := range s.Failures {
+		msgs[i] = f.Error()
+	}
+	return errors.New(strings.Join(msgs, "; "))
 }
 
 type line struct {
@@ -46,7 +84,9 @@ type line struct {
 	Summary       *summary          `json:"summary"`
 	Query         *struct {
 		ModelJob struct {
-			Fields []string `json:"fields"`
+			Fields      []string `json:"fields"`
+			Pivots      []string `json:"pivots"`
+			ColumnLimit int      `json:"column_limit"`
 		} `json:"model_job"`
 	} `json:"query"`
 	Result          string          `json:"result"`
@@ -70,7 +110,9 @@ type fieldMeta struct {
 	} `json:"format"`
 }
 
-// Parse decodes a stream body; a failed job is an error carrying the API's message.
+// Parse decodes a stream body. A job that failed or would not decode is
+// collected in Stream.Failures rather than aborting the whole stream, so the
+// jobs that did complete are still rendered.
 func Parse(data []byte) (*Stream, error) {
 	var st Stream
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -89,11 +131,13 @@ func Parse(data []byte) (*Stream, error) {
 			st.Remaining = l.RemainingJobIDs
 		case l.JobID != "":
 			if l.Status != "COMPLETE" {
-				return nil, fmt.Errorf("query job %s %s: %s", l.JobID, l.Status, jobError(l))
+				st.Failures = append(st.Failures, Failure{JobID: l.JobID, Status: l.Status, Message: jobError(l)})
+				continue
 			}
 			set, err := decodeJob(l)
 			if err != nil {
-				return nil, fmt.Errorf("query job %s: %w", l.JobID, err)
+				st.Failures = append(st.Failures, Failure{JobID: l.JobID, Message: err.Error()})
+				continue
 			}
 			st.Sets = append(st.Sets, set)
 		}
@@ -149,9 +193,14 @@ func decodeJob(l line) (*Set, error) {
 	var picked []int
 	if l.Query != nil && len(l.Query.ModelJob.Fields) > 0 {
 		for _, name := range l.Query.ModelJob.Fields {
-			if idx := schema.FieldIndices(name); len(idx) > 0 {
-				picked = append(picked, idx[0])
+			idx := schema.FieldIndices(name)
+			if len(idx) == 0 {
+				// A partial match would silently drop columns; fall back to
+				// the summary's field set, which describes what arrived.
+				picked = nil
+				break
 			}
+			picked = append(picked, idx[0])
 		}
 	}
 	if len(picked) == 0 {
@@ -169,6 +218,10 @@ func decodeJob(l line) (*Set, error) {
 	}
 
 	set := &Set{JobID: l.JobID}
+	if l.Query != nil {
+		set.Pivots = l.Query.ModelJob.Pivots
+		set.ColumnLimit = l.Query.ModelJob.ColumnLimit
+	}
 	for _, i := range picked {
 		f := schema.Field(i)
 		col := Column{Name: f.Name, Label: f.Name}

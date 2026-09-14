@@ -429,8 +429,12 @@ func TestPrepareBody(t *testing.T) {
 		{name: "workbook and planOnly conflict", workbook: true, props: queryRun, body: `{"query":{},"planOnly":true}`, err: "planOnly"},
 		{name: "workbook on a command without the field", workbook: true, props: generate, body: `{"modelId":"x"}`, err: "not supported"},
 		{name: "chart on a command without resultType", chart: true, props: generate, body: `{"modelId":"x"}`, want: `{"modelId":"x"}`},
-		{name: "no body", chart: true, workbook: true, props: queryRun, want: ``},
-		{name: "not JSON", chart: true, workbook: true, props: queryRun, body: `not json`, want: `not json`},
+		{name: "no body", chart: true, props: queryRun, want: ``},
+		{name: "not JSON", chart: true, props: queryRun, body: `not json`, want: `not json`},
+		// --workbook has nowhere to put workbookUrl: say so rather than
+		// sending the request and losing the link silently.
+		{name: "workbook with no body", workbook: true, props: queryRun, err: "needs a JSON request body"},
+		{name: "workbook with a non-JSON body", workbook: true, props: queryRun, body: `not json`, err: "needs a JSON object"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -499,6 +503,24 @@ func TestOutputResponse_ChartNeedsAStream(t *testing.T) {
 		StatusCode: 200,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`[{"region":"east","revenue":10}]`)),
+	}
+	err := outputResponseTo(&stdout, &stderr, resp, "human", false, &output.ChartOptions{Width: 60})
+	if err == nil || !strings.Contains(err.Error(), "not a query stream") {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("nothing should reach stdout, got %q", stdout.String())
+	}
+}
+
+// The same refusal holds for a non-JSON 2xx body: a CSV isn't a stream
+// either, so it is refused rather than written out with --chart ignored.
+func TestOutputResponse_ChartRefusedBeforePassthrough(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/csv"}},
+		Body:       io.NopCloser(strings.NewReader("region,revenue\neast,10\n")),
 	}
 	err := outputResponseTo(&stdout, &stderr, resp, "human", false, &output.ChartOptions{Width: 60})
 	if err == nil || !strings.Contains(err.Error(), "not a query stream") {

@@ -2,11 +2,13 @@ package output
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/exploreomni/omni-cli/internal/result"
+	"github.com/muesli/termenv"
 )
 
 func col(name, label string, dim bool, format string) result.Column {
@@ -42,7 +44,7 @@ func TestChart_HeadersAlignToColumns(t *testing.T) {
 	out := chart(t, sessionsSet(), ChartOptions{})
 	lines := strings.Split(out, "\n")
 	header, row := lines[0], lines[1]
-	hEnd := strings.LastIndex(header, "Sessions") + len("Sessions")
+	hEnd := strings.Index(header, "Sessions") + len("Sessions")
 	vEnd := strings.Index(row, "12,526") + len("12,526")
 	if lipgloss.Width(header[:hEnd]) != lipgloss.Width(row[:vEnd]) {
 		t.Errorf("value header should end where the values end:\n%s", out)
@@ -61,6 +63,40 @@ func chart(t *testing.T, set *result.Set, opts ChartOptions) string {
 	return buf.String()
 }
 
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
+
+// withColor turns color on for a test: the fill style paints a background
+// rather than drawing a glyph, so with the profile a test process actually
+// gets (no TTY) there would be nothing to see.
+func withColor(t *testing.T) func() {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	return func() { lipgloss.SetColorProfile(prev) }
+}
+
+// Without color the fill style has no glyph of its own, so it falls back to
+// solid blocks rather than printing rows of blank space down a pipe.
+func TestChart_FillWithoutColorFallsBackToBlocks(t *testing.T) {
+	set := &result.Set{
+		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Sessions", false, "NUMBER_0")},
+		Rows:    [][]any{{"east", int64(12526)}, {"west", int64(1)}},
+	}
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	defer lipgloss.SetColorProfile(prev)
+
+	out := chart(t, set, ChartOptions{Style: StyleFill, Width: 60})
+	if !strings.Contains(out, "█") {
+		t.Errorf("expected visible bars without color:\n%q", out)
+	}
+	if !strings.Contains(out, "12,526") {
+		t.Errorf("expected the value to still show:\n%q", out)
+	}
+}
+
 func chartErr(t *testing.T, set *result.Set, opts ChartOptions) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -71,12 +107,16 @@ func chartErr(t *testing.T, set *result.Set, opts ChartOptions) string {
 	return err.Error()
 }
 
-// The model says which column is the dimension and which the measure; the
-// chart doesn't guess.
+// The model says which columns are dimensions and which measures; the chart
+// doesn't guess. Every measure gets bars, in query order.
 func TestChart_ColumnsFromModel(t *testing.T) {
-	out := chart(t, sessionsSet(), ChartOptions{})
-	if !headerIs(out, "Country", "Sessions") {
-		t.Fatalf("expected the first dimension and first measure, got:\n%s", out)
+	out := chart(t, sessionsSet(), ChartOptions{Width: 80})
+	if !headerIs(out, "Country", "Engaged Sessions %") {
+		t.Fatalf("expected the dimension and every measure, got:\n%s", out)
+	}
+	header, _, _ := strings.Cut(out, "\n")
+	if i := strings.Index(header, "Sessions"); i < 0 || i > strings.Index(header, "Engaged") {
+		t.Errorf("measures should keep query order:\n%s", out)
 	}
 	if !strings.Contains(out, "12,526") {
 		t.Errorf("NUMBER_0 should group digits:\n%s", out)
@@ -106,6 +146,10 @@ func TestChart_ColumnSpellings(t *testing.T) {
 		if !headerIs(out, "Country", "Engaged Sessions %") {
 			t.Errorf("%q did not select the column:\n%s", spelling, out)
 		}
+	}
+	// A bare field name finds a column whose label reads differently.
+	if i, ok := matchColumn(pipelineSet().Columns, "count"); !ok || i != 3 {
+		t.Errorf(`"count" should find deals.count ("Deals Count"), got %d %v`, i, ok)
 	}
 	if _, ok := matchColumn(sessionsSet().Columns, "session"); ok {
 		t.Error("a near miss should not match")
@@ -141,13 +185,15 @@ func TestChart_FillStyle(t *testing.T) {
 		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Sessions", false, "NUMBER_0")},
 		Rows:    [][]any{{"east", int64(12526)}, {"west", int64(1)}, {"north", nil}},
 	}
+	defer withColor(t)()
 	out := chart(t, set, ChartOptions{Style: StyleFill, Width: 60})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if !strings.Contains(lines[1], "12,526") || strings.ContainsAny(out, "▇█━") {
 		t.Errorf("expected the value inside a painted bar, no glyphs:\n%s", out)
 	}
 	// The big bar holds its value; the tiny one can't and shows it after.
-	if strings.Index(lines[1], "12,526") > strings.Index(lines[2], "1") {
+	// Compared on plain text: the paint's escape codes aren't cells.
+	if strings.Index(stripANSI(lines[1]), "12,526") > strings.Index(stripANSI(lines[2]), "1") {
 		t.Errorf("a value inside a bar starts before one shown after a one-cell bar:\n%s", out)
 	}
 	if !strings.Contains(lines[3], "-") {
@@ -186,7 +232,7 @@ func TestChart_NullValueRendersAsDash(t *testing.T) {
 		Rows:    [][]any{{"x", int64(5)}, {"y", nil}},
 	}
 	out := chart(t, set, ChartOptions{})
-	if !strings.Contains(out, "y") || !strings.Contains(out, " - ") {
+	if !strings.Contains(out, "\ny -\n") {
 		t.Errorf("expected a dash for the null row:\n%s", out)
 	}
 }
@@ -273,6 +319,8 @@ func TestChart_Errors(t *testing.T) {
 		{"non-numeric value column", ChartOptions{Value: "country"}, "holds no numbers"},
 		{"unknown label column", ChartOptions{Label: "nope"}, "is not a column"},
 		{"unknown kind", ChartOptions{Kind: "pie"}, "unknown chart kind"},
+		// Bars labelled by their own values say nothing.
+		{"label is the value column", ChartOptions{Value: "sessions", Label: "sessions"}, "is the column being plotted"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -303,5 +351,129 @@ func TestResultTable(t *testing.T) {
 	// would be alphabetical; the model's order has Sessions second.
 	if strings.Index(out, "Sessions") > strings.Index(out, "Engaged") {
 		t.Errorf("columns should keep query order:\n%s", out)
+	}
+}
+
+// Region × stage with two measures, as the stream decodes it.
+func pipelineSet() *result.Set {
+	return &result.Set{
+		Columns: []result.Column{
+			{Name: "deals.region", Label: "Region", IsDimension: true, DataType: "STRING"},
+			{Name: "deals.stage", Label: "Stage", IsDimension: true, DataType: "STRING"},
+			col("deals.total_amount", "Total amount", false, "currency_0"),
+			col("deals.count", "Deals Count", false, ""),
+		},
+		Rows: [][]any{
+			{"AMER", "Closed Lost", int64(13966500), int64(223)},
+			{"AMER", "Negotiation", int64(167500), int64(3)},
+			{"AMER", "Closed Won", int64(3903000), int64(56)},
+			{"EMEA", "Closed Lost", int64(8482500), int64(125)},
+			{"EMEA", "Closed Won", int64(1949500), int64(36)},
+		},
+	}
+}
+
+func pivoted() *result.Set {
+	set := pipelineSet()
+	set.Pivots = []string{"deals.stage"}
+	return set
+}
+
+func barCells(line string) int {
+	return strings.Count(line, "▇")
+}
+
+// Two dimensions label each bar together, so rows don't read as repeats of
+// the first; each measure is scaled to its own maximum.
+func TestChart_TwoDimensionsTwoMeasures(t *testing.T) {
+	out := chart(t, pipelineSet(), ChartOptions{Width: 100})
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if f := strings.Fields(lines[0]); len(f) < 2 || f[0] != "Region" || f[1] != "Stage" {
+		t.Fatalf("expected both dimensions as columns:\n%s", out)
+	}
+	if !strings.Contains(lines[1], "AMER") || !strings.Contains(lines[1], "Closed Lost") {
+		t.Errorf("row should carry both dimension values:\n%s", out)
+	}
+	// Closed Lost is the max of both measures: its two bars are both full.
+	amount, count := strings.Split(lines[1], "$13,966,500")[1], strings.Split(lines[1], "223")[1]
+	if barCells(amount)-barCells(count) != barCells(strings.Split(amount, "223")[0]) {
+		t.Errorf("each measure should fill its own column at its max:\n%s", out)
+	}
+	for _, line := range lines {
+		if got := lipgloss.Width(line); got > 100 {
+			t.Errorf("line is %d cells: %q", got, line)
+		}
+	}
+}
+
+// A pivot spreads the measure across its values like the Omni app's bar
+// table: the pivot values head the columns, and they share one scale.
+func TestChart_Pivot(t *testing.T) {
+	out := chart(t, pivoted(), ChartOptions{Value: "Total amount", Width: 120, Style: StyleBlock})
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	for _, want := range []string{"Stage", "Closed Lost", "Negotiation", "Closed Won"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("group header missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.HasPrefix(lines[1], "Region") || strings.Count(lines[1], "Total amount") != 3 {
+		t.Errorf("expected the measure under each pivot value:\n%s", out)
+	}
+	if len(lines) != 4 {
+		t.Fatalf("expected two header lines and a row per region:\n%s", out)
+	}
+	if !strings.HasPrefix(lines[3], "EMEA") || !strings.Contains(lines[3], " - ") {
+		t.Errorf("EMEA has no Negotiation deals and should show a dash:\n%s", out)
+	}
+	// Shared scale: AMER Closed Lost ($13.97M) is the longest bar, and EMEA
+	// Closed Lost ($8.48M) is shorter than it though it's EMEA's largest.
+	full := strings.Count(strings.Split(lines[2], "$3,903,000")[0], "█")
+	emea := strings.Count(strings.Split(lines[3], "$1,949,500")[0], "█")
+	if emea >= full || emea == 0 {
+		t.Errorf("pivot columns should share the measure's scale (full %d, emea %d):\n%s", full, emea, out)
+	}
+}
+
+// A pivot too wide for the terminal drops trailing columns and says so.
+func TestChart_PivotFitsTheWidth(t *testing.T) {
+	out := chart(t, pivoted(), ChartOptions{Width: 50})
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if got := lipgloss.Width(line); got > 50 {
+			t.Errorf("line is %d cells: %q", got, line)
+		}
+	}
+	if !strings.Contains(out, "more column") {
+		t.Errorf("expected a note about dropped columns:\n%s", out)
+	}
+}
+
+func TestChart_PivotErrors(t *testing.T) {
+	for _, tc := range []struct {
+		opts ChartOptions
+		want string
+	}{
+		{ChartOptions{Label: "stage"}, "not a row dimension"},
+		{ChartOptions{Value: "region"}, "not a measure"},
+	} {
+		if got := chartErr(t, pivoted(), tc.opts); !strings.Contains(got, tc.want) {
+			t.Errorf("%+v: error %q does not mention %q", tc.opts, got, tc.want)
+		}
+	}
+}
+
+func TestResultTable_Pivot(t *testing.T) {
+	var buf bytes.Buffer
+	ResultTable(&buf, pivoted())
+	out := buf.String()
+	lines := strings.Split(out, "\n")
+	if strings.Count(out, "├") != 1 {
+		t.Errorf("expected one rule, under the header:\n%s", out)
+	}
+	// Two header lines: pivot values over measure labels.
+	if !strings.Contains(lines[1], "Stage") || !strings.Contains(lines[1], "Closed Lost") || !strings.Contains(lines[2], "Region") || strings.Count(lines[2], "Deals Count") != 3 {
+		t.Fatalf("expected pivot values over measure labels:\n%s", out)
+	}
+	if strings.Count(out, "AMER") != 1 || strings.Count(out, "EMEA") != 1 {
+		t.Errorf("expected one row per region:\n%s", out)
 	}
 }

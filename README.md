@@ -232,7 +232,18 @@ Fashion Hoodies & Sweatshir…    756,824.63 ▇▇▇▇▇▇▇▇▇▇▇�
 Open in Omni: https://myorg.omniapp.co/e/1:abc123/1
 ```
 
-The bars are the first measure, labelled by the first dimension, as the model defines them. Name either explicitly by field or label — `--chart-value engaged_sessions_percent`, `--chart-label "Country"`, `events_ext.sessions` all work — and cap the bar count with `--chart-rows`. Add `--workbook` to also open the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
+The chart is a table with bars, as the Omni app draws one: every dimension is a column, and every measure gets a column of bars scaled to its own maximum, as the model defines them. Narrow it to one measure or one dimension by field or label — `--chart-value engaged_sessions_percent`, `--chart-label "Country"`, `events_ext.sessions`, `sessions` all work — and cap the row count with `--chart-rows`.
+
+A query with `pivots` renders pivoted, both as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. Columns that don't fit the terminal are dropped with a note.
+
+```
+Stage  Closed Lost              Closed Won               Lead
+Region Total amount             Total amount             Total amount
+AMER    $13,966,500 ██████████    $3,903,000 ██▊           $1,960,500 █▍
+APAC     $3,919,500 ██▊           $1,591,500 █▏              $407,000 ▎
+EMEA     $8,482,500 ██████▏       $1,949,500 █▍            $1,259,500 ▉
+```
+ Add `--workbook` to also open the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
 
 Values that cross zero get a zero axis rather than being scaled against the maximum:
 
@@ -262,9 +273,9 @@ Piping is fine — `omni ... --chart | less` still draws, since that JSON is aut
 | Flag | Description |
 |------|-------------|
 | `--chart[=bar]` | Draw query results as a bar chart |
-| `--chart-value FIELD` | Measure to plot, by field name or label (default: the first measure) |
-| `--chart-label FIELD` | Dimension to label bars with (default: the first dimension) |
-| `--chart-rows N` | Most bars to draw before summarising the rest (default 50) |
+| `--chart-value FIELD` | Only this measure, by field name or label (default: every measure) |
+| `--chart-label FIELD` | Only this dimension as the row label (default: every dimension) |
+| `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
 | `--chart-style S` | `bar` (default — a hairline between rows), `block` (solid, with eighth-cell precision at the end), or `line` |
 
 Off a terminal — piped to a file, `pbcopy`, or a Slack message — the chart draws at 80 columns, which fits a code block.

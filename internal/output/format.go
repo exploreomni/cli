@@ -138,7 +138,7 @@ func parseSection(p string) (numFormat, bool) {
 			nf.scale = true
 			nf.addLiteral("%", inCore)
 			i++
-		case c == '$' || c == ' ' || c == '-' || c == '+':
+		case c == '$' || c == ' ' || c == '-' || c == '+' || c == '(' || c == ')':
 			nf.addLiteral(string(c), inCore)
 			i++
 		case strings.HasPrefix(p[i:], "€") || strings.HasPrefix(p[i:], "£") || strings.HasPrefix(p[i:], "¥"):

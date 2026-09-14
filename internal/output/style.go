@@ -23,3 +23,9 @@ var (
 	styleNum     = lipgloss.NewStyle().Padding(0, 1).Align(lipgloss.Right)
 	styleMuted   = lipgloss.NewStyle().Padding(0, 1).Foreground(midGray)
 )
+
+// colorEnabled reports whether the active lipgloss profile emits color at all;
+// piped output and TERM=dumb degrade to plain text, styles and all.
+func colorEnabled() bool {
+	return styleFill.Render(" ") != " "
+}
