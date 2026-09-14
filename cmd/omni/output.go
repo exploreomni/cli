@@ -37,10 +37,6 @@ func outputResponse(resp *http.Response, format string, compact bool, chart *out
 // not an error, so it passes through to stdout byte for byte. The body is read
 // in full before anything is written, so a truncated read can't leave half a
 // payload on stdout ahead of a non-zero exit.
-//
-// chart, when non-nil, means the caller asked for a chart of something that
-// isn't a query stream — an error, since nothing else carries the field
-// metadata a chart is drawn from.
 func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format string, compact bool, chart *output.ChartOptions) error {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -68,9 +64,8 @@ func outputResponseTo(stdout, stderr io.Writer, resp *http.Response, format stri
 		return nil
 	}
 
-	// Anything reaching here with a chart asked for isn't a query stream —
-	// checked before the passthrough below, so a CSV is refused rather than
-	// written out with --chart quietly ignored.
+	// A chart asked of anything but a query stream is refused before the
+	// passthrough below, so a CSV isn't written out with --chart ignored.
 	if chart != nil {
 		return fmt.Errorf("--chart plots query results: this response is not a query stream")
 	}

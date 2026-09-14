@@ -14,8 +14,10 @@ import (
 type numFormat struct {
 	kind     string // number, percent, id, big, billions, millions, thousands, currency, accounting, financial, pattern
 	decimals int    // -1 when the format leaves it open
-	symbol   string // currency family only
-	compact  bool   // bigcurrency, bigaccounting, bigfinancial
+	// pattern only: decimals past this many are dropped when they're zeros (#)
+	minDecimals int
+	symbol      string // currency family only
+	compact     bool   // bigcurrency, bigaccounting, bigfinancial
 
 	// pattern only
 	prefix, suffix string
@@ -141,9 +143,10 @@ func parseSection(p string) (numFormat, bool) {
 		case c == '$' || c == ' ' || c == '-' || c == '+' || c == '(' || c == ')':
 			nf.addLiteral(string(c), inCore)
 			i++
-		case strings.HasPrefix(p[i:], "€") || strings.HasPrefix(p[i:], "£") || strings.HasPrefix(p[i:], "¥"):
-			nf.addLiteral(p[i:i+len("€")], inCore)
-			i += len("€")
+		case currencyPrefix(p[i:]) != "":
+			sym := currencyPrefix(p[i:])
+			nf.addLiteral(sym, inCore)
+			i += len(sym)
 		default:
 			return numFormat{}, false
 		}
@@ -156,9 +159,20 @@ func parseSection(p string) (numFormat, bool) {
 		return numFormat{}, false
 	}
 	if dot := strings.IndexByte(digits, '.'); dot >= 0 {
-		nf.decimals = strings.Count(digits[dot+1:], "0")
+		// 0 is a digit always shown, # one shown only when it isn't a trailing zero.
+		nf.minDecimals = strings.Count(digits[dot+1:], "0")
+		nf.decimals = nf.minDecimals + strings.Count(digits[dot+1:], "#")
 	}
 	return nf, true
+}
+
+func currencyPrefix(s string) string {
+	for _, sym := range []string{"€", "£", "¥"} {
+		if strings.HasPrefix(s, sym) {
+			return sym
+		}
+	}
+	return ""
 }
 
 func (nf *numFormat) addLiteral(s string, afterCore bool) {
@@ -185,6 +199,7 @@ func FormatValue(v any, col result.Column) string {
 		}
 		return "false"
 	case string:
+		x = singleLine(x)
 		if x == "" {
 			return "-"
 		}
@@ -198,7 +213,7 @@ func FormatValue(v any, col result.Column) string {
 	}
 	f, ok := asFloat(v)
 	if !ok {
-		return fmt.Sprint(v)
+		return singleLine(fmt.Sprint(v))
 	}
 	nf, ok := parseFormat(col.Format)
 	if !ok {
@@ -280,6 +295,9 @@ func (nf numFormat) renderSection(abs float64) string {
 		s = strings.ToUpper(fmt.Sprintf("%.*e", nf.decimals, abs))
 	} else {
 		s = fixed(abs, nf.decimals, nf.group)
+		if nf.minDecimals < nf.decimals {
+			s = trimDecimals(s, nf.minDecimals)
+		}
 	}
 	return nf.prefix + s + nf.suffix
 }
@@ -322,13 +340,31 @@ func groupDigits(digits string) string {
 	return b.String()
 }
 
+// trimDecimals drops trailing zero decimals from a fixed rendering, keeping keep of them.
+func trimDecimals(s string, keep int) string {
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 {
+		return s
+	}
+	end := len(s)
+	for end > dot+1+keep && s[end-1] == '0' {
+		end--
+	}
+	if end == dot+1 {
+		end = dot
+	}
+	return s[:end]
+}
+
+// bigNumber picks the unit after rounding, so 999,999.9 reads 1.00M, not 1000.00K.
 func bigNumber(f float64, d int) string {
 	abs := math.Abs(f)
+	pow := math.Pow(10, float64(d))
 	for _, u := range []struct {
 		scale  float64
 		suffix string
 	}{{1e12, "T"}, {1e9, "B"}, {1e6, "M"}, {1e3, "K"}} {
-		if abs >= u.scale {
+		if math.Round(abs/u.scale*pow)/pow >= 1 {
 			return fixed(f/u.scale, d, false) + u.suffix
 		}
 	}

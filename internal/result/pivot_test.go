@@ -94,3 +94,30 @@ func TestPivot_NotPivoted(t *testing.T) {
 		t.Error("nothing to spread across the columns: no pivot")
 	}
 }
+
+// Values no row group relates fall back to their own order: row A has Q2
+// and Q4, row B Q1 and Q3.
+func TestPivot_UnrelatedValuesUseValueOrder(t *testing.T) {
+	set := pipelineSet()
+	set.Rows = [][]any{
+		{"A", "Q2", int64(1)},
+		{"A", "Q4", int64(1)},
+		{"B", "Q1", int64(1)},
+		{"B", "Q3", int64(1)},
+	}
+	want := [][]any{{"Q1"}, {"Q2"}, {"Q3"}, {"Q4"}}
+	if got := set.Pivot().Keys; !reflect.DeepEqual(got, want) {
+		t.Errorf("keys = %v, want %v", got, want)
+	}
+	set.Descending = map[string]bool{"deals.stage": true}
+	set.Rows = [][]any{
+		{"A", "Q4", int64(1)},
+		{"A", "Q2", int64(1)},
+		{"B", "Q3", int64(1)},
+		{"B", "Q1", int64(1)},
+	}
+	want = [][]any{{"Q4"}, {"Q3"}, {"Q2"}, {"Q1"}}
+	if got := set.Pivot().Keys; !reflect.DeepEqual(got, want) {
+		t.Errorf("descending: keys = %v, want %v", got, want)
+	}
+}

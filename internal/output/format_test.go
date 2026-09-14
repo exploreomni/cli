@@ -68,6 +68,20 @@ func TestFormatValue_ModelFormats(t *testing.T) {
 		{"$#,##0.00", 1234.5, "$1,234.50"},
 		{"$#,##0.00", -1234.5, "-$1,234.50"},
 		{`\$0.0`, 2.26, "$2.3"},
+		// £ and ¥ are two bytes, € three: each is consumed whole, wherever it sits.
+		{"£0.00", 1234.5, "£1234.50"},
+		{"£#,##0", 1234.0, "£1,234"},
+		{"¥#,##0", 1234.0, "¥1,234"},
+		{"0.00£", 1234.5, "1234.50£"},
+		{"#,##0€", 1234.0, "1,234€"},
+		// # decimals show only when they aren't trailing zeros.
+		{"#,##0.##", 1234.567, "1,234.57"},
+		{"#,##0.##", 1234.5, "1,234.5"},
+		{"#,##0.##", 1234.0, "1,234"},
+		{"0.0#", 2.0, "2.0"},
+		// The unit is picked after rounding.
+		{"big", 999999.9, "1.00M"},
+		{"big_0", 999.6, "1K"},
 		// Parenthesised negatives: the standard accounting shape.
 		{"#,##0;(#,##0)", -1234.0, "(1,234)"},
 		{"#,##0;(#,##0)", 1234.0, "1,234"},

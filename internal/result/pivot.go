@@ -1,8 +1,10 @@
 package result
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Pivoted is a Set reshaped as the query's pivots ask: one row per distinct
@@ -69,7 +71,13 @@ func (s *Set) Pivot() *Pivoted {
 		seqs[rk] = append(seqs[rk], pk)
 		values[cell{rk, pk}] = pick(r, p.Measures)
 	}
-	order := mergeOrder(rowKeys, seqs)
+	desc := make([]bool, len(p.PivotDims))
+	for i, c := range p.PivotDims {
+		desc[i] = s.Descending[s.Columns[c].Name]
+	}
+	order := mergeOrder(rowKeys, seqs, func(a, b string) bool {
+		return compareTuples(tuples[a], tuples[b], desc) < 0
+	})
 
 	if s.ColumnLimit > 0 && len(order) > s.ColumnLimit {
 		p.Omitted = len(order) - s.ColumnLimit
@@ -105,42 +113,102 @@ func tupleKey(row []any, idx []int) string {
 	return b.String()
 }
 
-// mergeOrder lays out pivot values in the stream's order. Each row group lists
-// its values in the order the API sorted them, but a group may lack some; a
-// value first seen in a later group goes after its predecessor in that group
-// (or before its successor), so a gap early on doesn't push it to the end.
-func mergeOrder(rowKeys []string, seqs map[string][]string) []string {
-	var order []string
-	placed := map[string]bool{}
+// mergeOrder lays out pivot values. Each row group lists its values in the
+// order the API sorted them; those orders are merged, and values they don't
+// relate (never in the same group) fall back to the pivot fields' own order.
+func mergeOrder(rowKeys []string, seqs map[string][]string, less func(a, b string) bool) []string {
+	var nodes []string
+	indegree := map[string]int{}
+	next := map[string]map[string]bool{}
 	for _, rk := range rowKeys {
 		seq := seqs[rk]
 		for j, pk := range seq {
-			if placed[pk] {
+			if _, ok := indegree[pk]; !ok {
+				indegree[pk] = 0
+				nodes = append(nodes, pk)
+			}
+			if j == 0 || seq[j-1] == pk || next[seq[j-1]][pk] {
 				continue
 			}
-			at := len(order)
-			if j > 0 {
-				at = indexOf(order, seq[j-1]) + 1
-			} else {
-				for _, next := range seq[1:] {
-					if placed[next] {
-						at = indexOf(order, next)
-						break
-					}
+			if next[seq[j-1]] == nil {
+				next[seq[j-1]] = map[string]bool{}
+			}
+			next[seq[j-1]][pk] = true
+			indegree[pk]++
+		}
+	}
+
+	order := make([]string, 0, len(nodes))
+	done := map[string]bool{}
+	for len(order) < len(nodes) {
+		// The least ready value; if the groups' orders conflict, none is
+		// ready, and the least remaining value breaks the cycle.
+		best := ""
+		for _, ready := range []bool{true, false} {
+			for _, n := range nodes {
+				if done[n] || (ready && indegree[n] > 0) {
+					continue
+				}
+				if best == "" || less(n, best) {
+					best = n
 				}
 			}
-			order = append(order[:at], append([]string{pk}, order[at:]...)...)
-			placed[pk] = true
+			if best != "" {
+				break
+			}
+		}
+		done[best] = true
+		order = append(order, best)
+		for n := range next[best] {
+			indegree[n]--
 		}
 	}
 	return order
 }
 
-func indexOf(s []string, v string) int {
-	for i, x := range s {
-		if x == v {
-			return i
+// compareTuples orders pivot values as their fields sort: numbers and times
+// by value, text lexically, nulls last; desc flips a field.
+func compareTuples(a, b []any, desc []bool) int {
+	for i := range a {
+		c := compareValues(a[i], b[i])
+		if desc[i] {
+			c = -c
+		}
+		if c != 0 {
+			return c
 		}
 	}
-	return -1
+	return 0
+}
+
+func compareValues(a, b any) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return 1
+	case b == nil:
+		return -1
+	}
+	if x, ok := number(a); ok {
+		if y, ok := number(b); ok {
+			return cmp.Compare(x, y)
+		}
+	}
+	if x, ok := a.(time.Time); ok {
+		if y, ok := b.(time.Time); ok {
+			return x.Compare(y)
+		}
+	}
+	return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
+}
+
+func number(v any) (float64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return float64(x), true
+	case float64:
+		return x, true
+	}
+	return 0, false
 }

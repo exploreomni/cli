@@ -44,9 +44,7 @@ func (h *spinnerHandle) Stop() {
 	}
 	close(h.stop)
 	h.s.Stop()
-	// The library erases what it last wrote; clear the whole line as well,
-	// so a phrase swapped in between its last frame and the erase can't
-	// leave a tail behind on the line the output is about to start on.
+	// Clear the whole line: the library only erases its last frame.
 	fmt.Fprint(os.Stderr, "\r\033[2K")
 }
 

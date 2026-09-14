@@ -416,8 +416,15 @@ func TestChart_Pivot(t *testing.T) {
 			t.Errorf("group header missing %q:\n%s", want, out)
 		}
 	}
-	if !strings.HasPrefix(lines[1], "Region") || strings.Count(lines[1], "Total amount") != 3 {
-		t.Errorf("expected the measure under each pivot value:\n%s", out)
+	if !strings.HasPrefix(lines[1], "Region") || strings.Count(lines[1], "Total amount") != 1 {
+		t.Errorf("a lone measure should be named once:\n%s", out)
+	}
+	if narrow := chart(t, pivoted(), ChartOptions{Value: "count", Width: 60}); strings.Contains(strings.Split(narrow, "\n")[0], "…") {
+		t.Errorf("pivot values should widen their column, not be cut off:\n%s", narrow)
+	}
+	both := chart(t, pivoted(), ChartOptions{Width: 160})
+	if header := strings.Split(both, "\n")[1]; strings.Count(header, "Total amount") < 2 || strings.Count(header, "Deals Count") < 2 {
+		t.Errorf("with two measures each column should say which:\n%s", both)
 	}
 	if len(lines) != 4 {
 		t.Fatalf("expected two header lines and a row per region:\n%s", out)
@@ -475,5 +482,39 @@ func TestResultTable_Pivot(t *testing.T) {
 	}
 	if strings.Count(out, "AMER") != 1 || strings.Count(out, "EMEA") != 1 {
 		t.Errorf("expected one row per region:\n%s", out)
+	}
+}
+
+func TestResult_StripsControlCharacters(t *testing.T) {
+	set := &result.Set{
+		Columns: []result.Column{{Name: "r", Label: "Region\x1b[31m", IsDimension: true}, col("v", "Total", false, "")},
+		Rows:    [][]any{{"east\x1b]0;pwned\x07\nwest", int64(5)}},
+	}
+	var table, link bytes.Buffer
+	ResultTable(&table, set)
+	ChartLink(&link, "https://x/e/1\x1b[2J")
+	for _, out := range []string{table.String(), chart(t, set, ChartOptions{}), link.String()} {
+		if strings.ContainsAny(out, "\x1b\x07") {
+			t.Errorf("control characters reached the output:\n%q", out)
+		}
+	}
+	// A newline in a value would break the layout; it reads as a space.
+	if out := chart(t, set, ChartOptions{}); strings.Count(out, "\n") != 2 {
+		t.Errorf("expected a header and one row:\n%q", out)
+	}
+}
+
+// Three measures, and a column limit that drops two pivot values: six
+// columns are missing, not two.
+func TestChart_PivotOmittedCountsColumns(t *testing.T) {
+	set := pivoted()
+	set.Columns = append(set.Columns, col("deals.won", "Won", false, ""))
+	for i := range set.Rows {
+		set.Rows[i] = append(set.Rows[i], int64(1))
+	}
+	set.ColumnLimit = 1
+	out := chart(t, set, ChartOptions{Width: 160})
+	if !strings.Contains(out, "… and 6 more columns") {
+		t.Errorf("expected six omitted columns:\n%s", out)
 	}
 }

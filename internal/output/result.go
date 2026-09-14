@@ -25,7 +25,7 @@ func ResultTable(w io.Writer, set *result.Set) {
 	}
 	headers := make([]string, len(set.Columns))
 	for i, c := range set.Columns {
-		headers[i] = c.Label
+		headers[i] = singleLine(c.Label)
 	}
 
 	t := resultTable(headers, func(col int) bool {
@@ -52,11 +52,11 @@ func pivotTable(w io.Writer, set *result.Set, p *result.Pivoted) {
 		if i == len(p.RowDims)-1 {
 			top = group
 		}
-		headers = append(headers, top+"\n"+set.Columns[c].Label)
+		headers = append(headers, top+"\n"+singleLine(set.Columns[c].Label))
 	}
 	for _, key := range p.Keys {
 		for _, m := range p.Measures {
-			headers = append(headers, pivotKey(set, p, key)+"\n"+set.Columns[m].Label)
+			headers = append(headers, pivotKey(set, p, key)+"\n"+singleLine(set.Columns[m].Label))
 		}
 	}
 
@@ -129,7 +129,7 @@ func resultTable(headers []string, numeric func(col int) bool) *table.Table {
 func pivotLabel(set *result.Set, p *result.Pivoted) string {
 	labels := make([]string, len(p.PivotDims))
 	for i, c := range p.PivotDims {
-		labels[i] = set.Columns[c].Label
+		labels[i] = singleLine(set.Columns[c].Label)
 	}
 	return strings.Join(labels, " · ")
 }
@@ -200,10 +200,10 @@ func flatGrid(set *result.Set, opts ChartOptions) (*grid, error) {
 	rows, omitted := capRows(len(set.Rows), opts)
 	g := &grid{omittedRows: omitted}
 	for _, c := range labels {
-		g.labelHeaders = append(g.labelHeaders, set.Columns[c].Label)
+		g.labelHeaders = append(g.labelHeaders, singleLine(set.Columns[c].Label))
 	}
 	for s, v := range values {
-		g.cols = append(g.cols, gridCol{header: set.Columns[v].Label, scale: s})
+		g.cols = append(g.cols, gridCol{header: singleLine(set.Columns[v].Label), scale: s})
 	}
 	for i, r := range set.Rows[:rows] {
 		var ls []string
@@ -260,16 +260,21 @@ func pivotGrid(set *result.Set, p *result.Pivoted, opts ChartOptions) (*grid, er
 	}
 
 	rows, omitted := capRows(len(p.Rows), opts)
-	g := &grid{groupLabel: pivotLabel(set, p), omittedRows: omitted, omittedCols: p.Omitted}
+	g := &grid{groupLabel: pivotLabel(set, p), omittedRows: omitted, omittedCols: p.Omitted * len(numeric)}
 	for _, c := range labels {
-		g.labelHeaders = append(g.labelHeaders, set.Columns[c].Label)
+		g.labelHeaders = append(g.labelHeaders, singleLine(set.Columns[c].Label))
 	}
 	if len(labels) == 0 {
 		g.labelHeaders = []string{"#"}
 	}
-	for _, key := range p.Keys {
+	for k, key := range p.Keys {
 		for s, m := range numeric {
-			g.cols = append(g.cols, gridCol{group: pivotKey(set, p, key), header: set.Columns[m].Label, scale: s})
+			header := singleLine(set.Columns[m].Label)
+			// One measure needs naming once; with several, each column says which.
+			if len(numeric) == 1 && k > 0 {
+				header = ""
+			}
+			g.cols = append(g.cols, gridCol{group: pivotKey(set, p, key), header: header, scale: s})
 		}
 	}
 	for i, r := range p.Rows[:rows] {

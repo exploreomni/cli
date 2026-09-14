@@ -369,6 +369,7 @@ func TestChartOptions(t *testing.T) {
 		},
 		{name: "rejected with json", args: []string{"--chart"}, format: "json", errs: true},
 		{name: "unknown style", args: []string{"--chart", "--chart-style", "pie"}, errs: true},
+		{name: "unknown kind, before any request", args: []string{"--chart=pie"}, errs: true},
 		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{Kind: "bar"}},
 	}
 	for _, tc := range tests {

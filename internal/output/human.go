@@ -47,7 +47,7 @@ func HumanBytes(w io.Writer, data []byte) error {
 		fmt.Fprintln(w)
 		return werr
 	}
-	renderValue(w, v)
+	renderValue(w, sanitizeJSON(v))
 	return nil
 }
 
@@ -58,6 +58,7 @@ func HumanError(statusCode int, detail string) {
 
 // HumanErrorTo prints a plain-text error message to w.
 func HumanErrorTo(w io.Writer, statusCode int, detail string) {
+	detail = sanitize(detail)
 	if detail == "" {
 		detail = fmt.Sprintf("HTTP %d", statusCode)
 	}
@@ -458,16 +459,13 @@ func formatNumber(f float64) string {
 	return formatNumberGrouped(f, 5)
 }
 
-// formatNumberPlain is formatNumber without separators, for scalars in
-// ordinary API responses: nothing there distinguishes a magnitude from an id
-// or a port, and a grouped id is a value someone copies back wrong.
+// formatNumberPlain is formatNumber without separators, for fields named as
+// identifiers: a grouped id is a value someone copies back wrong.
 func formatNumberPlain(f float64) string {
 	return formatNumberGrouped(f, math.MaxInt)
 }
 
-// formatNumberGrouped is formatNumber with the separator threshold exposed.
-// A caller holding a whole column passes 1 once any value in it needs
-// separators, so the column doesn't mix 113,250 with 6696.
+// formatNumberGrouped groups thousands once the integer part has minDigits digits.
 func formatNumberGrouped(f float64, minDigits int) string {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return fmt.Sprintf("%g", f)

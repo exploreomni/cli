@@ -48,7 +48,6 @@ func ValidStyle(s string) bool {
 	return ok
 }
 
-// DefaultChartRows is the default --chart-rows.
 const DefaultChartRows = 50
 
 const (
@@ -163,25 +162,41 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 		}
 		return width - used
 	}
-	// Labels yield to the bars first, so a row never wraps; then columns go.
-	for avail() < n*minBar() {
-		widest := 0
-		for i := range labelW {
-			if labelW[i] > labelW[widest] {
-				widest = i
+	var barW int
+	for {
+		// Labels yield to the bars first, so a row never wraps; then columns go.
+		for avail() < n*minBar() {
+			widest := 0
+			for i := range labelW {
+				if labelW[i] > labelW[widest] {
+					widest = i
+				}
+			}
+			if len(labelW) > 0 && labelW[widest] > minLabelWidth {
+				labelW[widest]--
+				continue
+			}
+			if n == 1 {
+				break
+			}
+			n--
+			g.omittedCols++
+		}
+		barW = max(avail()/n, minBar())
+		// A pivot value heading a single column widens it rather than being
+		// cut off; bars stay one width so a shared scale stays comparable.
+		grew := false
+		for c := 0; c < n && !st.inside; c++ {
+			if spansOne(g.cols, c) {
+				if need := lipgloss.Width(g.cols[c].group) - 1 - barW; need > valueW[c] {
+					valueW[c], grew = need, true
+				}
 			}
 		}
-		if len(labelW) > 0 && labelW[widest] > minLabelWidth {
-			labelW[widest]--
-			continue
-		}
-		if n == 1 {
+		if !grew {
 			break
 		}
-		n--
-		g.omittedCols++
 	}
-	barW := max(avail()/n, minBar())
 
 	pad := func(s string, cells int) string {
 		return s + strings.Repeat(" ", max(cells-lipgloss.Width(s), 0))
@@ -281,6 +296,11 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 	}
 }
 
+func spansOne(cols []gridCol, c int) bool {
+	g := cols[c].group
+	return g != "" && (c == 0 || cols[c-1].group != g) && (c == len(cols)-1 || cols[c+1].group != g)
+}
+
 // filledBar paints the bar as a background with the value inside it, or
 // after it when the bar is too short.
 func filledBar(it chartRow, lo, hi float64, width int) string {
@@ -358,7 +378,7 @@ func twoSidedBar(v, lo, hi float64, width int, fill string, tips []string) strin
 }
 
 func ChartLink(w io.Writer, url string) {
-	fmt.Fprintf(w, "%s %s\n", styleDim.Render("Open in Omni:"), url)
+	fmt.Fprintf(w, "%s %s\n", styleDim.Render("Open in Omni:"), singleLine(url))
 }
 
 func plural(n int) string {

@@ -149,6 +149,9 @@ func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions
 	if err != nil || kind == "" {
 		return nil, nil
 	}
+	if kind != output.ChartKindBar {
+		return nil, fmt.Errorf("unknown chart kind %q (supported: %s)", kind, output.ChartKindBar)
+	}
 	if chosenFormat == config.FormatJSON {
 		return nil, fmt.Errorf("--chart cannot be combined with JSON output: a chart is not JSON")
 	}

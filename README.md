@@ -217,45 +217,44 @@ A failed API call leaves exactly one JSON document on stderr, so `omni ... 2>err
 
 ### Charts
 
-`--chart` draws the same results as a bar chart:
+`--chart` draws the same results as the Omni app's bar table: every dimension is a column, and every measure gets a column of bars scaled to its own maximum, as the model defines them.
 
 ```bash
-omni query run --body @revenue-by-category.json --chart
+omni query run --body @revenue-by-category.json --chart --workbook
 ```
 
 ```
-Category · Total Sale Price
-Jeans                        1,602,513.81 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
-Accessories                     955,617.30 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▋
-Outerwear & Coats               842,064.07 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
-Fashion Hoodies & Sweatshir…    756,824.63 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Category                     Total Sale Price
+Jeans                            1,602,513.81 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Accessories                        955,617.30 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Outerwear & Coats                  842,064.07 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Fashion Hoodies & Sweatshir…       756,824.63 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
 Open in Omni: https://myorg.omniapp.co/e/1:abc123/1
 ```
 
-The chart is a table with bars, as the Omni app draws one: every dimension is a column, and every measure gets a column of bars scaled to its own maximum, as the model defines them. Narrow it to one measure or one dimension by field or label — `--chart-value engaged_sessions_percent`, `--chart-label "Country"`, `events_ext.sessions`, `sessions` all work — and cap the row count with `--chart-rows`.
+Narrow it to one measure or one dimension by field or label — `--chart-value engaged_sessions_percent`, `--chart-label "Country"`, `events_ext.sessions` and `sessions` all work — and cap the row count with `--chart-rows`. `--workbook` also opens the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
 
-A query with `pivots` renders pivoted, both as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. Columns that don't fit the terminal are dropped with a note.
+A query with `pivots` renders pivoted, as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. Columns that don't fit the terminal are dropped with a note.
 
 ```
-Stage  Closed Lost              Closed Won               Lead
-Region Total amount             Total amount             Total amount
-AMER    $13,966,500 ██████████    $3,903,000 ██▊           $1,960,500 █▍
-APAC     $3,919,500 ██▊           $1,591,500 █▏              $407,000 ▎
-EMEA     $8,482,500 ██████▏       $1,949,500 █▍            $1,259,500 ▉
+Stage  Closed Lost                Closed Won               Negotiation
+Region Total amount
+AMER    $13,966,500 ████████████  $3,903,000 ███▍          $167,500 ▏
+EMEA     $8,482,500 ███████▎      $1,949,500 █▋                   -
+APAC     $3,919,500 ███▍          $1,591,500 █▍            $177,000 ▏
 ```
- Add `--workbook` to also open the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
 
 Values that cross zero get a zero axis rather than being scaled against the maximum:
 
 ```
-Created At Month · Mom Change
-Feb 2024  2,793.82  │▇▇▇▇▇▌
-Mar 2024 10,528.18  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▊
-Apr 2024     -68.70 ▇│
-Nov 2024 29,857.87  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Created At Month Mom Change
+Feb 2024           2,793.82  │▇▇▇▇▇
+Mar 2024          10,528.18  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Apr 2024             -68.70 ▇│
+Nov 2024          29,857.87  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
 ```
 
-A chart is drawn from the query stream's field metadata. A `resultType` in the body would replace that stream with a document, so `--chart` drops it and says so; anything else that can't be charted is refused before any request is made:
+A chart is drawn from the query stream's field metadata. A `resultType` in the body would replace that stream with a document, so `--chart` drops it and says so. Flags that can't work are refused before any request is made; a `--chart-value` or `--chart-label` is matched against the result's columns once it arrives.
 
 ```console
 $ omni query run --body @q.json --chart          # body sets resultType
@@ -268,17 +267,15 @@ $ omni models list --chart
 Error: --chart plots query results: use it with query run or query wait
 ```
 
-Piping is fine — `omni ... --chart | less` still draws, since that JSON is auto-detected rather than asked for.
+Piping is fine — `omni ... --chart | less` still draws, since that JSON is auto-detected rather than asked for. Off a terminal — piped to a file, `pbcopy`, or a Slack message — the chart draws at 80 columns, which fits a code block.
 
 | Flag | Description |
 |------|-------------|
-| `--chart[=bar]` | Draw query results as a bar chart |
+| `--chart[=bar]` | Draw query results as a bar table |
 | `--chart-value FIELD` | Only this measure, by field name or label (default: every measure) |
 | `--chart-label FIELD` | Only this dimension as the row label (default: every dimension) |
 | `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
-| `--chart-style S` | `bar` (default — a hairline between rows), `block` (solid, with eighth-cell precision at the end), or `line` |
-
-Off a terminal — piped to a file, `pbcopy`, or a Slack message — the chart draws at 80 columns, which fits a code block.
+| `--chart-style S` | `bar` (default — a hairline between rows), `block` (solid, with eighth-cell precision at the end), `line`, or `fill` (the value painted inside the bar; solid blocks without color) |
 | `--workbook` | Also open the query in an ephemeral workbook and print its link |
 
 ## Environment variables

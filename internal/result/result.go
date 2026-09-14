@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 
@@ -36,6 +37,8 @@ type Set struct {
 	Pivots []string
 	// ColumnLimit caps the pivot columns shown, as the query sets it; 0 means none.
 	ColumnLimit int
+	// Descending lists the columns the query sorts high to low.
+	Descending map[string]bool
 }
 
 // Stream is one parsed query/run or query/wait response.
@@ -87,6 +90,10 @@ type line struct {
 			Fields      []string `json:"fields"`
 			Pivots      []string `json:"pivots"`
 			ColumnLimit int      `json:"column_limit"`
+			Sorts       []struct {
+				ColumnName     string `json:"column_name"`
+				SortDescending bool   `json:"sort_descending"`
+			} `json:"sorts"`
 		} `json:"model_job"`
 	} `json:"query"`
 	Result          string          `json:"result"`
@@ -221,6 +228,14 @@ func decodeJob(l line) (*Set, error) {
 	if l.Query != nil {
 		set.Pivots = l.Query.ModelJob.Pivots
 		set.ColumnLimit = l.Query.ModelJob.ColumnLimit
+		for _, s := range l.Query.ModelJob.Sorts {
+			if s.SortDescending {
+				if set.Descending == nil {
+					set.Descending = map[string]bool{}
+				}
+				set.Descending[s.ColumnName] = true
+			}
+		}
 	}
 	for _, i := range picked {
 		f := schema.Field(i)
@@ -297,6 +312,9 @@ func value(col arrow.Array, i int) any {
 	case *array.Uint32:
 		return int64(a.Value(i))
 	case *array.Uint64:
+		if v := a.Value(i); v > math.MaxInt64 {
+			return float64(v)
+		}
 		return int64(a.Value(i))
 	case *array.Float32:
 		return float64(a.Value(i))

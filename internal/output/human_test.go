@@ -299,3 +299,15 @@ func TestTruncate_DoesNotSplitRunes(t *testing.T) {
 		t.Error("a string under the limit should pass through")
 	}
 }
+
+// Values are data: an escape sequence in one must not reach the terminal.
+func TestHumanBytes_StripsControlCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	body := `{"records":[{"id":"1","name":"evil\u001b]52;c;aGk=\u0007name\u001b[2J"}]}`
+	if err := HumanBytes(&buf, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, "evil]52;c;aGk=name[2J") {
+		t.Errorf("control characters should be dropped, text kept:\n%q", out)
+	}
+}
