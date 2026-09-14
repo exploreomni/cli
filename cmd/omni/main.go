@@ -138,7 +138,6 @@ func addResultFlags(cmd *cobra.Command) {
 	f.String("chart-label", "", "only this dimension labels the rows, by field or label (default: every dimension)")
 	f.String("chart-value", "", "only this measure gets bars, by field or label (default: every measure)")
 	f.Int("chart-rows", output.DefaultChartRows, "most rows to draw before summarising the rest")
-	f.String("chart-style", output.StyleBar, "bar style: bar, block (solid, finer ends), line, fill (value inside the bar; rows touch)")
 }
 
 // chartOptions reads the --chart flags; nil when no chart was asked for. An
@@ -158,17 +157,12 @@ func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions
 	label, _ := cmd.Flags().GetString("chart-label")
 	value, _ := cmd.Flags().GetString("chart-value")
 	rows, _ := cmd.Flags().GetInt("chart-rows")
-	style, _ := cmd.Flags().GetString("chart-style")
-	if !output.ValidStyle(style) {
-		return nil, fmt.Errorf("--chart-style %q is not one of bar, block, line, fill", style)
-	}
 	return &output.ChartOptions{
 		Kind:    kind,
 		Label:   label,
 		Value:   value,
 		Width:   terminalWidth(),
 		MaxRows: rows,
-		Style:   style,
 	}, nil
 }
 

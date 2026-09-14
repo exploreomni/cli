@@ -275,7 +275,6 @@ Piping is fine — `omni ... --chart | less` still draws, since that JSON is aut
 | `--chart-value FIELD` | Only this measure, by field name or label (default: every measure) |
 | `--chart-label FIELD` | Only this dimension as the row label (default: every dimension) |
 | `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
-| `--chart-style S` | `bar` (default — a hairline between rows), `block` (solid, with eighth-cell precision at the end), `line`, or `fill` (the value painted inside the bar; solid blocks without color) |
 | `--workbook` | Also open the query in an ephemeral workbook and print its link |
 
 ## Environment variables

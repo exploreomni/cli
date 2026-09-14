@@ -978,7 +978,6 @@ var globalFlagKeys = map[string]string{
 	flagLookupKey("chart-label"): "chart-label",
 	flagLookupKey("chart-value"): "chart-value",
 	flagLookupKey("chart-rows"):  "chart-rows",
-	flagLookupKey("chart-style"): "chart-style",
 	flagLookupKey("workbook"):    "workbook",
 	// Added by cobra on every command; must stay a bool.
 	flagLookupKey("help"): "help",

@@ -368,7 +368,6 @@ func TestChartOptions(t *testing.T) {
 			want: &output.ChartOptions{Kind: "bar", Label: "region", Value: "revenue"},
 		},
 		{name: "rejected with json", args: []string{"--chart"}, format: "json", errs: true},
-		{name: "unknown style", args: []string{"--chart", "--chart-style", "pie"}, errs: true},
 		{name: "unknown kind, before any request", args: []string{"--chart=pie"}, errs: true},
 		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{Kind: "bar"}},
 	}
@@ -401,7 +400,6 @@ func TestChartOptions(t *testing.T) {
 			// Width comes from the terminal; the rest is the flags.
 			got.Width = 0
 			got.MaxRows = 0
-			got.Style = ""
 			if *got != *tc.want {
 				t.Errorf("got %+v, want %+v", *got, *tc.want)
 			}

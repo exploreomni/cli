@@ -18,35 +18,11 @@ type ChartOptions struct {
 	Value   string
 	Width   int
 	MaxRows int
-	Style   string
 }
 
-// Bar styles. "bar" (▇) leaves a hairline between rows so they don't fuse
-// on tightly leaded terminals; "block" (█) gains eighth-cell end precision;
-// "fill" paints the value inside the bar, and its rows touch.
-const (
-	StyleBar   = "bar"
-	StyleBlock = "block"
-	StyleLine  = "line"
-	StyleFill  = "fill"
-)
-
-var styles = map[string]struct {
-	fill   string
-	tips   []string // partial end cells by eighths; nil rounds to whole cells
-	inside bool     // value printed inside the bar
-}{
-	StyleBar:   {"▇", nil, false},
-	StyleBlock: {"█", eighths[:], false},
-	StyleLine:  {"━", nil, false},
-	StyleFill:  {" ", nil, true},
-}
-
-// ValidStyle reports whether s names a bar style.
-func ValidStyle(s string) bool {
-	_, ok := styles[s]
-	return ok
-}
+// barGlyph (▇) leaves a hairline between rows so they don't fuse on tightly
+// leaded terminals.
+const barGlyph = "▇"
 
 const DefaultChartRows = 50
 
@@ -56,8 +32,6 @@ const (
 	minLabelWidth     = 6
 	minBarWidth       = 12
 )
-
-var eighths = [...]string{"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"}
 
 // Beside other bar columns a bar can be short: the value is printed next to
 // it, so the bar only has to show proportion.
@@ -92,17 +66,6 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 		width = defaultChartWidth
 	}
 
-	st, ok := styles[opts.Style]
-	if !ok {
-		st = styles[StyleBar]
-	}
-	// "fill" is a background with no glyph of its own, so without color it
-	// draws rows of blank space — which is what a pipe or a dumb terminal
-	// gets. Solid blocks say the same thing without needing SGR support.
-	if st.inside && !colorEnabled() {
-		st = styles[StyleBlock]
-	}
-
 	// Each measure is scaled on its own, across every column it fills.
 	type bounds struct{ lo, hi float64 }
 	scales := map[int]bounds{}
@@ -121,9 +84,7 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 			textW[c] = max(textW[c], lipgloss.Width(it.text))
 		}
 		scales[col.scale] = b
-		if !st.inside {
-			valueW[c] = max(textW[c], lipgloss.Width(col.header))
-		}
+		valueW[c] = max(textW[c], lipgloss.Width(col.header))
 	}
 
 	labelW := make([]int, len(g.labelHeaders))
@@ -140,14 +101,7 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 		if n == 1 {
 			return minBarWidth
 		}
-		m := minCellBarWidth
-		if st.inside {
-			// A value too long for its bar prints after it, inside the cell.
-			for c := range n {
-				m = max(m, 2*textW[c]+3)
-			}
-		}
-		return m
+		return minCellBarWidth
 	}
 	avail := func() int {
 		used := len(labelW) - 1 + 1 + 2*(n-1) // label gaps, the gap after labels, column gaps
@@ -155,10 +109,7 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 			used += lw
 		}
 		for c := range n {
-			used += valueW[c]
-			if !st.inside {
-				used++
-			}
+			used += valueW[c] + 1
 		}
 		return width - used
 	}
@@ -186,7 +137,7 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 		// A pivot value heading a single column widens it rather than being
 		// cut off; bars stay one width so a shared scale stays comparable.
 		grew := false
-		for c := 0; c < n && !st.inside; c++ {
+		for c := 0; c < n; c++ {
 			if spansOne(g.cols, c) {
 				if need := lipgloss.Width(g.cols[c].group) - 1 - barW; need > valueW[c] {
 					valueW[c], grew = need, true
@@ -202,9 +153,6 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 		return s + strings.Repeat(" ", max(cells-lipgloss.Width(s), 0))
 	}
 	colW := func(c int) int {
-		if st.inside {
-			return barW
-		}
 		return valueW[c] + 1 + barW
 	}
 	labelArea := func(cells []string) string {
@@ -246,12 +194,8 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 	b.WriteString(labelArea(g.labelHeaders))
 	for c := range n {
 		b.WriteString(gap(c))
-		if st.inside {
-			b.WriteString(pad(truncateCells(g.cols[c].header, barW), barW))
-		} else {
-			b.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(g.cols[c].header))
-			b.WriteString(strings.Repeat(" ", 1+barW))
-		}
+		b.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(g.cols[c].header))
+		b.WriteString(strings.Repeat(" ", 1+barW))
 	}
 	fmt.Fprintln(w, styleDim.Render(strings.TrimRight(b.String(), " ")))
 
@@ -265,17 +209,13 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 			line.WriteString(gap(c))
 			var drawn string
 			switch {
-			case st.inside:
-				drawn = filledBar(it, sc.lo, sc.hi, barW)
 			case !it.present:
 			case sc.lo < 0:
-				drawn = twoSidedBar(it.value, sc.lo, sc.hi, barW, st.fill, st.tips)
+				drawn = twoSidedBar(it.value, sc.lo, sc.hi, barW)
 			default:
-				drawn = styleBar.Render(blocks(it.value, sc.hi, barW, st.fill, st.tips))
+				drawn = styleBar.Render(blocks(it.value, sc.hi, barW))
 			}
-			if !st.inside {
-				line.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(it.text) + " ")
-			}
+			line.WriteString(lipgloss.NewStyle().Width(valueW[c]).Align(lipgloss.Right).Render(it.text) + " ")
 			if !last {
 				drawn = pad(drawn, barW)
 			}
@@ -301,62 +241,17 @@ func spansOne(cols []gridCol, c int) bool {
 	return g != "" && (c == 0 || cols[c-1].group != g) && (c == len(cols)-1 || cols[c+1].group != g)
 }
 
-// filledBar paints the bar as a background with the value inside it, or
-// after it when the bar is too short.
-func filledBar(it chartRow, lo, hi float64, width int) string {
-	if !it.present {
-		return styleDim.Render("-")
-	}
-	paint := func(cells int, text string, st lipgloss.Style) string {
-		if cells <= 0 {
-			return text
-		}
-		if lipgloss.Width(text)+2 <= cells {
-			return st.Render(" " + text + strings.Repeat(" ", cells-lipgloss.Width(text)-1))
-		}
-		return st.Render(strings.Repeat(" ", cells)) + " " + text
-	}
-	if lo >= 0 {
-		return paint(cellsFor(it.value, hi, width), it.text, styleFill)
-	}
-	span := hi - lo
-	usable := width - 1
-	if span <= 0 || usable < 2 {
-		return it.text
-	}
-	left := min(max(int(math.Round((-lo/span)*float64(usable))), 1), usable-1)
-	right := usable - left
-	if it.value < 0 {
-		cells := cellsFor(-it.value, -lo, left)
-		bar := paint(cells, it.text, styleFillNeg)
-		return strings.Repeat(" ", max(left-lipgloss.Width(bar), 0)) + bar + styleDim.Render("│")
-	}
-	return strings.Repeat(" ", left) + styleDim.Render("│") + paint(cellsFor(it.value, hi, right), it.text, styleFill)
-}
-
-func cellsFor(v, scale float64, width int) int {
-	if scale <= 0 || v <= 0 || width <= 0 {
-		return 0
-	}
-	return min(max(int(math.Round((v/scale)*float64(width))), 1), width)
-}
-
 // blocks renders v/scale of width; a non-zero value is always at least one cell.
-func blocks(v, scale float64, width int, fill string, tips []string) string {
+func blocks(v, scale float64, width int) string {
 	if scale <= 0 || v <= 0 || width <= 0 {
 		return ""
 	}
-	if tips == nil {
-		n := int(math.Round((v / scale) * float64(width)))
-		return strings.Repeat(fill, min(max(n, 1), width))
-	}
-	total := int(math.Round((v / scale) * float64(width) * 8))
-	total = min(max(total, 1), width*8)
-	return strings.Repeat(fill, total/8) + tips[total%8]
+	n := int(math.Round((v / scale) * float64(width)))
+	return strings.Repeat(barGlyph, min(max(n, 1), width))
 }
 
 // twoSidedBar draws around a zero axis.
-func twoSidedBar(v, lo, hi float64, width int, fill string, tips []string) string {
+func twoSidedBar(v, lo, hi float64, width int) string {
 	span := hi - lo
 	if span <= 0 {
 		return ""
@@ -370,11 +265,10 @@ func twoSidedBar(v, lo, hi float64, width int, fill string, tips []string) strin
 	right := usable - left
 
 	if v < 0 {
-		// No right-filling partial blocks exist, so negatives round to whole cells.
-		b := blocks(-v, -lo, left, fill, nil)
+		b := blocks(-v, -lo, left)
 		return strings.Repeat(" ", left-lipgloss.Width(b)) + styleNeg.Render(b) + styleDim.Render("│")
 	}
-	return strings.Repeat(" ", left) + styleDim.Render("│") + styleBar.Render(blocks(v, hi, right, fill, tips))
+	return strings.Repeat(" ", left) + styleDim.Render("│") + styleBar.Render(blocks(v, hi, right))
 }
 
 func ChartLink(w io.Writer, url string) {

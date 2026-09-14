@@ -159,7 +159,6 @@ available; binary values in its JSON object are interpreted as file paths.
   --chart-label F Only this dimension labels the rows, by field name or label
   --chart-value F Only this measure gets bars, by field name or label
   --chart-rows N  Most rows to draw (default 50)
-  --chart-style S bar (default), block (solid, finer ends), line, or fill
   --workbook      Also open the query in an ephemeral workbook; the link prints
                   under human output, or as {"workbookUrl": ...} on stderr in
                   JSON mode

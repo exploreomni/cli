@@ -2,13 +2,11 @@ package output
 
 import (
 	"bytes"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/exploreomni/omni-cli/internal/result"
-	"github.com/muesli/termenv"
 )
 
 func col(name, label string, dim bool, format string) result.Column {
@@ -61,40 +59,6 @@ func chart(t *testing.T, set *result.Set, opts ChartOptions) string {
 		t.Fatalf("ResultChart: %v", err)
 	}
 	return buf.String()
-}
-
-var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-func stripANSI(s string) string { return ansiRE.ReplaceAllString(s, "") }
-
-// withColor turns color on for a test: the fill style paints a background
-// rather than drawing a glyph, so with the profile a test process actually
-// gets (no TTY) there would be nothing to see.
-func withColor(t *testing.T) func() {
-	t.Helper()
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	return func() { lipgloss.SetColorProfile(prev) }
-}
-
-// Without color the fill style has no glyph of its own, so it falls back to
-// solid blocks rather than printing rows of blank space down a pipe.
-func TestChart_FillWithoutColorFallsBackToBlocks(t *testing.T) {
-	set := &result.Set{
-		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Sessions", false, "NUMBER_0")},
-		Rows:    [][]any{{"east", int64(12526)}, {"west", int64(1)}},
-	}
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.Ascii)
-	defer lipgloss.SetColorProfile(prev)
-
-	out := chart(t, set, ChartOptions{Style: StyleFill, Width: 60})
-	if !strings.Contains(out, "█") {
-		t.Errorf("expected visible bars without color:\n%q", out)
-	}
-	if !strings.Contains(out, "12,526") {
-		t.Errorf("expected the value to still show:\n%q", out)
-	}
 }
 
 func chartErr(t *testing.T, set *result.Set, opts ChartOptions) string {
@@ -161,68 +125,29 @@ func TestChart_BarLengthsScaleToMax(t *testing.T) {
 		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Revenue", false, "")},
 		Rows:    [][]any{{"east", int64(1000)}, {"west", int64(500)}, {"north", int64(0)}},
 	}
-	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{Style: StyleBlock}), "\n"), "\n")
-	full := strings.Count(lines[1], "█")
-	half := strings.Count(lines[2], "█")
+	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{}), "\n"), "\n")
+	full := strings.Count(lines[1], "▇")
+	half := strings.Count(lines[2], "▇")
 	if full == 0 || half == 0 {
 		t.Fatalf("expected drawn bars:\n%s", strings.Join(lines, "\n"))
 	}
 	if got, want := half, full/2; got < want-1 || got > want+1 {
 		t.Errorf("half-value bar is %d blocks, expected about %d", got, want)
 	}
-	if strings.ContainsAny(lines[3], "█▏▎▍▌▋▊▉") {
+	if strings.Contains(lines[3], "▇") {
 		t.Errorf("zero row should have no bar: %q", lines[3])
 	}
 }
 
-// The default style leaves a hairline between rows; block fills the cell and
-// gains partial end cells; line is plain rules. Whatever the glyph, a tiny
-// value still shows as at least one cell.
-// The fill style carries the value inside the bar, so there is no value
-// column; a bar too short for its number shows the number after it.
-func TestChart_FillStyle(t *testing.T) {
-	set := &result.Set{
-		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Sessions", false, "NUMBER_0")},
-		Rows:    [][]any{{"east", int64(12526)}, {"west", int64(1)}, {"north", nil}},
-	}
-	defer withColor(t)()
-	out := chart(t, set, ChartOptions{Style: StyleFill, Width: 60})
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if !strings.Contains(lines[1], "12,526") || strings.ContainsAny(out, "▇█━") {
-		t.Errorf("expected the value inside a painted bar, no glyphs:\n%s", out)
-	}
-	// The big bar holds its value; the tiny one can't and shows it after.
-	// Compared on plain text: the paint's escape codes aren't cells.
-	if strings.Index(stripANSI(lines[1]), "12,526") > strings.Index(stripANSI(lines[2]), "1") {
-		t.Errorf("a value inside a bar starts before one shown after a one-cell bar:\n%s", out)
-	}
-	if !strings.Contains(lines[3], "-") {
-		t.Errorf("null row should show a dash:\n%s", out)
-	}
-	for _, line := range lines {
-		if got := lipgloss.Width(line); got > 60 {
-			t.Errorf("line is %d cells: %q", got, line)
-		}
-	}
-}
-
-func TestChart_Styles(t *testing.T) {
+// A tiny value still shows as at least one cell, rounded to whole cells.
+func TestChart_TinyValueDrawsOneCell(t *testing.T) {
 	set := &result.Set{
 		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Revenue", false, "")},
 		Rows:    [][]any{{"east", int64(1000)}, {"west", int64(1)}},
 	}
-	for style, glyph := range map[string]string{"": "▇", StyleBar: "▇", StyleBlock: "█", StyleLine: "━"} {
-		out := chart(t, set, ChartOptions{Style: style})
-		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-		if !strings.Contains(lines[1], glyph) {
-			t.Errorf("style %q: expected %q bars:\n%s", style, glyph, out)
-		}
-		if style != StyleBlock && strings.ContainsAny(out, "▏▎▍▌▋▊▉") {
-			t.Errorf("style %q should round to whole cells:\n%s", style, out)
-		}
-		if got := strings.Count(lines[2], glyph) + strings.Count(lines[2], "▏"); got < 1 {
-			t.Errorf("style %q: a tiny value should still draw one cell:\n%s", style, out)
-		}
+	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{}), "\n"), "\n")
+	if got := strings.Count(lines[2], "▇"); got != 1 {
+		t.Errorf("a tiny value should draw one cell, got %d:\n%s", got, strings.Join(lines, "\n"))
 	}
 }
 
@@ -409,7 +334,7 @@ func TestChart_TwoDimensionsTwoMeasures(t *testing.T) {
 // A pivot spreads the measure across its values like the Omni app's bar
 // table: the pivot values head the columns, and they share one scale.
 func TestChart_Pivot(t *testing.T) {
-	out := chart(t, pivoted(), ChartOptions{Value: "Total amount", Width: 120, Style: StyleBlock})
+	out := chart(t, pivoted(), ChartOptions{Value: "Total amount", Width: 120})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	for _, want := range []string{"Stage", "Closed Lost", "Negotiation", "Closed Won"} {
 		if !strings.Contains(lines[0], want) {
@@ -434,8 +359,8 @@ func TestChart_Pivot(t *testing.T) {
 	}
 	// Shared scale: AMER Closed Lost ($13.97M) is the longest bar, and EMEA
 	// Closed Lost ($8.48M) is shorter than it though it's EMEA's largest.
-	full := strings.Count(strings.Split(lines[2], "$3,903,000")[0], "█")
-	emea := strings.Count(strings.Split(lines[3], "$1,949,500")[0], "█")
+	full := strings.Count(strings.Split(lines[2], "$3,903,000")[0], "▇")
+	emea := strings.Count(strings.Split(lines[3], "$1,949,500")[0], "▇")
 	if emea >= full || emea == 0 {
 		t.Errorf("pivot columns should share the measure's scale (full %d, emea %d):\n%s", full, emea, out)
 	}
