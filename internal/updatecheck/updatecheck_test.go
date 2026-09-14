@@ -53,13 +53,13 @@ func (c *clock) advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-const releaseBody = `{"tag_name":"v1.3.0","html_url":"https://example.test/v1.3.0","published_at":"2026-08-30T12:00:00Z"}`
+const releaseBody = `{"tag_name":"v1.3.0","html_url":"https://github.com/exploreomni/cli/releases/tag/v1.3.0","published_at":"2026-08-30T12:00:00Z"}`
 
 func newTestChecker(t *testing.T, statePath string, clk *clock, rt roundTripFunc) *Checker {
 	t.Helper()
 	return &Checker{
 		Client:    &http.Client{Transport: rt},
-		Endpoint:  "https://example.test/latest",
+		Endpoint:  defaultEndpoint,
 		StatePath: statePath,
 		Now:       clk.Now,
 	}
@@ -156,7 +156,7 @@ func TestAutomaticCheckFastPathDoesNotCreateTheLock(t *testing.T) {
 		t.Fatal("a throttled check must not make a request")
 		return nil, nil
 	})
-	wantRelease := Release{Version: "v1.3.0", URL: "https://example.test/v1.3.0"}
+	wantRelease := Release{Version: "v1.3.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.3.0"}
 	if err := checker.writeState(state{
 		NextCheckAt:   clk.Now().Add(checkInterval),
 		LatestRelease: wantRelease,
@@ -332,10 +332,10 @@ func TestStaleLeaseOwnerCannotOverwriteNewerState(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the expired lease to be reclaimed")
 	}
-	checker.finishCheck(fresh, Release{Version: "v1.4.0", URL: "https://example.test/v1.4.0"}, nil)
+	checker.finishCheck(fresh, Release{Version: "v1.4.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.4.0"}, nil)
 
 	// The stale owner finally returns with an older answer.
-	checker.finishCheck(stale, Release{Version: "v1.3.0", URL: "https://example.test/v1.3.0"}, nil)
+	checker.finishCheck(stale, Release{Version: "v1.3.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.3.0"}, nil)
 
 	s, err := checker.readState()
 	if err != nil {
@@ -352,7 +352,7 @@ func TestStaleLeaseOwnerCannotOverwriteNewerState(t *testing.T) {
 func TestConcurrentNotificationClaimsProduceOneNotice(t *testing.T) {
 	clk := newClock()
 	statePath := filepath.Join(t.TempDir(), "update.json")
-	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://example.test/release"})
+	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.3.0"})
 
 	var claims atomic.Int64
 	var wg sync.WaitGroup
@@ -376,7 +376,7 @@ func TestConcurrentNotificationClaimsProduceOneNotice(t *testing.T) {
 func TestNotificationThrottle(t *testing.T) {
 	clk := newClock()
 	checker := newTestChecker(t, filepath.Join(t.TempDir(), "update.json"), clk, nil)
-	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://example.test/release"})
+	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.3.0"})
 	if !checker.ClaimNotification(r) {
 		t.Fatal("a new release should be claimable before its first notification")
 	}
@@ -395,7 +395,7 @@ func TestNotificationThrottle(t *testing.T) {
 func TestNotificationFastPathDoesNotCreateTheLock(t *testing.T) {
 	clk := newClock()
 	checker := newTestChecker(t, filepath.Join(t.TempDir(), "update.json"), clk, nil)
-	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://example.test/release"})
+	r := result("v1.2.0", Release{Version: "v1.3.0", URL: "https://github.com/exploreomni/cli/releases/tag/v1.3.0"})
 	if err := checker.writeState(state{
 		NotifiedVersion: r.LatestVersion,
 		NotifiedAt:      clk.Now(),

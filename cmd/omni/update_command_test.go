@@ -28,7 +28,7 @@ func TestUpdateCheckJSON(t *testing.T) {
 		UpdateAvailable: true,
 		CurrentVersion:  "v1.2.0",
 		LatestVersion:   "v1.3.0",
-		ReleaseURL:      "https://example.test/v1.3.0",
+		ReleaseURL:      "https://github.com/exploreomni/cli/releases/tag/v1.3.0",
 		Upgrade: updatecheck.UpgradeInstructions{
 			Homebrew: "brew update && brew upgrade omni",
 			Other:    "install command",
