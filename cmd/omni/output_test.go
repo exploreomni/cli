@@ -369,6 +369,8 @@ func TestChartOptions(t *testing.T) {
 		},
 		{name: "rejected with json", args: []string{"--chart"}, format: "json", errs: true},
 		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{}},
+		{name: "chart-value without chart", args: []string{"--chart-value", "revenue"}, errs: true},
+		{name: "chart-rows without chart", args: []string{"--chart-rows", "5"}, errs: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -425,6 +427,9 @@ func TestPrepareBody(t *testing.T) {
 		{name: "workbook flag wins over a false in the body", workbook: true, props: queryRun, body: `{"query":{},"workbookUrl":false}`, want: `{"query":{},"workbookUrl":true}`},
 		{name: "workbook with a resultType is fine", workbook: true, props: queryRun, body: `{"query":{},"resultType":"csv"}`, want: `{"query":{},"resultType":"csv","workbookUrl":true}`},
 		{name: "workbook and planOnly conflict", workbook: true, props: queryRun, body: `{"query":{},"planOnly":true}`, err: "planOnly"},
+		{name: "chart and planOnly conflict", chart: true, props: queryRun, body: `{"query":{},"planOnly":true}`, err: "--chart cannot be combined with planOnly"},
+		{name: "chart with planOnly false", chart: true, props: queryRun, body: `{"query":{},"planOnly":false}`, want: `{"query":{},"planOnly":false}`},
+		{name: "chart keeps an undeclared resultType", chart: true, props: generate, body: `{"modelId":"x","resultType":"csv"}`, want: `{"modelId":"x","resultType":"csv"}`},
 		{name: "workbook on a command without the field", workbook: true, props: generate, body: `{"modelId":"x"}`, err: "not supported"},
 		{name: "chart on a command without resultType", chart: true, props: generate, body: `{"modelId":"x"}`, want: `{"modelId":"x"}`},
 		{name: "no body", chart: true, props: queryRun, want: ``},

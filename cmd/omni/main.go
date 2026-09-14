@@ -143,6 +143,11 @@ func addResultFlags(cmd *cobra.Command) {
 // detection) refuses a chart.
 func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions, error) {
 	if on, err := cmd.Flags().GetBool("chart"); err != nil || !on {
+		for _, name := range []string{"chart-value", "chart-rows"} {
+			if cmd.Flags().Changed(name) {
+				return nil, fmt.Errorf("--%s only applies with --chart", name)
+			}
+		}
 		return nil, nil
 	}
 	if chosenFormat == config.FormatJSON {
@@ -176,9 +181,6 @@ func prepareBody(chart, workbook bool, format string, cmd *cobra.Command, body [
 		}
 		return body, nil
 	}
-	if !openapi.BodyDeclares(cmd, "resultType") && !workbook {
-		return body, nil
-	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(body, &obj); err != nil {
 		// Silently dropping the flag would send the request without
@@ -188,8 +190,14 @@ func prepareBody(chart, workbook bool, format string, cmd *cobra.Command, body [
 		}
 		return body, nil
 	}
+	if isTrue(obj["planOnly"]) {
+		if chart {
+			return nil, fmt.Errorf("--chart cannot be combined with planOnly")
+		}
+		return nil, fmt.Errorf("--workbook cannot be combined with planOnly")
+	}
 	changed := false
-	if raw, ok := obj["resultType"]; chart && ok {
+	if raw, ok := obj["resultType"]; chart && ok && openapi.BodyDeclares(cmd, "resultType") {
 		if format == config.FormatHuman {
 			fmt.Fprintf(os.Stderr, "note: --chart ignores \"resultType\": %s and reads the query stream\n", raw)
 		}
@@ -205,9 +213,6 @@ func prepareBody(chart, workbook bool, format string, cmd *cobra.Command, body [
 			return nil, fmt.Errorf("preparing the request body: %w", err)
 		}
 		return filled, nil
-	}
-	if isTrue(obj["planOnly"]) {
-		return nil, fmt.Errorf("--workbook cannot be combined with planOnly")
 	}
 	if obj == nil {
 		return nil, fmt.Errorf("--workbook needs a JSON object as the request body")

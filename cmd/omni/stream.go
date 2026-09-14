@@ -52,7 +52,7 @@ func renderStream(cfg *config.ResolvedConfig, resp *http.Response, format string
 	// rendered, stdout stays empty and only the failure is reported.
 	failed := st.Err()
 	if len(st.Sets) == 0 && failed != nil {
-		return failed
+		return reportFailures(stderr, format, compact, failed)
 	}
 
 	// Render everything before writing anything, so a failure on a later
@@ -79,7 +79,16 @@ func renderStream(cfg *config.ResolvedConfig, resp *http.Response, format string
 	if _, err := stdout.Write(out.Bytes()); err != nil {
 		return err
 	}
-	return failed
+	if failed != nil {
+		return reportFailures(stderr, format, compact, failed)
+	}
+	return nil
+}
+
+// reportFailures reports failed jobs like a failed API call, with no HTTP status.
+func reportFailures(stderr io.Writer, format string, compact bool, failed error) error {
+	writeError(stderr, format, 0, failed.Error(), nil, compact)
+	return &apiError{detail: failed.Error()}
 }
 
 func waitForJobs(cfg *config.ResolvedConfig, format string, compact bool, stderr io.Writer, ids []string) (*result.Stream, error) {

@@ -165,6 +165,37 @@ func TestRenderStream_FailedJobKeepsTheOthers(t *testing.T) {
 	}
 }
 
+func TestRenderStream_FailedJobUsesTheEnvelope(t *testing.T) {
+	failed := `{"job_id":"j2","status":"ERROR","error_type":"PLAN","error_message":"No such view"}`
+	for name, body := range map[string]string{
+		"only failures": `{"jobs_submitted":{"j2":"r2"}}` + "\n" + failed + "\n",
+		"mixed":         `{"jobs_submitted":{"j1":"r1","j2":"r2"}}` + "\n" + completedJob(t, "j1") + "\n" + failed + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := renderStream(&config.ResolvedConfig{}, streamResp(body, nil), "json", true, &output.ChartOptions{Width: 60}, &stdout, &stderr)
+			var apiErr *apiError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("expected an apiError, got %v", err)
+			}
+			var env map[string]any
+			if json.Unmarshal(stderr.Bytes(), &env) != nil || !strings.Contains(fmt.Sprint(env["error"]), "No such view") {
+				t.Errorf("stderr should be one JSON envelope, got %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRenderStream_FailedJobIsSanitized(t *testing.T) {
+	body := `{"jobs_submitted":{"j1":"r1"}}` + "\n" +
+		`{"job_id":"j1","status":"ERROR","error_message":"bad\u001b]0;pwned\u0007 view"}` + "\n"
+	var stderr bytes.Buffer
+	_ = renderStream(&config.ResolvedConfig{}, streamResp(body, nil), "human", false, nil, io.Discard, &stderr)
+	if strings.ContainsAny(stderr.String(), "\x1b\x07") || !strings.Contains(stderr.String(), "view") {
+		t.Errorf("control characters should be stripped, got %q", stderr.String())
+	}
+}
+
 // With nothing left to render, stdout stays empty.
 func TestRenderStream_OnlyFailuresWriteNothing(t *testing.T) {
 	body := `{"jobs_submitted":{"j1":"r1"}}` + "\n" +
