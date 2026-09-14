@@ -17,6 +17,7 @@ type numFormat struct {
 	decimals int    // -1 when the format leaves it open
 	// pattern only: decimals past this many are dropped when they're zeros (#)
 	minDecimals int
+	minInt      int    // pattern only: integer digits always shown (00000)
 	symbol      string // currency family only
 	compact     bool   // bigcurrency, bigaccounting, bigfinancial
 
@@ -159,11 +160,14 @@ func parseSection(p string) (numFormat, bool) {
 	if digits == "" {
 		return numFormat{}, false
 	}
+	intDigits := digits
 	if dot := strings.IndexByte(digits, '.'); dot >= 0 {
 		// 0 is a digit always shown, # one shown only when it isn't a trailing zero.
 		nf.minDecimals = strings.Count(digits[dot+1:], "0")
 		nf.decimals = nf.minDecimals + strings.Count(digits[dot+1:], "#")
+		intDigits = digits[:dot]
 	}
+	nf.minInt = strings.Count(intDigits, "0")
 	return nf, true
 }
 
@@ -217,25 +221,11 @@ func formatValue(v any, col result.Column) string {
 		return x
 	}
 	nf, formatted := parseFormat(col.Format)
-	var integer int64
-	isInteger := true
-	switch x := v.(type) {
-	case int64:
-		integer = x
-	case int:
-		integer = int64(x)
-	default:
-		isInteger = false
-	}
-	if isInteger {
+	if ex, ok := asExact(v); ok {
 		if !formatted {
-			s := strconv.FormatInt(integer, 10)
-			if len(strings.TrimPrefix(s, "-")) >= 5 {
-				return integerFixed(integer, 0, true)
-			}
-			return s
+			return ex.plain()
 		}
-		if s, ok := nf.renderInteger(integer); ok {
+		if s, ok := nf.renderExact(ex); ok {
 			return s
 		}
 	}
@@ -249,26 +239,119 @@ func formatValue(v any, col result.Column) string {
 	return nf.render(f)
 }
 
-// Preserve the Arrow integer's digits for formats that don't scale the value.
-// Chart geometry and compact/scaled formats can still use floating point.
-func (nf numFormat) renderInteger(v int64) (string, bool) {
+// exact is an integer or decimal kept as digits, never rounded through float64.
+type exact struct {
+	neg    bool
+	digits string // the unsigned coefficient
+	scale  int
+}
+
+func asExact(v any) (exact, bool) {
+	var s string
+	scale := 0
+	switch x := v.(type) {
+	case int64:
+		s = strconv.FormatInt(x, 10)
+	case int:
+		s = strconv.Itoa(x)
+	case result.Decimal:
+		s, scale = x.Coef.String(), int(x.Scale)
+	default:
+		return exact{}, false
+	}
+	if strings.HasPrefix(s, "-") {
+		return exact{neg: true, digits: s[1:], scale: scale}, true
+	}
+	return exact{digits: s, scale: scale}, true
+}
+
+func (e exact) isZero() bool {
+	return strings.Trim(e.digits, "0") == ""
+}
+
+// fixed rounds half away from zero; neg is false when that rounds to zero.
+func (e exact) fixed(decimals, minInt int, group bool) (body string, neg bool) {
+	digits := e.digits
+	if decimals < e.scale {
+		cut := len(digits) - (e.scale - decimals)
+		roundUp := cut >= 0 && digits[cut] >= '5'
+		digits = digits[:max(cut, 0)]
+		if roundUp {
+			digits = incrementDigits(digits)
+		}
+	} else {
+		digits += strings.Repeat("0", decimals-e.scale)
+	}
+	if len(digits) <= decimals {
+		digits = strings.Repeat("0", decimals-len(digits)+1) + digits
+	}
+	intPart, frac := digits[:len(digits)-decimals], digits[len(digits)-decimals:]
+	intPart = strings.TrimLeft(intPart, "0")
+	if len(intPart) < max(minInt, 1) {
+		intPart = strings.Repeat("0", max(minInt, 1)-len(intPart)) + intPart
+	}
+	if group {
+		intPart = groupDigits(intPart)
+	}
+	if frac != "" {
+		intPart += "." + frac
+	}
+	return intPart, e.neg && strings.Trim(digits, "0") != ""
+}
+
+func incrementDigits(d string) string {
+	b := []byte(d)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < '9' {
+			b[i]++
+			return string(b)
+		}
+		b[i] = '0'
+	}
+	return "1" + string(b)
+}
+
+// plain matches formatNumber: trailing zeros dropped, grouped from five digits.
+func (e exact) plain() string {
+	body, neg := e.fixed(e.scale, 1, false)
+	intPart, frac := body, ""
+	if i := strings.IndexByte(body, '.'); i >= 0 {
+		intPart, frac = body[:i], strings.TrimRight(body[i:], "0")
+		if frac == "." {
+			frac = ""
+		}
+	}
+	if len(intPart) >= 5 {
+		intPart = groupDigits(intPart)
+	}
+	return signed(intPart+frac, neg)
+}
+
+func signed(s string, neg bool) string {
+	if neg {
+		return "-" + s
+	}
+	return s
+}
+
+func (nf numFormat) renderExact(e exact) (string, bool) {
 	switch nf.kind {
 	case "id":
-		return integerFixed(v, 0, false), true
+		return signed(e.fixed(0, 1, false)), true
 	case "number":
-		return integerFixed(v, defaultDecimals(nf, 2), true), true
+		return signed(e.fixed(defaultDecimals(nf, 2), 1, true)), true
 	case "currency", "accounting", "financial":
 		if nf.compact {
 			return "", false
 		}
-		body := strings.TrimPrefix(integerFixed(v, defaultDecimals(nf, 2), true), "-")
+		body, neg := e.fixed(defaultDecimals(nf, 2), 1, true)
 		if nf.kind == "financial" {
-			if v < 0 {
+			if neg {
 				body = "(" + body + ")"
 			}
 			return body, true
 		}
-		if v < 0 {
+		if neg {
 			if nf.kind == "currency" {
 				return "-" + nf.symbol + body, true
 			}
@@ -276,38 +359,26 @@ func (nf numFormat) renderInteger(v int64) (string, bool) {
 		}
 		return nf.symbol + body, true
 	case "pattern":
-		sign := ""
-		if v < 0 {
+		sign := false
+		if e.neg && !e.isZero() {
 			if nf.negative != nil {
 				nf = *nf.negative
 			} else {
-				sign = "-"
+				sign = true
 			}
-		} else if v == 0 && nf.zero != nil {
+		} else if e.isZero() && nf.zero != nil {
 			nf = *nf.zero
 		}
 		if nf.scale || nf.divide != 1 || nf.exponent {
 			return "", false
 		}
-		body := strings.TrimPrefix(integerFixed(v, nf.minDecimals, nf.group), "-")
-		return sign + nf.prefix + body + nf.suffix, true
+		body, neg := e.fixed(nf.decimals, nf.minInt, nf.group)
+		if nf.minDecimals < nf.decimals {
+			body = trimDecimals(body, nf.minDecimals)
+		}
+		return signed(nf.prefix+body+nf.suffix, sign && neg), true
 	}
 	return "", false
-}
-
-func integerFixed(v int64, decimals int, group bool) string {
-	s := strconv.FormatInt(v, 10)
-	sign := ""
-	if v < 0 {
-		sign, s = "-", s[1:]
-	}
-	if group {
-		s = groupDigits(s)
-	}
-	if decimals > 0 {
-		s += "." + strings.Repeat("0", decimals)
-	}
-	return sign + s
 }
 
 func (nf numFormat) render(f float64) string {
@@ -382,7 +453,14 @@ func (nf numFormat) renderSection(abs float64) string {
 	if nf.exponent {
 		s = strings.ToUpper(fmt.Sprintf("%.*e", nf.decimals, abs))
 	} else {
-		s = fixed(abs, nf.decimals, nf.group)
+		s = padInteger(fixed(abs, nf.decimals, false), nf.minInt)
+		if nf.group {
+			intPart, frac, _ := strings.Cut(s, ".")
+			s = groupDigits(intPart)
+			if frac != "" {
+				s += "." + frac
+			}
+		}
 		if nf.minDecimals < nf.decimals {
 			s = trimDecimals(s, nf.minDecimals)
 		}
@@ -412,6 +490,17 @@ func fixed(f float64, d int, group bool) string {
 		intPart = groupDigits(intPart)
 	}
 	return sign + intPart + frac
+}
+
+func padInteger(s string, minInt int) string {
+	intLen := strings.IndexByte(s, '.')
+	if intLen < 0 {
+		intLen = len(s)
+	}
+	if intLen >= minInt {
+		return s
+	}
+	return strings.Repeat("0", minInt-intLen) + s
 }
 
 func groupDigits(digits string) string {
@@ -540,6 +629,8 @@ func asFloat(v any) (float64, bool) {
 		return x, true
 	case int:
 		return float64(x), true
+	case result.Decimal:
+		return x.Float64(), true
 	}
 	return 0, false
 }

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"math"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -192,5 +195,60 @@ func TestParse_CarriesPivots(t *testing.T) {
 	set := st.Sets[0]
 	if len(set.Pivots) != 1 || set.Pivots[0] != "events_ext.event_timestamp[date]" || set.ColumnLimit != 50 {
 		t.Errorf("pivots = %v, column limit = %d", set.Pivots, set.ColumnLimit)
+	}
+}
+
+func TestValue_DecimalsAndLargeUnsignedStayExact(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	db := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 38, Scale: 2})
+	defer db.Release()
+	big20, _ := new(big.Int).SetString("12345678901234567891", 10)
+	db.Append(decimal128.FromBigInt(big20))
+	db.Append(decimal128.FromI64(9007199254740993))
+	decimals := db.NewArray()
+	defer decimals.Release()
+
+	whole := array.NewDecimal128Builder(mem, &arrow.Decimal128Type{Precision: 38, Scale: 0})
+	defer whole.Release()
+	whole.Append(decimal128.FromI64(9007199254740993))
+	wholes := whole.NewArray()
+	defer wholes.Release()
+
+	ub := array.NewUint64Builder(mem)
+	defer ub.Release()
+	ub.AppendValues([]uint64{math.MaxUint64, 7}, nil)
+	uints := ub.NewArray()
+	defer uints.Release()
+
+	for _, tc := range []struct {
+		col  arrow.Array
+		i    int
+		want any
+	}{
+		{decimals, 0, "123456789012345678.91"},
+		{decimals, 1, "90071992547409.93"},
+		{wholes, 0, int64(9007199254740993)},
+		{uints, 0, "18446744073709551615"},
+		{uints, 1, int64(7)},
+	} {
+		got := value(tc.col, tc.i)
+		if d, ok := got.(Decimal); ok {
+			got = d.String()
+		}
+		if got != tc.want {
+			t.Errorf("value(%s, %d) = %#v, want %#v", tc.col.DataType(), tc.i, got, tc.want)
+		}
+	}
+}
+
+func TestCompareValues_DecimalsCompareExactly(t *testing.T) {
+	a := Decimal{Coef: big.NewInt(9007199254740993)}
+	b := Decimal{Coef: big.NewInt(9007199254740992)}
+	if compareValues(a, b) <= 0 || compareValues(b, a) >= 0 {
+		t.Error("decimals a float can't tell apart should still order")
+	}
+	if compareValues(Decimal{Coef: big.NewInt(150), Scale: 2}, int64(1)) <= 0 {
+		t.Error("1.50 should sort after 1")
 	}
 }

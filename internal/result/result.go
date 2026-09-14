@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"unicode"
 
@@ -31,7 +32,7 @@ type Column struct {
 type Set struct {
 	JobID   string
 	Columns []Column
-	Rows    [][]any // string, int64, float64, bool, time.Time, or nil
+	Rows    [][]any // string, int64, float64, Decimal, bool, time.Time, or nil
 	// Pivots names the columns the query pivots on. The stream carries rows
 	// in long form either way; Pivot reshapes them.
 	Pivots []string
@@ -284,8 +285,9 @@ func Humanize(name string) string {
 	return strings.Join(parts, " ")
 }
 
-// value converts one Arrow cell: ints to int64, floats and decimals to
-// float64, anything unhandled to Arrow's string form.
+// value converts one Arrow cell: ints to int64, floats to float64, decimals
+// (and unsigned ints past int64) to an exact Decimal, anything unhandled to
+// Arrow's string form.
 func value(col arrow.Array, i int) any {
 	if col.IsNull(i) {
 		return nil
@@ -313,7 +315,7 @@ func value(col arrow.Array, i int) any {
 		return int64(a.Value(i))
 	case *array.Uint64:
 		if v := a.Value(i); v > math.MaxInt64 {
-			return float64(v)
+			return Decimal{Coef: new(big.Int).SetUint64(v)}
 		}
 		return int64(a.Value(i))
 	case *array.Float32:
@@ -321,9 +323,9 @@ func value(col arrow.Array, i int) any {
 	case *array.Float64:
 		return a.Value(i)
 	case *array.Decimal128:
-		return a.Value(i).ToFloat64(a.DataType().(*arrow.Decimal128Type).Scale)
+		return newDecimal(a.Value(i).BigInt(), a.DataType().(*arrow.Decimal128Type).Scale)
 	case *array.Decimal256:
-		return a.Value(i).ToFloat64(a.DataType().(*arrow.Decimal256Type).Scale)
+		return newDecimal(a.Value(i).BigInt(), a.DataType().(*arrow.Decimal256Type).Scale)
 	case *array.Timestamp:
 		unit := a.DataType().(*arrow.TimestampType).Unit
 		return a.Value(i).ToTime(unit).UTC()

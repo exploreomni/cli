@@ -2,6 +2,7 @@ package output
 
 import (
 	"math"
+	"math/big"
 	"testing"
 	"time"
 
@@ -33,6 +34,64 @@ func TestFormatValue_ExactIntegers(t *testing.T) {
 	} {
 		if got := FormatValue(tc.value, result.Column{Format: tc.format}); got != tc.want {
 			t.Errorf("FormatValue(%d, %q) = %q, want %q", tc.value, tc.format, got, tc.want)
+		}
+	}
+}
+
+func dec(t *testing.T, s string, scale int32) result.Decimal {
+	t.Helper()
+	coef, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		t.Fatalf("bad coefficient %q", s)
+	}
+	return result.Decimal{Coef: coef, Scale: scale}
+}
+
+func TestFormatValue_ExactDecimals(t *testing.T) {
+	for _, tc := range []struct {
+		value        result.Decimal
+		format, want string
+	}{
+		{dec(t, "12345678901234567891", 2), "", "123,456,789,012,345,678.91"},
+		{dec(t, "1250", 2), "", "12.5"},
+		{dec(t, "-100", 2), "", "-1"},
+		{dec(t, "5", 3), "", "0.005"},
+		{dec(t, "18446744073709551615", 0), "id", "18446744073709551615"},
+		{dec(t, "18446744073709551615", 0), "", "18,446,744,073,709,551,615"},
+		{dec(t, "12345678901234567891", 2), "number_2", "123,456,789,012,345,678.91"},
+		{dec(t, "12345678901234567895", 3), "number_2", "12,345,678,901,234,567.90"},
+		{dec(t, "999995", 4), "number_1", "100.0"},
+		{dec(t, "5", 1), "id", "1"},
+		{dec(t, "-4", 3), "number_2", "0.00"},
+		{dec(t, "-12345678901234567891", 2), "currency_2", "-$123,456,789,012,345,678.91"},
+		{dec(t, "-12345678901234567891", 2), "financial_0", "(123,456,789,012,345,679)"},
+		{dec(t, "12345678901234567891", 2), "#,##0.0#", "123,456,789,012,345,678.91"},
+		{dec(t, "1250", 2), "0.0#", "12.5"},
+		{dec(t, "1250", 2), "percent_0", "1,250%"},
+	} {
+		if got := FormatValue(tc.value, result.Column{Format: tc.format}); got != tc.want {
+			t.Errorf("FormatValue(%s, %q) = %q, want %q", tc.value, tc.format, got, tc.want)
+		}
+	}
+}
+
+func TestFormatValue_ZeroPaddedPatterns(t *testing.T) {
+	for _, tc := range []struct {
+		value        any
+		format, want string
+	}{
+		{int64(12), "00000", "00012"},
+		{int64(-12), "00000", "-00012"},
+		{int64(123456), "00000", "123456"},
+		{12.6, "00000", "00013"},
+		{3.14159, "000.00", "003.14"},
+		{int64(1234), "#,##0000", "1,234"},
+		{int64(12), "#,000,000", "000,012"},
+		{dec(t, "125", 1), "0000.0", "0012.5"},
+		{0.5, "#.##", "0.5"},
+	} {
+		if got := FormatValue(tc.value, result.Column{Format: tc.format}); got != tc.want {
+			t.Errorf("FormatValue(%v, %q) = %q, want %q", tc.value, tc.format, got, tc.want)
 		}
 	}
 }
