@@ -11,8 +11,7 @@ import (
 
 // ChartOptions describes a requested chart; zero values mean the defaults.
 type ChartOptions struct {
-	Label   string
-	Value   string
+	Values  []string // measures to draw, by field or label; empty draws every one
 	Width   int
 	MaxRows int
 }

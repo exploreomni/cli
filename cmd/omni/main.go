@@ -134,8 +134,7 @@ func addResultFlags(cmd *cobra.Command) {
 	f := cmd.PersistentFlags()
 	f.Bool("workbook", false, "also open the query in an ephemeral workbook and print its link")
 	f.Bool("chart", false, "draw query results as a bar chart")
-	f.String("chart-label", "", "only this dimension labels the rows, by field or label (default: every dimension)")
-	f.String("chart-value", "", "only this measure gets bars, by field or label (default: every measure)")
+	f.StringSlice("chart-value", nil, "only these `fields` get bars, by field or label; comma-separated or repeated (default: every measure)")
 	f.Int("chart-rows", output.DefaultChartRows, "most rows to draw before summarising the rest")
 }
 
@@ -149,12 +148,13 @@ func chartOptions(cmd *cobra.Command, chosenFormat string) (*output.ChartOptions
 	if chosenFormat == config.FormatJSON {
 		return nil, fmt.Errorf("--chart cannot be combined with JSON output: a chart is not JSON")
 	}
-	label, _ := cmd.Flags().GetString("chart-label")
-	value, _ := cmd.Flags().GetString("chart-value")
+	values, _ := cmd.Flags().GetStringSlice("chart-value")
+	if len(values) == 0 {
+		values = nil
+	}
 	rows, _ := cmd.Flags().GetInt("chart-rows")
 	return &output.ChartOptions{
-		Label:   label,
-		Value:   value,
+		Values:  values,
 		Width:   terminalWidth(),
 		MaxRows: rows,
 	}, nil

@@ -146,8 +146,7 @@ func pivotKey(set *result.Set, p *result.Pivoted, key []any) string {
 // ResultChart draws the result as the Omni app's bar table: each dimension
 // a column, each measure a column of bars on its own scale. A pivoted query
 // spreads its measures across the pivot values, which share that scale.
-// --chart-value narrows the bars to one measure; --chart-label the
-// dimensions to one.
+// --chart-value narrows the bars to the measures it names.
 func ResultChart(w io.Writer, set *result.Set, opts ChartOptions) error {
 	if len(set.Rows) == 0 {
 		fmt.Fprintln(w, "No results.")
@@ -168,29 +167,14 @@ func ResultChart(w io.Writer, set *result.Set, opts ChartOptions) error {
 }
 
 func flatGrid(set *result.Set, opts ChartOptions) (*grid, error) {
-	values, err := pickValues(set, opts.Value)
+	values, err := pickValues(set, opts.Values)
 	if err != nil {
 		return nil, err
 	}
-	isValue := map[int]bool{}
-	for _, v := range values {
-		isValue[v] = true
-	}
 	var labels []int
-	if opts.Label != "" {
-		i, ok := matchColumn(set.Columns, opts.Label)
-		if !ok {
-			return nil, fmt.Errorf("--chart-label %q is not a column (have: %s)", opts.Label, columnNames(set))
-		}
-		if isValue[i] {
-			return nil, fmt.Errorf("--chart-label %q is the column being plotted; label the bars with a different one", opts.Label)
-		}
-		labels = []int{i}
-	} else {
-		for i, c := range set.Columns {
-			if c.IsDimension && !isValue[i] {
-				labels = append(labels, i)
-			}
+	for i, c := range set.Columns {
+		if c.IsDimension && indexOfInt(values, i) < 0 {
+			labels = append(labels, i)
 		}
 	}
 
@@ -223,16 +207,20 @@ func flatGrid(set *result.Set, opts ChartOptions) (*grid, error) {
 
 func pivotGrid(set *result.Set, p *result.Pivoted, opts ChartOptions) (*grid, error) {
 	measures := p.Measures
-	if opts.Value != "" {
-		i, ok := matchColumn(set.Columns, opts.Value)
-		if !ok {
-			return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", opts.Value, columnNames(set))
+	if len(opts.Values) > 0 {
+		measures = nil
+		for _, want := range opts.Values {
+			i, ok := matchColumn(set.Columns, want)
+			if !ok {
+				return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", want, columnNames(set))
+			}
+			if indexOfInt(p.Measures, i) < 0 || !numericColumn(set, i) {
+				return nil, fmt.Errorf("--chart-value %q is not a measure this pivot spreads across its columns", set.Columns[i].Label)
+			}
+			if indexOfInt(measures, i) < 0 {
+				measures = append(measures, i)
+			}
 		}
-		j := indexOfInt(p.Measures, i)
-		if j < 0 || !numericColumn(set, i) {
-			return nil, fmt.Errorf("--chart-value %q is not a measure this pivot spreads across its columns", set.Columns[i].Label)
-		}
-		measures = []int{i}
 	}
 	var numeric []int
 	for _, m := range measures {
@@ -245,17 +233,6 @@ func pivotGrid(set *result.Set, p *result.Pivoted, opts ChartOptions) (*grid, er
 	}
 
 	labels := p.RowDims
-	if opts.Label != "" {
-		i, ok := matchColumn(set.Columns, opts.Label)
-		if !ok {
-			return nil, fmt.Errorf("--chart-label %q is not a column (have: %s)", opts.Label, columnNames(set))
-		}
-		if indexOfInt(p.RowDims, i) < 0 {
-			return nil, fmt.Errorf("--chart-label %q is not a row dimension of this pivot", set.Columns[i].Label)
-		}
-		labels = []int{i}
-	}
-
 	rows, omitted := capRows(len(p.Rows), opts)
 	g := &grid{groupLabel: pivotLabel(set, p), omittedRows: omitted, omittedCols: p.Omitted * len(numeric)}
 	for _, c := range labels {
@@ -318,18 +295,24 @@ func capRows(n int, opts ChartOptions) (rows, omitted int) {
 	return n, 0
 }
 
-// pickValues chooses the columns to draw bars for: the one --chart-value
-// names, else every measure, else the first numeric column.
-func pickValues(set *result.Set, want string) ([]int, error) {
-	if want != "" {
-		i, ok := matchColumn(set.Columns, want)
-		if !ok {
-			return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", want, columnNames(set))
+// pickValues chooses the columns to draw bars for: the ones --chart-value
+// names, in that order, else every measure, else the first numeric column.
+func pickValues(set *result.Set, wants []string) ([]int, error) {
+	if len(wants) > 0 {
+		var picked []int
+		for _, want := range wants {
+			i, ok := matchColumn(set.Columns, want)
+			if !ok {
+				return nil, fmt.Errorf("--chart-value %q is not a column (have: %s)", want, columnNames(set))
+			}
+			if !numericColumn(set, i) {
+				return nil, fmt.Errorf("--chart-value %q holds no numbers", set.Columns[i].Label)
+			}
+			if indexOfInt(picked, i) < 0 {
+				picked = append(picked, i)
+			}
 		}
-		if !numericColumn(set, i) {
-			return nil, fmt.Errorf("--chart-value %q holds no numbers", set.Columns[i].Label)
-		}
-		return []int{i}, nil
+		return picked, nil
 	}
 	var measures []int
 	for i, c := range set.Columns {

@@ -232,7 +232,7 @@ Fashion Hoodies & Sweatshir…       756,824.63 ▇▇▇▇▇▇▇▇▇▇�
 Open in Omni: https://myorg.omniapp.co/e/1:abc123/1
 ```
 
-Narrow it to one measure or one dimension by field or label — `--chart-value engaged_sessions_percent`, `--chart-label "Country"`, `events_ext.sessions` and `sessions` all work — and cap the row count with `--chart-rows`. `--workbook` also opens the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
+Narrow it to some of the measures by field or label — `--chart-value engaged_sessions_percent,"Sessions"`, `events_ext.sessions` and `sessions` all work; on a pivot, only those measures spread across the pivot values, so more of them fit — and cap the row count with `--chart-rows`. `--workbook` also opens the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
 
 A query with `pivots` renders pivoted, as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. Columns that don't fit the terminal are dropped with a note.
 
@@ -254,7 +254,7 @@ Apr 2024             -68.70 ▇│
 Nov 2024          29,857.87  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
 ```
 
-A chart is drawn from the query stream's field metadata. A `resultType` in the body would replace that stream with a document, so `--chart` drops it and says so. Flags that can't work are refused before any request is made; a `--chart-value` or `--chart-label` is matched against the result's columns once it arrives.
+A chart is drawn from the query stream's field metadata. A `resultType` in the body would replace that stream with a document, so `--chart` drops it and says so. Flags that can't work are refused before any request is made; a `--chart-value` is matched against the result's columns once it arrives.
 
 ```console
 $ omni query run --body @q.json --chart          # body sets resultType
@@ -272,8 +272,7 @@ Piping is fine — `omni ... --chart | less` still draws, since that JSON is aut
 | Flag | Description |
 |------|-------------|
 | `--chart` | Draw query results as a bar table |
-| `--chart-value FIELD` | Only this measure, by field name or label (default: every measure) |
-| `--chart-label FIELD` | Only this dimension as the row label (default: every dimension) |
+| `--chart-value FIELDS` | Only these measures, by field name or label; comma-separated or repeated (default: every measure) |
 | `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
 | `--workbook` | Also open the query in an ephemeral workbook and print its link |
 

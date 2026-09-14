@@ -975,7 +975,6 @@ var globalFlagKeys = map[string]string{
 	flagLookupKey("compact"):     "compact",
 	flagLookupKey("format"):      "format",
 	flagLookupKey("chart"):       "chart",
-	flagLookupKey("chart-label"): "chart-label",
 	flagLookupKey("chart-value"): "chart-value",
 	flagLookupKey("chart-rows"):  "chart-rows",
 	flagLookupKey("workbook"):    "workbook",

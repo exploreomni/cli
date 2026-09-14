@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -363,8 +364,8 @@ func TestChartOptions(t *testing.T) {
 		{name: "flag", args: []string{"--chart"}, want: &output.ChartOptions{}},
 		{
 			name: "columns",
-			args: []string{"--chart", "--chart-label", "region", "--chart-value", "revenue"},
-			want: &output.ChartOptions{Label: "region", Value: "revenue"},
+			args: []string{"--chart", "--chart-value", "revenue,count", "--chart-value", "Win rate"},
+			want: &output.ChartOptions{Values: []string{"revenue", "count", "Win rate"}},
 		},
 		{name: "rejected with json", args: []string{"--chart"}, format: "json", errs: true},
 		{name: "allowed with human", args: []string{"--chart"}, format: "human", want: &output.ChartOptions{}},
@@ -398,7 +399,7 @@ func TestChartOptions(t *testing.T) {
 			// Width comes from the terminal; the rest is the flags.
 			got.Width = 0
 			got.MaxRows = 0
-			if *got != *tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", *got, *tc.want)
 			}
 		})

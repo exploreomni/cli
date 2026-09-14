@@ -88,12 +88,24 @@ func TestChart_ColumnsFromModel(t *testing.T) {
 }
 
 func TestChart_ValueFormattedByModel(t *testing.T) {
-	out := chart(t, sessionsSet(), ChartOptions{Value: "engaged_sessions_percent"})
+	out := chart(t, sessionsSet(), ChartOptions{Values: []string{"engaged_sessions_percent"}})
 	if !headerIs(out, "Country", "Engaged Sessions %") {
 		t.Fatalf("expected the percent measure, got:\n%s", out)
 	}
 	if !strings.Contains(out, "39.9%") || !strings.Contains(out, "44.9%") {
 		t.Errorf("percent format should apply:\n%s", out)
+	}
+}
+
+// Several values draw in the order given, each once.
+func TestChart_SeveralValues(t *testing.T) {
+	out := chart(t, sessionsSet(), ChartOptions{Values: []string{"Engaged Sessions %", "sessions", "events_ext.sessions"}, Width: 80})
+	if !headerIs(out, "Country", "Sessions") {
+		t.Fatalf("expected the flag's order, ending with Sessions:\n%s", out)
+	}
+	header, _, _ := strings.Cut(out, "\n")
+	if strings.Count(header, "Sessions") != 2 {
+		t.Errorf("a column named twice should draw once:\n%s", out)
 	}
 }
 
@@ -106,7 +118,7 @@ func TestChart_ColumnSpellings(t *testing.T) {
 		"events_ext.engaged_sessions_percent",
 		"ENGAGED SESSIONS PERCENT",
 	} {
-		out := chart(t, sessionsSet(), ChartOptions{Value: spelling})
+		out := chart(t, sessionsSet(), ChartOptions{Values: []string{spelling}})
 		if !headerIs(out, "Country", "Engaged Sessions %") {
 			t.Errorf("%q did not select the column:\n%s", spelling, out)
 		}
@@ -240,11 +252,8 @@ func TestChart_Errors(t *testing.T) {
 		opts ChartOptions
 		want string
 	}{
-		{"unknown value column", ChartOptions{Value: "nope"}, "is not a column"},
-		{"non-numeric value column", ChartOptions{Value: "country"}, "holds no numbers"},
-		{"unknown label column", ChartOptions{Label: "nope"}, "is not a column"},
-		// Bars labelled by their own values say nothing.
-		{"label is the value column", ChartOptions{Value: "sessions", Label: "sessions"}, "is the column being plotted"},
+		{"unknown value column", ChartOptions{Values: []string{"nope"}}, "is not a column"},
+		{"non-numeric value column", ChartOptions{Values: []string{"sessions", "country"}}, "holds no numbers"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -333,7 +342,7 @@ func TestChart_TwoDimensionsTwoMeasures(t *testing.T) {
 // A pivot spreads the measure across its values like the Omni app's bar
 // table: the pivot values head the columns, and they share one scale.
 func TestChart_Pivot(t *testing.T) {
-	out := chart(t, pivoted(), ChartOptions{Value: "Total amount", Width: 120})
+	out := chart(t, pivoted(), ChartOptions{Values: []string{"Total amount"}, Width: 120})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	for _, want := range []string{"Stage", "Closed Lost", "Negotiation", "Closed Won"} {
 		if !strings.Contains(lines[0], want) {
@@ -343,12 +352,16 @@ func TestChart_Pivot(t *testing.T) {
 	if !strings.HasPrefix(lines[1], "Region") || strings.Count(lines[1], "Total amount") != 1 {
 		t.Errorf("a lone measure should be named once:\n%s", out)
 	}
-	if narrow := chart(t, pivoted(), ChartOptions{Value: "count", Width: 60}); strings.Contains(strings.Split(narrow, "\n")[0], "…") {
+	if narrow := chart(t, pivoted(), ChartOptions{Values: []string{"count"}, Width: 60}); strings.Contains(strings.Split(narrow, "\n")[0], "…") {
 		t.Errorf("pivot values should widen their column, not be cut off:\n%s", narrow)
 	}
 	both := chart(t, pivoted(), ChartOptions{Width: 160})
 	if header := strings.Split(both, "\n")[1]; strings.Count(header, "Total amount") < 2 || strings.Count(header, "Deals Count") < 2 {
 		t.Errorf("with two measures each column should say which:\n%s", both)
+	}
+	// Naming both measures draws what no flag draws.
+	if picked := chart(t, pivoted(), ChartOptions{Values: []string{"Total amount", "count"}, Width: 160}); picked != both {
+		t.Errorf("naming every measure should match the default:\n%s\nvs\n%s", picked, both)
 	}
 	if len(lines) != 4 {
 		t.Fatalf("expected two header lines and a row per region:\n%s", out)
@@ -383,8 +396,8 @@ func TestChart_PivotErrors(t *testing.T) {
 		opts ChartOptions
 		want string
 	}{
-		{ChartOptions{Label: "stage"}, "not a row dimension"},
-		{ChartOptions{Value: "region"}, "not a measure"},
+		{ChartOptions{Values: []string{"region"}}, "not a measure"},
+		{ChartOptions{Values: []string{"count", "nope"}}, "is not a column"},
 	} {
 		if got := chartErr(t, pivoted(), tc.opts); !strings.Contains(got, tc.want) {
 			t.Errorf("%+v: error %q does not mention %q", tc.opts, got, tc.want)
