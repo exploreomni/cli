@@ -156,7 +156,8 @@ available; binary values in its JSON object are interpreted as file paths.
                   its own scale; a query with pivots is drawn pivoted. Leave
                   resultType out of the body. Cannot be combined with an
                   explicitly requested JSON format.
-  --chart-value F Only these measures get bars, by field name or label;
+  --chart-value FIELDS
+                  Only these measures get bars, by field name or label;
                   comma-separated or repeated. Works on pivots too.
   --chart-rows N  Most rows to draw (default 50)
   --workbook      Also open the query in an ephemeral workbook; the link prints
