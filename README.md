@@ -234,7 +234,7 @@ Open in Omni: https://myorg.omniapp.co/e/1:abc123/1
 
 Narrow it to some of the measures by field or label — `--chart-value engaged_sessions_percent,"Sessions"`, `events_ext.sessions` and `sessions` all work; on a pivot, only those measures spread across the pivot values, so more of them fit — and cap the row count with `--chart-rows`. `--workbook` also opens the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
 
-A query with `pivots` renders pivoted, as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. Columns that don't fit the terminal are dropped with a note.
+A query with `pivots` renders pivoted, as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. A chart drops columns that don't fit the terminal, with a note; a table shows every pivot column up to the query's `column_limit`.
 
 ```
 Stage  Closed Lost                Closed Won               Negotiation
