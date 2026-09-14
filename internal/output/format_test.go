@@ -1,11 +1,57 @@
 package output
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/result"
 )
+
+func TestFormatValue_ExactIntegers(t *testing.T) {
+	for _, tc := range []struct {
+		value        int64
+		format, want string
+	}{
+		{9007199254740993, "id", "9007199254740993"},
+		{math.MaxInt64, "id", "9223372036854775807"},
+		{math.MinInt64, "id", "-9223372036854775808"},
+		{9007199254740993, "", "9,007,199,254,740,993"},
+		{9007199254740993, "NUMBER_0", "9,007,199,254,740,993"},
+		{9007199254740993, "number", "9,007,199,254,740,993.00"},
+		{9007199254740993, "currency_2", "$9,007,199,254,740,993.00"},
+		{math.MinInt64, "accounting_0", "$(9,223,372,036,854,775,808)"},
+		{-9007199254740993, "financial_0", "(9,007,199,254,740,993)"},
+		{9007199254740993, "#,##0.0#", "9,007,199,254,740,993.0"},
+		{math.MinInt64, "#,##0;(#,##0)", "(9,223,372,036,854,775,808)"},
+		{-9007199254740993, "0", "-9007199254740993"},
+		{12345, "big_1", "12.3K"},
+		{12, "percent_0", "1,200%"},
+		{1234, "0.0,", "1.2"},
+		{-1234, "0.0,;(0.0,)", "(1.2)"},
+		{1234, "0.00E+00", "1.23E+03"},
+	} {
+		if got := FormatValue(tc.value, result.Column{Format: tc.format}); got != tc.want {
+			t.Errorf("FormatValue(%d, %q) = %q, want %q", tc.value, tc.format, got, tc.want)
+		}
+	}
+}
+
+func TestFormatValue_SanitizesModelFormats(t *testing.T) {
+	for _, tc := range []struct {
+		value        any
+		format, want string
+	}{
+		{int64(1), "0\"\x1b]0;changed\a\n\t\"", "1]0;changed  "},
+		{1.5, "0.0\"\x1b]0;changed\a\"", "1.5]0;changed"},
+		{time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC), "%Y\x1b[2J\n", "2026[2J "},
+		{"2026-09-14", "%Y\x1b[2J\n", "2026[2J "},
+	} {
+		if got := FormatValue(tc.value, result.Column{Format: tc.format, DataType: "DATE"}); got != tc.want {
+			t.Errorf("FormatValue(%v, %q) = %q, want %q", tc.value, tc.format, got, tc.want)
+		}
+	}
+}
 
 func TestFormatValue_ModelFormats(t *testing.T) {
 	tests := []struct {

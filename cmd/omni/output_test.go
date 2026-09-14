@@ -436,6 +436,8 @@ func TestPrepareBody(t *testing.T) {
 		// sending the request and losing the link silently.
 		{name: "workbook with no body", workbook: true, props: queryRun, err: "needs a JSON request body"},
 		{name: "workbook with a non-JSON body", workbook: true, props: queryRun, body: `not json`, err: "needs a JSON object"},
+		{name: "workbook with null", workbook: true, props: queryRun, body: `null`, err: "needs a JSON object"},
+		{name: "chart and workbook with null", chart: true, workbook: true, props: queryRun, body: `null`, err: "needs a JSON object"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

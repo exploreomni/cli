@@ -221,6 +221,9 @@ func prepareBody(chart, workbook bool, format string, cmd *cobra.Command, body [
 	if isTrue(obj["planOnly"]) {
 		return nil, fmt.Errorf("--workbook cannot be combined with planOnly")
 	}
+	if obj == nil {
+		return nil, fmt.Errorf("--workbook needs a JSON object as the request body")
+	}
 	obj["workbookUrl"] = json.RawMessage(`true`)
 	filled, err := json.Marshal(obj)
 	if err != nil {

@@ -487,7 +487,7 @@ func TestResultTable_Pivot(t *testing.T) {
 
 func TestResult_StripsControlCharacters(t *testing.T) {
 	set := &result.Set{
-		Columns: []result.Column{{Name: "r", Label: "Region\x1b[31m", IsDimension: true}, col("v", "Total", false, "")},
+		Columns: []result.Column{{Name: "r", Label: "Region\x1b[31m", IsDimension: true}, col("v", "Total", false, "0\"\x1b]0;changed\a\"")},
 		Rows:    [][]any{{"east\x1b]0;pwned\x07\nwest", int64(5)}},
 	}
 	var table, link bytes.Buffer

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -185,6 +186,10 @@ func (nf *numFormat) addLiteral(s string, afterCore bool) {
 
 // FormatValue renders one cell in its column's model format.
 func FormatValue(v any, col result.Column) string {
+	return singleLine(formatValue(v, col))
+}
+
+func formatValue(v any, col result.Column) string {
 	switch x := v.(type) {
 	case nil:
 		return "-"
@@ -211,15 +216,98 @@ func FormatValue(v any, col result.Column) string {
 		}
 		return x
 	}
+	nf, formatted := parseFormat(col.Format)
+	var integer int64
+	isInteger := true
+	switch x := v.(type) {
+	case int64:
+		integer = x
+	case int:
+		integer = int64(x)
+	default:
+		isInteger = false
+	}
+	if isInteger {
+		if !formatted {
+			s := strconv.FormatInt(integer, 10)
+			if len(strings.TrimPrefix(s, "-")) >= 5 {
+				return integerFixed(integer, 0, true)
+			}
+			return s
+		}
+		if s, ok := nf.renderInteger(integer); ok {
+			return s
+		}
+	}
 	f, ok := asFloat(v)
 	if !ok {
 		return singleLine(fmt.Sprint(v))
 	}
-	nf, ok := parseFormat(col.Format)
-	if !ok {
+	if !formatted {
 		return formatNumber(f)
 	}
 	return nf.render(f)
+}
+
+// Preserve the Arrow integer's digits for formats that don't scale the value.
+// Chart geometry and compact/scaled formats can still use floating point.
+func (nf numFormat) renderInteger(v int64) (string, bool) {
+	switch nf.kind {
+	case "id":
+		return integerFixed(v, 0, false), true
+	case "number":
+		return integerFixed(v, defaultDecimals(nf, 2), true), true
+	case "currency", "accounting", "financial":
+		if nf.compact {
+			return "", false
+		}
+		body := strings.TrimPrefix(integerFixed(v, defaultDecimals(nf, 2), true), "-")
+		if nf.kind == "financial" {
+			if v < 0 {
+				body = "(" + body + ")"
+			}
+			return body, true
+		}
+		if v < 0 {
+			if nf.kind == "currency" {
+				return "-" + nf.symbol + body, true
+			}
+			body = "(" + body + ")"
+		}
+		return nf.symbol + body, true
+	case "pattern":
+		sign := ""
+		if v < 0 {
+			if nf.negative != nil {
+				nf = *nf.negative
+			} else {
+				sign = "-"
+			}
+		} else if v == 0 && nf.zero != nil {
+			nf = *nf.zero
+		}
+		if nf.scale || nf.divide != 1 || nf.exponent {
+			return "", false
+		}
+		body := strings.TrimPrefix(integerFixed(v, nf.minDecimals, nf.group), "-")
+		return sign + nf.prefix + body + nf.suffix, true
+	}
+	return "", false
+}
+
+func integerFixed(v int64, decimals int, group bool) string {
+	s := strconv.FormatInt(v, 10)
+	sign := ""
+	if v < 0 {
+		sign, s = "-", s[1:]
+	}
+	if group {
+		s = groupDigits(s)
+	}
+	if decimals > 0 {
+		s += "." + strings.Repeat("0", decimals)
+	}
+	return sign + s
 }
 
 func (nf numFormat) render(f float64) string {
