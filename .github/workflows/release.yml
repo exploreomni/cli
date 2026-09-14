@@ -52,3 +52,17 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "Brew formula update for omni version ${GITHUB_REF_NAME}"
           git push origin HEAD:main
+
+      - name: Notify omni-agent-skills
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.SKILLS_REPO_TOKEN }}
+          repository: exploreomni/omni-agent-skills
+          event-type: cli-update
+          client-payload: >-
+            {
+              "release_tag": "${{ github.ref_name }}",
+              "release_url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+              "commit_sha": "${{ github.sha }}"
+            }
