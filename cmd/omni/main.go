@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -9,6 +10,8 @@ import (
 	"github.com/exploreomni/omni-cli/internal/auth"
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/openapi"
+	"github.com/exploreomni/omni-cli/internal/updatecheck"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -27,11 +30,19 @@ func init() {
 }
 
 func main() {
+	useragent.Set(version)
+
+	checker := updatecheck.New()
+	var updater automaticUpdate
 	root := &cobra.Command{
 		Use:     "omni",
 		Short:   "Omni CLI — programmatic access to the Omni API",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// This hook runs immediately before RunE, so the check overlaps
+			// with the work the user asked for.
+			updater = startAutomaticUpdate(checker, version, cmd, os.Stdout, os.Stderr)
+
 			// Skip auth for config commands
 			if cmd.Name() == "init" || cmd.Name() == "show" || cmd.Name() == "use" || cmd.Name() == "login" || cmd.Name() == "logout" || cmd.Name() == "config" {
 				return nil
@@ -47,17 +58,19 @@ func main() {
 		},
 	}
 
-	// Global flags
-	root.PersistentFlags().StringP("profile", "p", "", "config profile to use")
-	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
-	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
-	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
-	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
+	addGlobalFlags(root)
 
+	// Flag names are matched ignoring case and dash/underscore placement, so
+	// --base-url, --baseurl and --base_url are the same flag on every command.
+	// Set before the subcommands are added: cobra propagates the function to
+	// children as they're attached, which covers the hand-written commands and
+	// the root's persistent flags as well as the generated ones.
+	root.SetGlobalNormalizationFunc(openapi.NormalizeFlagName)
 
 	// Hand-written commands (not from spec)
 	addConfigCommands(root)
 	addAgentHelpCommand(root)
+	addUpdateCommand(root, checker, version)
 
 	// Load OpenAPI spec and generate API commands
 	specData, err := specFS.ReadFile("openapi.json")
@@ -78,10 +91,33 @@ func main() {
 
 	// Hand-written commands that attach to generated command groups
 	addBranchCommands(root, executeAPICall)
+	addUserCommands(root, executeAPICall)
 
-	if err := root.Execute(); err != nil {
+	// ExecuteC, not Execute: cobra returns a nil error whenever it answers the
+	// help flag, including for `omni models list-branches --help`, where the
+	// "help" is really an unknown-subcommand error. UnknownSubcommand asks the
+	// command that ran whether that's what happened.
+	cmd, err := root.ExecuteC()
+	success := err == nil && !openapi.UnknownSubcommand(cmd)
+	updater.finish(success, os.Stderr)
+	if !success {
 		os.Exit(1)
 	}
+}
+
+// addGlobalFlags registers the flags every command inherits.
+//
+// These names are reserved: openapi.IsReservedFlagName knows them, so a spec
+// query param that would otherwise shadow one (say a param named "baseUrl"
+// taking over --base-url) is registered under a --param- prefix instead.
+// TestGlobalFlagsAreReserved fails if a flag is added here without being
+// added there too.
+func addGlobalFlags(root *cobra.Command) {
+	root.PersistentFlags().StringP("profile", "p", "", "config profile to use")
+	root.PersistentFlags().String("token", "", "API token (overrides profile/env)")
+	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
+	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
+	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
 }
 
 // executeAPICall is the callback invoked by generated commands to make the actual HTTP request.
@@ -100,14 +136,23 @@ func executeAPICall(req openapi.APIRequest) error {
 	// scripts piping JSON shouldn't get decorative noise on stderr.
 	sp := maybeStartSpinner(format)
 
-	resp, err := auth.Do(cfg, req.Method, req.Path, req.Body)
+	resp, err := auth.DoWithContentType(cfg, req.Method, req.Path, req.Body, req.ContentType)
 	sp.Stop()
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	return outputResponse(resp, format, compact)
+	err = outputResponse(resp, format, compact)
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		// outputResponse already wrote a complete error message to stderr —
+		// a JSON envelope carrying the status, or the human-mode one-liner.
+		// Letting cobra append its own line would say it twice, and would
+		// leave two documents on stderr for JSON consumers to trip over.
+		req.Cmd.SilenceErrors = true
+	}
+	return err
 }
 
 // resolveConfig builds the runtime config from flags, env, and config file.

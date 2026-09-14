@@ -1,0 +1,164 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/exploreomni/omni-cli/internal/updatecheck"
+	"github.com/spf13/cobra"
+)
+
+type fakeReleaseChecker struct {
+	result updatecheck.Result
+	err    error
+	checks int
+}
+
+func (f *fakeReleaseChecker) Check(_ context.Context, _ string) (updatecheck.Result, error) {
+	f.checks++
+	return f.result, f.err
+}
+
+func TestUpdateCheckJSON(t *testing.T) {
+	checker := &fakeReleaseChecker{result: updatecheck.Result{
+		UpdateAvailable: true,
+		CurrentVersion:  "v1.2.0",
+		LatestVersion:   "v1.3.0",
+		ReleaseURL:      "https://example.test/v1.3.0",
+		Upgrade: updatecheck.UpgradeInstructions{
+			Homebrew: "brew upgrade omni",
+			Other:    "install command",
+		},
+	}}
+	root := &cobra.Command{Use: "omni"}
+	addGlobalFlags(root)
+	addUpdateCommand(root, checker, "v1.2.0")
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetArgs([]string{"update", "check", "--format", "json", "--compact"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if checker.checks != 1 {
+		t.Fatalf("checks = %d, want one explicit check", checker.checks)
+	}
+	var got updatecheck.Result
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON %q: %v", stdout.String(), err)
+	}
+	if !got.UpdateAvailable || got.LatestVersion != "v1.3.0" {
+		t.Fatalf("result = %+v", got)
+	}
+}
+
+func TestUpdateCheckHuman(t *testing.T) {
+	checker := &fakeReleaseChecker{result: updatecheck.Result{
+		UpdateAvailable: false,
+		CurrentVersion:  "v1.3.0",
+		LatestVersion:   "v1.3.0",
+	}}
+	root := &cobra.Command{Use: "omni"}
+	addGlobalFlags(root)
+	addUpdateCommand(root, checker, "v1.3.0")
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetArgs([]string{"update", "check", "--format", "human"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "v1.3.0 is up to date") {
+		t.Fatalf("stdout = %q", got)
+	}
+}
+
+// A failed check keeps the CLI's stream contract: nothing on stdout, exactly
+// one JSON document on stderr, and no second report from cobra.
+func TestUpdateCheckFailureJSON(t *testing.T) {
+	checker := &fakeReleaseChecker{err: errors.New("network unavailable")}
+	root := &cobra.Command{Use: "omni"}
+	addGlobalFlags(root)
+	addUpdateCommand(root, checker, "v1.2.0")
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"update", "check", "--format", "json", "--compact"})
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "network unavailable") {
+		t.Fatalf("error = %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want nothing on a failure", stdout.String())
+	}
+	var envelope struct {
+		Error  string `json:"error"`
+		Status int    `json:"status"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not a single JSON document (%v): %q", err, stderr.String())
+	}
+	if envelope.Error != "network unavailable" || envelope.Status != 0 {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+}
+
+func TestUpdateCheckFailureHuman(t *testing.T) {
+	checker := &fakeReleaseChecker{err: errors.New("network unavailable")}
+	root := &cobra.Command{Use: "omni"}
+	addGlobalFlags(root)
+	addUpdateCommand(root, checker, "v1.2.0")
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"update", "check", "--format", "human"})
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected an error")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if got := stderr.String(); got != "Error: network unavailable\n" {
+		t.Fatalf("stderr = %q", got)
+	}
+}
+
+// The hand-written update group must behave like the generated ones: a bare
+// group or a mistyped subcommand is an error on stderr with an empty stdout,
+// not help printed to stdout with exit 0.
+func TestUpdateGroupRequiresSubcommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"bare group", []string{"update"}, "requires a subcommand"},
+		{"typo", []string{"update", "chekc"}, `unknown subcommand "chekc"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &cobra.Command{Use: "omni"}
+			addGlobalFlags(root)
+			addUpdateCommand(root, &fakeReleaseChecker{}, "v1.2.0")
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected an error, got nil (stdout %q)", stdout.String())
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err.Error(), tt.wantErr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout.String())
+			}
+		})
+	}
+}

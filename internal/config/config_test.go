@@ -715,3 +715,45 @@ func TestLoad_MissingFile(t *testing.T) {
 		t.Fatal("expected error loading nonexistent file, got nil")
 	}
 }
+
+func TestResolve_UnknownProfileNamesAvailable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OMNI_CONFIG_DIR", dir)
+	t.Setenv("OMNI_API_TOKEN", "")
+	cfg := &Config{Version: 1, DefaultProfile: "a", Profiles: map[string]Profile{
+		"a": {APIEndpoint: "https://a.omniapp.co", AuthMethod: "api-key", APIKey: "k"},
+		"b": {APIEndpoint: "https://b.omniapp.co", AuthMethod: "api-key", APIKey: "k"},
+	}}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Resolve("nope", "", "")
+	if err == nil {
+		t.Fatal("expected error for unknown profile")
+	}
+	for _, want := range []string{`profile "nope" not found`, "available: a, b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "no API token") {
+		t.Errorf("unknown profile must not be reported as a missing token: %q", err)
+	}
+}
+
+func TestResolve_MalformedConfigIsReported(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OMNI_CONFIG_DIR", dir)
+	t.Setenv("OMNI_API_TOKEN", "")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"version":1,"profiles":{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Resolve("", "", "")
+	if err == nil || !strings.Contains(err.Error(), "loading config") || strings.Contains(err.Error(), "no API token") {
+		t.Errorf("want a parse error naming the config file, got %v", err)
+	}
+	// With everything supplied on the command line the broken file is irrelevant.
+	if _, err := Resolve("", "tok", "https://x.omniapp.co"); err != nil {
+		t.Errorf("flags should bypass the broken config, got %v", err)
+	}
+}

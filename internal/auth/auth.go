@@ -8,10 +8,18 @@ import (
 	"strings"
 
 	"github.com/exploreomni/omni-cli/internal/config"
+	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
 // Do executes an authenticated HTTP request against the Omni API.
 func Do(cfg *config.ResolvedConfig, method, path string, body []byte) (*http.Response, error) {
+	return DoWithContentType(cfg, method, path, body, "application/json")
+}
+
+// DoWithContentType executes an authenticated request using the caller's
+// declared request media type. Multipart callers must include the boundary in
+// contentType (for example, multipart/form-data; boundary=...).
+func DoWithContentType(cfg *config.ResolvedConfig, method, path string, body []byte, contentType string) (*http.Response, error) {
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
 	url := baseURL + path
 
@@ -32,8 +40,12 @@ func Do(cfg *config.ResolvedConfig, method, path string, body []byte) (*http.Res
 	}
 
 	req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	req.Header.Set("Content-Type", "application/json")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", useragent.String())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

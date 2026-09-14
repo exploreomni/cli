@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,51 @@ func TestJSONTo_InvalidJSON(t *testing.T) {
 	got := strings.TrimSpace(buf.String())
 	if got != input {
 		t.Errorf("expected raw output %q, got %q", input, got)
+	}
+}
+
+// A failed API call leaves exactly one JSON document: the detail, the status,
+// and the API's own payload verbatim under "body".
+func TestAPIErrorTo_SingleJSONDocument(t *testing.T) {
+	for _, compact := range []bool{true, false} {
+		var buf bytes.Buffer
+		APIErrorTo(&buf, 400, "bad request", json.RawMessage(`{"detail":"bad request","code":"X"}`), compact)
+
+		var got struct {
+			Error  string          `json:"error"`
+			Status int             `json:"status"`
+			Body   json.RawMessage `json:"body"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("compact=%v: output is not a single JSON document (%v): %q", compact, err, buf.String())
+		}
+		if got.Error != "bad request" || got.Status != 400 {
+			t.Errorf("compact=%v: got %+v, want detail and status", compact, got)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(got.Body, &body); err != nil {
+			t.Fatalf("compact=%v: body is not JSON (%v): %q", compact, err, string(got.Body))
+		}
+		if body["code"] != "X" {
+			t.Errorf("compact=%v: body = %q, want the API's payload", compact, string(got.Body))
+		}
+		// Pretty mode indents; compact mode stays on one line.
+		if indented := strings.Contains(buf.String(), "\n  "); indented == compact {
+			t.Errorf("compact=%v: unexpected formatting: %q", compact, buf.String())
+		}
+	}
+}
+
+// With no JSON payload to embed, "body" is omitted rather than emitted as null.
+func TestAPIErrorTo_OmitsMissingBody(t *testing.T) {
+	var buf bytes.Buffer
+	APIErrorTo(&buf, 502, "Bad Gateway", nil, true)
+	if strings.Contains(buf.String(), "body") {
+		t.Errorf("expected no body field, got %q", buf.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("output is not valid JSON (%v): %q", err, buf.String())
 	}
 }
 
