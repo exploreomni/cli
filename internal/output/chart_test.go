@@ -2,6 +2,8 @@ package output
 
 import (
 	"bytes"
+	"math"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -160,6 +162,39 @@ func TestChart_TinyValueDrawsOneCell(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{}), "\n"), "\n")
 	if got := strings.Count(lines[2], "▇"); got != 1 {
 		t.Errorf("a tiny value should draw one cell, got %d:\n%s", got, strings.Join(lines, "\n"))
+	}
+}
+
+func TestChart_NonFiniteValueDrawsNoBar(t *testing.T) {
+	set := &result.Set{
+		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Revenue", false, "")},
+		Rows:    [][]any{{"east", 100.0}, {"west", math.NaN()}, {"north", math.Inf(1)}},
+	}
+	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{}), "\n"), "\n")
+	for _, line := range lines[2:] {
+		if strings.Contains(line, "▇") {
+			t.Errorf("a non-finite value should draw no bar: %q", line)
+		}
+		if !strings.Contains(line, "NaN") && !strings.Contains(line, "Inf") {
+			t.Errorf("the value's text should still show: %q", line)
+		}
+	}
+}
+
+func TestChart_DecimalValues(t *testing.T) {
+	set := &result.Set{
+		Columns: []result.Column{{Name: "r", Label: "Region", IsDimension: true}, col("v", "Revenue", false, "number_2")},
+		Rows: [][]any{
+			{"east", result.Decimal{Coef: big.NewInt(100000), Scale: 2}},
+			{"west", result.Decimal{Coef: big.NewInt(50000), Scale: 2}},
+		},
+	}
+	lines := strings.Split(strings.TrimRight(chart(t, set, ChartOptions{Width: 40}), "\n"), "\n")
+	if !strings.Contains(lines[1], "1,000.00") || !strings.Contains(lines[2], "500.00") {
+		t.Fatalf("decimals should render in the model format:\n%s", strings.Join(lines, "\n"))
+	}
+	if east, west := barCells(lines[1]), barCells(lines[2]); east != 2*west {
+		t.Errorf("bars should scale to the decimal values, got %d and %d", east, west)
 	}
 }
 

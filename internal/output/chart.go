@@ -205,7 +205,7 @@ func renderGrid(w io.Writer, g *grid, opts ChartOptions) {
 			line.WriteString(gap(c))
 			var drawn string
 			switch {
-			case !it.present:
+			case !it.present || math.IsNaN(it.value) || math.IsInf(it.value, 0):
 			case sc.lo < 0:
 				drawn = twoSidedBar(it.value, sc.lo, sc.hi, barW)
 			default:

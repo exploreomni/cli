@@ -1,6 +1,8 @@
 package output
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -47,12 +49,25 @@ func sanitizeJSON(v any) any {
 			x[i] = sanitizeJSON(x[i])
 		}
 	case map[string]any:
+		var dirty []string
 		for k, val := range x {
-			if clean := sanitize(k); clean != k {
-				delete(x, k)
-				k = clean
-			}
 			x[k] = sanitizeJSON(val)
+			if sanitize(k) != k {
+				dirty = append(dirty, k)
+			}
+		}
+		// "ab" and "a\x00b" both clean to "ab"; number the collision rather than drop a field.
+		sort.Strings(dirty)
+		for _, k := range dirty {
+			clean := sanitize(k)
+			for n := 2; ; n++ {
+				if _, taken := x[clean]; !taken {
+					break
+				}
+				clean = fmt.Sprintf("%s (%d)", sanitize(k), n)
+			}
+			x[clean] = x[k]
+			delete(x, k)
 		}
 	}
 	return v

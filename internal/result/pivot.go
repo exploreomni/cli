@@ -3,6 +3,7 @@ package result
 import (
 	"cmp"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -104,11 +105,13 @@ func pick(row []any, idx []int) []any {
 }
 
 // tupleKey identifies a tuple of cell values; the type is part of the key so
-// the string "1" and the number 1 stay distinct.
+// the string "1" and the number 1 stay distinct, and the length so a string
+// can't impersonate a separator.
 func tupleKey(row []any, idx []int) string {
 	var b strings.Builder
 	for _, c := range idx {
-		fmt.Fprintf(&b, "%T:%v\x00", row[c], row[c])
+		v := fmt.Sprint(row[c])
+		fmt.Fprintf(&b, "%T:%d:%s", row[c], len(v), v)
 	}
 	return b.String()
 }
@@ -190,6 +193,15 @@ func compareValues(a, b any) int {
 	case b == nil:
 		return -1
 	}
+	_, aDec := a.(Decimal)
+	_, bDec := b.(Decimal)
+	if aDec || bDec {
+		if x, ok := exactRat(a); ok {
+			if y, ok := exactRat(b); ok {
+				return x.Cmp(y)
+			}
+		}
+	}
 	if x, ok := number(a); ok {
 		if y, ok := number(b); ok {
 			return cmp.Compare(x, y)
@@ -209,6 +221,18 @@ func number(v any) (float64, bool) {
 		return float64(x), true
 	case float64:
 		return x, true
+	case Decimal:
+		return x.Float64(), true
 	}
 	return 0, false
+}
+
+func exactRat(v any) (*big.Rat, bool) {
+	switch x := v.(type) {
+	case int64:
+		return new(big.Rat).SetInt64(x), true
+	case Decimal:
+		return new(big.Rat).SetFrac(x.Coef, new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(x.Scale)), nil)), true
+	}
+	return nil, false
 }

@@ -298,6 +298,15 @@ func TestTruncate_DoesNotSplitRunes(t *testing.T) {
 	if truncateCells("short", 10) != "short" {
 		t.Error("a string under the limit should pass through")
 	}
+	if got := truncateCells("Stage", 1); got != "…" {
+		t.Errorf("truncateCells(_, 1) = %q, want an ellipsis", got)
+	}
+	if got := truncateCells("Stage", 0); got != "" {
+		t.Errorf("truncateCells(_, 0) = %q, want nothing", got)
+	}
+	if got := truncateCells("#", 1); got != "#" {
+		t.Errorf("a one-cell string fits one cell, got %q", got)
+	}
 }
 
 // Values are data: an escape sequence in one must not reach the terminal.
@@ -309,5 +318,17 @@ func TestHumanBytes_StripsControlCharacters(t *testing.T) {
 	}
 	if out := buf.String(); strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, "evil]52;c;aGk=name[2J") {
 		t.Errorf("control characters should be dropped, text kept:\n%q", out)
+	}
+}
+
+func TestSanitizeJSON_KeyCollisionKeepsBothFields(t *testing.T) {
+	v := sanitizeJSON(map[string]any{"ab": "clean", "a\x00b": "dirty"}).(map[string]any)
+	if len(v) != 2 || v["ab"] != "clean" || v["ab (2)"] != "dirty" {
+		t.Errorf("expected both fields kept, got %#v", v)
+	}
+	for k := range v {
+		if strings.ContainsRune(k, 0) {
+			t.Errorf("key %q still has a control character", k)
+		}
 	}
 }

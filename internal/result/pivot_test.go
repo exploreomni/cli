@@ -121,3 +121,14 @@ func TestPivot_UnrelatedValuesUseValueOrder(t *testing.T) {
 		t.Errorf("descending: keys = %v, want %v", got, want)
 	}
 }
+
+func TestTupleKey_StringsCannotCollide(t *testing.T) {
+	a := []any{"a\x00string:b", "c"}
+	b := []any{"a", "b\x00string:c"}
+	if tupleKey(a, []int{0, 1}) == tupleKey(b, []int{0, 1}) {
+		t.Error("distinct tuples produced the same key")
+	}
+	if tupleKey([]any{"1"}, []int{0}) == tupleKey([]any{int64(1)}, []int{0}) {
+		t.Error("the string \"1\" and the number 1 should stay distinct")
+	}
+}

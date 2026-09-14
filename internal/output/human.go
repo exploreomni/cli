@@ -513,8 +513,13 @@ func formatNumberGrouped(f float64, minDigits int) string {
 // label of 28 runes occupies 56 columns, which would blow the layout its
 // width was budgeted for.
 func truncateCells(s string, max int) string {
-	if max <= 1 || lipgloss.Width(s) <= max {
+	switch {
+	case lipgloss.Width(s) <= max:
 		return s
+	case max <= 0:
+		return ""
+	case max == 1:
+		return "…"
 	}
 	var b strings.Builder
 	used := 0
