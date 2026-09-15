@@ -32,6 +32,10 @@
       "name": "API Tokens"
     },
     {
+      "description": "Custom chart color palette management",
+      "name": "Color Palettes"
+    },
+    {
       "description": "Database connections and environments",
       "name": "Connections"
     },
@@ -3397,6 +3401,315 @@
           "message",
           "success"
         ]
+      },
+      "ColorPalettesListResponse": {
+        "type": "object",
+        "properties": {
+          "color_palettes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "colors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Ordered colors as stored, usually hex values",
+                  "example": [
+                    "#1f77b4",
+                    "#ff7f0e",
+                    "#2ca02c"
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When the palette was created"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Palette ID. Visualizations reference the palette by this value."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Palette name",
+                  "example": "Brand colors"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "discrete",
+                    "continuous"
+                  ],
+                  "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+                  "example": "discrete"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When the palette was last updated"
+                }
+              },
+              "required": [
+                "colors",
+                "created_at",
+                "id",
+                "name",
+                "type",
+                "updated_at"
+              ]
+            },
+            "description": "Custom palettes, sorted by name"
+          }
+        },
+        "required": [
+          "color_palettes"
+        ]
+      },
+      "ColorPalettesCreateResponse": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered colors as stored, usually hex values",
+            "example": [
+              "#1f77b4",
+              "#ff7f0e",
+              "#2ca02c"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was created"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Palette ID. Visualizations reference the palette by this value."
+          },
+          "name": {
+            "type": "string",
+            "description": "Palette name",
+            "example": "Brand colors"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+            "example": "discrete"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was last updated"
+          }
+        },
+        "required": [
+          "colors",
+          "created_at",
+          "id",
+          "name",
+          "type",
+          "updated_at"
+        ]
+      },
+      "ColorPalettesCreateBody": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "example": "#1f77b4"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Ordered hex colors. Discrete palettes are used in order; continuous palettes interpolate between them.",
+            "example": [
+              "#1f77b4",
+              "#ff7f0e",
+              "#2ca02c"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Palette name, unique per type within the organization",
+            "example": "Brand colors"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+            "example": "discrete"
+          }
+        },
+        "required": [
+          "colors",
+          "name",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "ColorPalettesGetResponse": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered colors as stored, usually hex values",
+            "example": [
+              "#1f77b4",
+              "#ff7f0e",
+              "#2ca02c"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was created"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Palette ID. Visualizations reference the palette by this value."
+          },
+          "name": {
+            "type": "string",
+            "description": "Palette name",
+            "example": "Brand colors"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+            "example": "discrete"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was last updated"
+          }
+        },
+        "required": [
+          "colors",
+          "created_at",
+          "id",
+          "name",
+          "type",
+          "updated_at"
+        ]
+      },
+      "ColorPalettesUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered colors as stored, usually hex values",
+            "example": [
+              "#1f77b4",
+              "#ff7f0e",
+              "#2ca02c"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was created"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Palette ID. Visualizations reference the palette by this value."
+          },
+          "name": {
+            "type": "string",
+            "description": "Palette name",
+            "example": "Brand colors"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+            "example": "discrete"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the palette was last updated"
+          }
+        },
+        "required": [
+          "colors",
+          "created_at",
+          "id",
+          "name",
+          "type",
+          "updated_at"
+        ]
+      },
+      "ColorPalettesUpdateBody": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "example": "#1f77b4"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Ordered hex colors. Discrete palettes are used in order; continuous palettes interpolate between them.",
+            "example": [
+              "#1f77b4",
+              "#ff7f0e",
+              "#2ca02c"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Palette name, unique per type within the organization",
+            "example": "Brand colors"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' palettes color categories; 'continuous' palettes define a gradient for numeric scales",
+            "example": "discrete"
+          }
+        },
+        "additionalProperties": false
       },
       "ConnectionsDbtRotateSigningKeyResponse": {
         "type": "object",
@@ -34821,7 +35134,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 1024
           },
           "name": {
             "type": "string",
@@ -40395,6 +40709,14 @@
             "type": "integer",
             "description": "Number of workbook models replaced"
           },
+          "skipped_foreign_homed_not_in_branch_count": {
+            "type": "integer",
+            "description": "Number of tabs of documents homed in other models that were skipped because a replace on a branch has no branch of those models to draft on"
+          },
+          "skipped_foreign_homed_unauthorized_count": {
+            "type": "integer",
+            "description": "Number of tabs of documents homed in other models that were skipped because the caller cannot update those models"
+          },
           "skipped_foreign_tabs_count": {
             "type": "integer",
             "description": "Number of tabs left alone because they query a shared model other than this one"
@@ -45248,7 +45570,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, the acting user lacks routines access (the Use routines role permission) on the routine model, the request supplied a `condition` but conditional routines are not enabled for the organization, or the target user is an embed user (embed users cannot own routines).",
+            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, the acting user lacks routines access (the Use routines role permission) on the routine model, the request supplied a `condition` but conditional routines are not enabled for the organization, or the target user is an embed user in an organization that has not enabled routines for embed users.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45919,6 +46241,219 @@
           },
           "405": {
             "description": "Method not allowed"
+          }
+        }
+      }
+    },
+    "/api/v1/color-palettes": {
+      "get": {
+        "description": "Lists the custom chart color palettes defined for the organization. Built-in palettes are not included.",
+        "operationId": "colorPalettesList",
+        "summary": "List custom color palettes",
+        "tags": [
+          "Color Palettes"
+        ],
+        "responses": {
+          "200": {
+            "description": "Custom color palettes in the organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColorPalettesListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      },
+      "post": {
+        "description": "Creates a custom chart color palette. Requires the Manage Config permission. Palette names must be unique per type within the organization.",
+        "operationId": "colorPalettesCreate",
+        "summary": "Create a custom color palette",
+        "tags": [
+          "Color Palettes"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ColorPalettesCreateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Color palette created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColorPalettesCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage Config permission"
+          },
+          "409": {
+            "description": "A palette with this name and type already exists"
+          }
+        }
+      }
+    },
+    "/api/v1/color-palettes/{id}": {
+      "get": {
+        "description": "Returns one custom chart color palette by ID.",
+        "operationId": "colorPalettesGet",
+        "summary": "Get a custom color palette",
+        "tags": [
+          "Color Palettes"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Palette ID",
+              "example": "3c90c3cc-0d44-4b50-8888-8dd25736052a"
+            },
+            "required": true,
+            "description": "Palette ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Color palette details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColorPalettesGetResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid palette ID"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Color palette not found"
+          }
+        }
+      },
+      "put": {
+        "description": "Updates a custom chart color palette. Omitted fields keep their current values. Charts using the palette pick up the new colors. Requires the Manage Config permission.",
+        "operationId": "colorPalettesUpdate",
+        "summary": "Update a custom color palette",
+        "tags": [
+          "Color Palettes"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Palette ID",
+              "example": "3c90c3cc-0d44-4b50-8888-8dd25736052a"
+            },
+            "required": true,
+            "description": "Palette ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ColorPalettesUpdateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Color palette updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColorPalettesUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or palette ID"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage Config permission"
+          },
+          "404": {
+            "description": "Color palette not found"
+          },
+          "409": {
+            "description": "Another palette already has this name and type, or the palette is the organization's default and cannot change type"
+          }
+        }
+      },
+      "delete": {
+        "description": "Deletes a custom chart color palette. Charts using it fall back to the organization's default palette. The organization's current default palette cannot be deleted. Requires the Manage Config permission.",
+        "operationId": "colorPalettesDelete",
+        "summary": "Delete a custom color palette",
+        "tags": [
+          "Color Palettes"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Palette ID",
+              "example": "3c90c3cc-0d44-4b50-8888-8dd25736052a"
+            },
+            "required": true,
+            "description": "Palette ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Color palette deleted"
+          },
+          "400": {
+            "description": "Invalid palette ID"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage Config permission"
+          },
+          "404": {
+            "description": "Color palette not found"
+          },
+          "409": {
+            "description": "The palette is the organization's default and cannot be deleted"
           }
         }
       }
@@ -50102,12 +50637,14 @@
           {
             "schema": {
               "type": "integer",
-              "exclusiveMinimum": 0,
-              "default": 50,
-              "description": "Number of records per page"
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100, integer)",
+              "example": 20
             },
             "required": false,
-            "description": "Number of records per page",
+            "description": "Number of results per page (1-100, integer)",
             "name": "pageSize",
             "in": "query"
           },
@@ -50118,11 +50655,12 @@
                 "asc",
                 "desc"
               ],
-              "default": "asc",
-              "description": "Sort direction"
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
             },
             "required": false,
-            "description": "Sort direction",
+            "description": "Sort direction for results",
             "name": "sortDirection",
             "in": "query"
           },
@@ -50133,6 +50671,7 @@
                 "name",
                 "favorites",
                 "updatedAt",
+                "lastViewedAt",
                 "visits"
               ],
               "default": "name",
@@ -53770,15 +54309,15 @@
           },
           {
             "schema": {
-              "type": [
-                "number",
-                "null"
-              ],
-              "description": "Number of results per page",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100, integer)",
               "example": 20
             },
             "required": false,
-            "description": "Number of results per page",
+            "description": "Number of results per page (1-100, integer)",
             "name": "pageSize",
             "in": "query"
           },
@@ -53813,10 +54352,12 @@
                 "asc",
                 "desc"
               ],
-              "description": "Sort direction"
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
             },
             "required": false,
-            "description": "Sort direction",
+            "description": "Sort direction for results",
             "name": "sortDirection",
             "in": "query"
           },
@@ -53825,11 +54366,10 @@
               "type": "string",
               "enum": [
                 "name",
-                "createdAt",
-                "updatedAt",
                 "favorites",
                 "path"
               ],
+              "default": "name",
               "description": "Field to sort by"
             },
             "required": false,
@@ -55232,11 +55772,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated list of fields to include (e.g., activeBranches)",
+              "description": "Comma-separated list of fields to include. Supported: activeBranches",
               "example": "activeBranches"
             },
             "required": false,
-            "description": "Comma-separated list of fields to include (e.g., activeBranches)",
+            "description": "Comma-separated list of fields to include. Supported: activeBranches",
             "name": "include",
             "in": "query"
           },
@@ -55275,6 +55815,7 @@
                 "SHARED",
                 "SHARED_EXTENSION",
                 "BRANCH",
+                "EXTENSION_BRANCH",
                 "WORKBOOK",
                 "QUERY"
               ],
@@ -55298,12 +55839,14 @@
           {
             "schema": {
               "type": "integer",
-              "exclusiveMinimum": 0,
-              "description": "Number of results per page",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Number of results per page (1-100, integer)",
               "example": 20
             },
             "required": false,
-            "description": "Number of results per page",
+            "description": "Number of results per page (1-100, integer)",
             "name": "pageSize",
             "in": "query"
           },
@@ -55314,10 +55857,12 @@
                 "asc",
                 "desc"
               ],
-              "description": "Sort direction"
+              "default": "desc",
+              "description": "Sort direction for results",
+              "example": "desc"
             },
             "required": false,
-            "description": "Sort direction",
+            "description": "Sort direction for results",
             "name": "sortDirection",
             "in": "query"
           },
@@ -55332,6 +55877,7 @@
                 "createdAt",
                 "updatedAt"
               ],
+              "default": "updatedAt",
               "description": "Field to sort by"
             },
             "required": false,
