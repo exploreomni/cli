@@ -202,6 +202,80 @@ A failed API call leaves exactly one JSON document on stderr, so `omni ... 2>err
 
 `body` holds the API's own payload and is omitted when the response wasn't JSON. A **successful** response that isn't JSON — `query run` streams `text/ndjson`, and returns CSV or XLSX with a result type — is passed through to stdout unchanged.
 
+### Query results
+
+`query run` and `query wait` stream results as NDJSON with the rows as Arrow. In JSON mode that stream passes through untouched. In human mode the CLI decodes it and renders what the model says about each field — its label, whether it's a dimension or a measure, and its number format — so a `NUMBER_0` measure reads `12,526` and a `percent` measure reads `39.92%`, in the query's column order. If the first response's wait window elapses, the CLI polls `query/wait` until every job has finished.
+
+```
+╭───────────────┬──────────┬────────────────────╮
+│ Country       │ Sessions │ Engaged Sessions % │
+├───────────────┼──────────┼────────────────────┤
+│ United States │   12,526 │             39.92% │
+│ Ireland       │      838 │             44.87% │
+╰───────────────┴──────────┴────────────────────╯
+```
+
+### Charts
+
+`--chart` draws the same results as the Omni app's bar table: every dimension is a column, and every measure gets a column of bars scaled to its own maximum, as the model defines them.
+
+```bash
+omni query run --body @revenue-by-category.json --chart --workbook
+```
+
+```
+Category                     Total Sale Price
+Jeans                            1,602,513.81 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Accessories                        955,617.30 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Outerwear & Coats                  842,064.07 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Fashion Hoodies & Sweatshir…       756,824.63 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Open in Omni: https://myorg.omniapp.co/e/1:abc123/1
+```
+
+Narrow it to some of the measures by field or label — `--chart-value engaged_sessions_percent,"Sessions"`, `events_ext.sessions` and `sessions` all work; on a pivot, only those measures spread across the pivot values, so more of them fit — and cap the row count with `--chart-rows`. `--workbook` also opens the query in an ephemeral workbook: the link prints under the output (or, in JSON mode, as `{"workbookUrl": …}` on stderr, since stdout stays the API's payload).
+
+A query with `pivots` renders pivoted, as a table and as a chart: the remaining dimensions stay as rows, each pivot value heads its own columns, and a measure's bars share one scale across all of them. A chart drops columns that don't fit the terminal, with a note; a table shows every pivot column up to the query's `column_limit`.
+
+```
+Stage  Closed Lost                Closed Won               Negotiation
+Region Total amount
+AMER    $13,966,500 ████████████  $3,903,000 ███▍          $167,500 ▏
+EMEA     $8,482,500 ███████▎      $1,949,500 █▋                   -
+APAC     $3,919,500 ███▍          $1,591,500 █▍            $177,000 ▏
+```
+
+Values that cross zero get a zero axis rather than being scaled against the maximum:
+
+```
+Created At Month Mom Change
+Feb 2024           2,793.82  │▇▇▇▇▇
+Mar 2024          10,528.18  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+Apr 2024             -68.70 ▇│
+Nov 2024          29,857.87  │▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+```
+
+A chart is drawn from the query stream's field metadata. A `resultType` in the body would replace that stream with a document, so `--chart` drops it and says so. Flags that can't work are refused before any request is made; a `--chart-value` is matched against the result's columns once it arrives.
+
+```console
+$ omni query run --body @q.json --chart          # body sets resultType
+note: --chart ignores "resultType": "csv" and reads the query stream
+
+$ omni query run --body @q.json --chart --format json    # or OMNI_OUTPUT_FORMAT=json
+Error: --chart cannot be combined with JSON output: a chart is not JSON
+
+$ omni models list --chart
+Error: --chart plots query results: use it with query run or query wait
+```
+
+Piping is fine — `omni ... --chart | less` still draws, since that JSON is auto-detected rather than asked for. Off a terminal — piped to a file, `pbcopy`, or a Slack message — the chart draws at 80 columns, which fits a code block.
+
+| Flag | Description |
+|------|-------------|
+| `--chart` | Draw query results as a bar table |
+| `--chart-value FIELDS` | Only these measures, by field name or label; comma-separated or repeated (default: every measure) |
+| `--chart-rows N` | Most rows to draw before summarising the rest (default 50) |
+| `--workbook` | Also open the query in an ephemeral workbook and print its link |
+
 ## Environment variables
 
 | Variable | Description |

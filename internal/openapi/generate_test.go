@@ -2148,3 +2148,52 @@ func TestFirstLine(t *testing.T) {
 		}
 	}
 }
+
+// Body properties are read off the spec, so a second endpoint that grows a
+// field is covered without a code change here.
+func TestBodyDeclares(t *testing.T) {
+	specData, err := os.ReadFile("../../api/openapi.json")
+	if err != nil {
+		t.Skipf("spec not available: %v", err)
+	}
+	cmds, err := GenerateCommands(specData, func(APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	find := func(group, name string) *cobra.Command {
+		for _, g := range cmds {
+			if g.Name() != group {
+				continue
+			}
+			for _, sub := range g.Commands() {
+				if sub.Name() == name {
+					return sub
+				}
+			}
+		}
+		t.Fatalf("no command %s %s", group, name)
+		return nil
+	}
+
+	run := find("query", "run")
+	for _, prop := range []string{"resultType", "workbookUrl", "planOnly"} {
+		if !BodyDeclares(run, prop) {
+			t.Errorf("query run should declare %s", prop)
+		}
+	}
+	if BodyDeclares(run, "nope") {
+		t.Error("query run should not declare a made-up property")
+	}
+	if gen := find("ai", "generate-query"); BodyDeclares(gen, "resultType") {
+		t.Error("ai generate-query should not declare resultType")
+	}
+	if BodyDeclares(nil, "resultType") {
+		t.Error("a nil command declares nothing")
+	}
+	if !ReturnsStream(run) || !ReturnsStream(find("query", "wait")) {
+		t.Error("query run and query wait return a stream")
+	}
+	if ReturnsStream(find("models", "list")) || ReturnsStream(nil) {
+		t.Error("models list does not return a stream")
+	}
+}
