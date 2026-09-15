@@ -482,7 +482,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		if qf.Param.Required {
 			desc = strings.TrimSpace(desc + " (required)")
 		}
-		cmd.Flags().String(qf.Name, "", desc)
+		cmd.Flags().String(qf.Name, "", flagUsage(desc))
 		if qf.Param.Required {
 			cmd.MarkFlagRequired(qf.Name)
 			hasRequiredQuery = true
@@ -611,6 +611,13 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// flagUsage quotes a description's `code` spans with ' instead: pflag reads the
+// first backquoted word in a flag's usage as its value placeholder, so a spec
+// description mentioning `job_ids` would print as --job-ids job_ids.
+func flagUsage(desc string) string {
+	return strings.ReplaceAll(desc, "`", "'")
 }
 
 // queryFlagName is the generic escape hatch flag for query params the spec

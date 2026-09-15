@@ -2197,3 +2197,130 @@ func TestBodyDeclares(t *testing.T) {
 		t.Error("models list does not return a stream")
 	}
 }
+
+// pflag takes the first backquoted word in a flag's usage as its value
+// placeholder, so a spec description mentioning `job_ids` must not print as
+// --job-ids job_ids.
+func TestBuildCommand_BackticksInDescriptionKeepTypePlaceholder(t *testing.T) {
+	op := &operationInfo{
+		Tag:         "test",
+		OperationID: "testWait",
+		Method:      "GET",
+		Path:        "/api/v1/wait",
+		QueryParams: []paramInfo{
+			{Name: "jobIds", In: "query", Description: "Job IDs. Required unless the deprecated `job_ids` is sent."},
+			{Name: "mode", In: "query", Description: "Use `fast` or `slow`.", Enum: []string{"fast", "slow"}, Required: true},
+		},
+	}
+	cmd := buildCommand(op, func(APIRequest) error { return nil })
+
+	for flag, want := range map[string]string{
+		"job-ids": "Job IDs. Required unless the deprecated 'job_ids' is sent.",
+		"mode":    "Use 'fast' or 'slow'. [fast, slow] (required)",
+	} {
+		f := cmd.Flags().Lookup(flag)
+		if f == nil {
+			t.Fatalf("missing --%s", flag)
+		}
+		name, usage := pflag.UnquoteUsage(f)
+		if name != "string" {
+			t.Errorf("--%s placeholder = %q, want \"string\"", flag, name)
+		}
+		if usage != want {
+			t.Errorf("--%s usage = %q, want %q", flag, usage, want)
+		}
+	}
+
+	var help bytes.Buffer
+	cmd.SetOut(&help)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--help: %v", err)
+	}
+	if !regexp.MustCompile(`--job-ids string\s+Job IDs`).MatchString(help.String()) {
+		t.Errorf("help should show --job-ids string:\n%s", help.String())
+	}
+}
+
+// Every flag generated from the real spec shows its type as the placeholder,
+// never a word lifted from its description.
+func TestGenerateCommands_NoFlagPlaceholderFromDescription(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	checked, quoted := 0, 0
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		c.Flags().VisitAll(func(f *pflag.Flag) {
+			checked++
+			if strings.Contains(f.Usage, "`") {
+				t.Errorf("%s --%s usage still has a backtick: %q", c.CommandPath(), f.Name, f.Usage)
+			}
+			if strings.Contains(f.Usage, "'") {
+				quoted++
+			}
+			name, _ := pflag.UnquoteUsage(f)
+			typeName, _ := pflag.UnquoteUsage(&pflag.Flag{Value: f.Value})
+			if name != typeName {
+				t.Errorf("%s --%s placeholder = %q, want its type %q", c.CommandPath(), f.Name, name, typeName)
+			}
+		})
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	for _, c := range cmds {
+		walk(c)
+	}
+	if checked == 0 {
+		t.Fatal("no flags checked")
+	}
+	// The spec does use backticks in param descriptions; if none survive as
+	// quotes, the check above proved nothing.
+	if quoted == 0 {
+		t.Error("expected some flag descriptions with quoted code spans")
+	}
+}
+
+// The commands that showed a description word as their placeholder.
+func TestGenerateCommands_KnownBacktickFlags(t *testing.T) {
+	specData := loadSpec(t)
+	cmds, err := GenerateCommands(specData, func(APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	find := func(path ...string) *cobra.Command {
+		for _, c := range cmds {
+			if c.Name() != path[0] {
+				continue
+			}
+			sub, _, err := c.Find(path[1:])
+			if err == nil && sub != c {
+				return sub
+			}
+		}
+		t.Fatalf("command %v not found", path)
+		return nil
+	}
+	for _, tc := range []struct {
+		path []string
+		flag string
+		want string
+	}{
+		{[]string{"query", "wait"}, "job-ids", "deprecated 'job_ids' is sent"},
+		{[]string{"skills", "list"}, "creator-id", "'creator.id' from a listed skill"},
+		{[]string{"models", "refresh"}, "hard-refresh", "'tables' filters"},
+		{[]string{"whoami", "whoami"}, "model-id", "'rolesByModelTruncated'"},
+	} {
+		f := find(tc.path...).Flags().Lookup(tc.flag)
+		if f == nil {
+			t.Errorf("%v: missing --%s", tc.path, tc.flag)
+			continue
+		}
+		if name, usage := pflag.UnquoteUsage(f); name != "string" || !strings.Contains(usage, tc.want) {
+			t.Errorf("%v --%s: placeholder %q, usage %q", tc.path, tc.flag, name, usage)
+		}
+	}
+}
