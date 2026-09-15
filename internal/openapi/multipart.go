@@ -133,7 +133,7 @@ func registerMultipartFlags(cmd *cobra.Command, fields []multipartFieldInfo) {
 		if field.Required {
 			description += " [required unless supplied via --body]"
 		}
-		cmd.Flags().String(flagName, "", description)
+		cmd.Flags().String(flagName, "", flagUsage(description))
 	}
 }
 
