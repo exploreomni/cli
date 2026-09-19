@@ -34,7 +34,7 @@ jobs:
         with:
           repository: exploreomni/homebrew-tap
           ref: main
-          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: homebrew-tap
 
       - name: Render Homebrew formula from release artifacts
