@@ -2,26 +2,19 @@ name: Notify Docs on Changes
 
 on:
   # Release-only: the receiver diffs previous tag..this tag, so one dispatch per
-  # release carries every change since the last one. Pushes to main are
-  # deliberately not a trigger — they produced a docs PR per merge.
+  # release carries every change since the last one.
   release:
     types: [published]
 
 jobs:
   notify:
+    if: '!github.event.release.prerelease'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger mintlify-omni docs sync
+      - name: Trigger mintlify-omni docs generation
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DOCS_REPO_TOKEN }}
           repository: exploreomni/mintlify-omni
-          event-type: cli-docs-update
-          client-payload: >-
-            {
-              "source": "cli",
-              "trigger": "${{ github.event_name == 'release' && 'release' || 'push' }}",
-              "release_tag": "${{ github.event.release.tag_name || '' }}",
-              "commit_sha": "${{ github.sha }}",
-              "before_sha": "${{ github.event.before || '' }}"
-            }
+          event-type: generate-docs
+          client-payload: '{"source": "cli", "release_tag": ${{ toJSON(github.event.release.tag_name) }}}'
