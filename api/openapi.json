@@ -894,8 +894,15 @@
         "properties": {
           "answer": {
             "type": "string",
-            "description": "A synthesized answer to the question, based on the Omni documentation.",
+            "description": "An answer based on the available documentation, or an explanation when the search was skipped or failed.",
             "example": "To create a dashboard filter, navigate to your dashboard and click the \"Add Filter\" button..."
+          },
+          "fulfillmentNotes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Selected pages that could not be fetched, with each page URL and its HTTP status or transport error code."
           },
           "sources": {
             "type": "array",
@@ -920,11 +927,23 @@
               ]
             },
             "description": "List of documentation pages that were used to synthesize the answer."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "skipped",
+              "failed"
+            ],
+            "description": "Search outcome: complete when all selected pages were fetched and an answer was synthesized; partial when some fetches failed but an answer was synthesized; skipped when no usable relevant pages were selected; failed when the index or all selected pages could not be fetched, or the synthesis response could not be parsed.",
+            "example": "complete"
           }
         },
         "required": [
           "answer",
-          "sources"
+          "sources",
+          "status"
         ]
       },
       "AiSearchOmniDocsBody": {
@@ -1735,7 +1754,7 @@
           },
           "text": {
             "type": "string",
-            "description": "Markdown content of the message. For assistant turns this is the same string returned by /api/v1/ai/jobs/{jobId}/result#message.",
+            "description": "Markdown content of the message. For assistant turns this is the turn's answer: the text of its final summary, or of the validation that closed a turn the AI ended in plain text. Present for web-UI turns that have no job, and not guaranteed to match the job result message byte for byte.",
             "example": "What were our top products last week?"
           }
         },
@@ -3788,6 +3807,14 @@
             "description": "Path to dbt project root",
             "example": "dbt_project"
           },
+          "publicKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SSH public key to register as a deploy key on the git repository. Reflects the new key after a PUT with rotateKeys: true. Null for non-ssh auth.",
+            "example": "ssh-rsa AAAA..."
+          },
           "sshUrl": {
             "type": "string",
             "description": "Clone URL for the git repository — SSH (git@...) for ssh auth, https:// for https_token or github_app auth",
@@ -3814,6 +3841,7 @@
           "enableVirtualSchemas",
           "githubAppInstallationId",
           "projectRootPath",
+          "publicKey",
           "sshUrl",
           "supportsDbt"
         ],
@@ -4568,6 +4596,18 @@
       "DashboardsDownloadBody": {
         "type": "object",
         "properties": {
+          "containerPages": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+            "example": [
+              "page_abc123"
+            ]
+          },
           "enableConditionalFormatting": {
             "type": "boolean",
             "default": true,
@@ -9589,6 +9629,10 @@
             "default": false
           },
           "allowInternalNavigation": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowModals": {
             "type": "boolean",
             "default": false
           },
@@ -17276,7 +17320,7 @@
             "properties": {
               "attachedQueryKey": {
                 "type": "string",
-                "description": "Set by the auto-add-tile flow when this container was generated for a specific workbook tab. The server removes containers with a matching `attachedQueryKey` when that tab is deleted. The reducer clears this when the user adds unrelated content (a different query, filter, text tile, page switcher, or sub-container)."
+                "description": "The workbook tab this tile container belongs to. By default this is the `id` of the query content item the container renders. Both use the same numbering as the keys under `queryPresentations`, so a copy that renumbers chart ids must renumber this too; a value naming a different tab makes Explore and Edit in workbook open that other tab. The server removes containers with a matching `attachedQueryKey` when that tab is deleted."
               },
               "generatedHeading": {
                 "type": "boolean",
@@ -25625,7 +25669,7 @@
             "properties": {
               "attachedQueryKey": {
                 "type": "string",
-                "description": "Set by the auto-add-tile flow when this container was generated for a specific workbook tab. The server removes containers with a matching `attachedQueryKey` when that tab is deleted. The reducer clears this when the user adds unrelated content (a different query, filter, text tile, page switcher, or sub-container)."
+                "description": "The workbook tab this tile container belongs to. By default this is the `id` of the query content item the container renders. Both use the same numbering as the keys under `queryPresentations`, so a copy that renumbers chart ids must renumber this too; a value naming a different tab makes Explore and Edit in workbook open that other tab. The server removes containers with a matching `attachedQueryKey` when that tab is deleted."
               },
               "generatedHeading": {
                 "type": "boolean",
@@ -30734,6 +30778,9 @@
             ],
             "description": "Document description."
           },
+          "draftOf": {
+            "$ref": "#/components/schemas/DocumentsV2DraftOf"
+          },
           "modelId": {
             "type": "string",
             "format": "uuid",
@@ -32128,6 +32175,20 @@
         "required": [
           "config"
         ]
+      },
+      "DocumentsV2DraftOf": {
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "description": "Identifier of the published document."
+          }
+        },
+        "required": [
+          "identifier"
+        ],
+        "additionalProperties": false,
+        "description": "Present only when `{identifier}` names a draft: the published document the draft belongs to, which the draft routes (`…/documents/{identifier}/draft/{draftIdentifier}`) address it under."
       },
       "QueryPresentationsReadExternal": {
         "type": "object",
@@ -35158,6 +35219,16 @@
           "app": {
             "$ref": "#/components/schemas/DocumentsV2AppEcho"
           },
+          "draftOf": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DocumentsV2DraftOf"
+              },
+              {
+                "description": "Read-only and accepted only so a GET of a draft round-trips through PATCH; nothing in it is written. An `identifier` other than the document this route addresses is rejected with 409."
+              }
+            ]
+          },
           "modelId": {
             "type": "string",
             "format": "uuid",
@@ -35203,7 +35274,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them, and a map-provider setting the organization's app policy turns off for every app. The write itself succeeded. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
+                "description": "Non-blocking warnings — present only when there are any. Currently: external resource hosts the app's iframe CSP will block until an org admin allows them, and a map-provider or print-and-dialogs setting the organization's app policy turns off for every app. The write itself succeeded. Advisory prose, not a contract: the wording is deliberately volatile, there are no per-warning codes, and consumers must not branch on the content. The render-time CSP is the enforcement."
               }
             },
             "required": [
@@ -36285,7 +36356,7 @@
               "string",
               "null"
             ],
-            "description": "Failure reason string for prompts whose underlying job failed.",
+            "description": "Why the underlying job did not deliver an answer: it failed, its result could not be read, or it completed without producing a response.",
             "example": null
           },
           "eval_prompt_id": {
@@ -36345,7 +36416,7 @@
               "number",
               "null"
             ],
-            "description": "Numeric judge score for this prompt result, if scoring ran.",
+            "description": "Numeric score for this prompt result. The judge aggregate when scoring ran; 0 with a null scoring_cost when the job completed without producing a response, which is scored without a judge.",
             "example": 0.9
           },
           "scoring_cost": {
@@ -36400,7 +36471,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Conversation the agentic job belongs to.",
+            "description": "Conversation the agentic job belongs to. Pass it to GET /api/v1/ai/conversations/{conversationId} to read the full transcript of this eval result. A user-scoped token can read it only if it created the run; use an organization API key for other users' runs.",
             "example": "770e8400-e29b-41d4-a716-446655440002"
           },
           "id": {
@@ -39314,7 +39385,7 @@
         "properties": {
           "dashboard_identifier": {
             "type": "string",
-            "description": "Identifier of the dashboard that generated this exposure"
+            "description": "Identifier of the dashboard or app that generated this exposure"
           },
           "deduplication_name": {
             "type": "string",
@@ -39346,7 +39417,7 @@
           },
           "label": {
             "type": "string",
-            "description": "Original dashboard name"
+            "description": "Original document name"
           },
           "name": {
             "type": "string",
@@ -39365,12 +39436,12 @@
               "ml",
               "application"
             ],
-            "description": "Type of the exposure",
+            "description": "Type of the exposure: \"dashboard\" for a dashboard, \"application\" for an app",
             "example": "dashboard"
           },
           "url": {
             "type": "string",
-            "description": "URL of the dashboard"
+            "description": "URL of the dashboard or app"
           }
         },
         "required": [
@@ -39379,18 +39450,18 @@
           "owner",
           "type"
         ],
-        "description": "The dbt exposure for this dashboard."
+        "description": "The dbt exposure for this document."
       },
       "DbtExposureOwner": {
         "type": "object",
         "properties": {
           "email": {
             "type": "string",
-            "description": "Email of the dashboard owner"
+            "description": "Email of the document owner"
           },
           "name": {
             "type": "string",
-            "description": "Name of the dashboard owner"
+            "description": "Name of the document owner"
           }
         },
         "required": [
@@ -41291,7 +41362,7 @@
               "string",
               "null"
             ],
-            "description": "Reason for system disabling: missingQuery, noAccess, orphanedFilterConfigKeys"
+            "description": "Reason for system disabling: contentRemoved, credentialMissing, destinationDisabled, missingQuery, noAccess, orphanedFilterConfigKeys, ownerRevoked"
           },
           "timezone": {
             "type": "string",
@@ -41381,7 +41452,7 @@
             "example": false
           },
           "metadata": {
-            "description": "Schedule metadata including format options and delivery settings. Includes `timezoneOverride` (IANA timezone applied to query execution at render time, or null when no override is set)."
+            "description": "Schedule metadata including format options and delivery settings. Includes `timezoneOverride` (IANA timezone applied to query execution at render time, or null when no override is set) and `containerPages` (the instanceKeys of the advanced-layout pages the delivery renders, absent when no pages were selected)."
           },
           "name": {
             "type": "string",
@@ -41428,7 +41499,7 @@
               "string",
               "null"
             ],
-            "description": "Reason for system disabling: missingQuery, noAccess, orphanedFilterConfigKeys"
+            "description": "Reason for system disabling: contentRemoved, credentialMissing, destinationDisabled, missingQuery, noAccess, orphanedFilterConfigKeys, ownerRevoked"
           },
           "timezone": {
             "type": "string",
@@ -41775,7 +41846,7 @@
               "format": "uuid"
             },
             "default": [],
-            "description": "At least one email, userId, or userGroupId must be provided. Array of recipient user UUIDs to remove from the scheduled task. Use the List users and List embed users endpoints to retrieve user IDs.",
+            "description": "At least one email, userId, or userGroupId must be provided. Array of recipient user UUIDs to remove from the scheduled task. Use the List users and List embed users endpoints to retrieve user IDs. Each ID removes only that user, whereas an entry in emails removes every recipient delivered to that address.",
             "example": [
               "987fcdeb-51a2-43d7-9b56-254415f67890"
             ]
@@ -42775,6 +42846,13 @@
       "DocumentExportResponse": {
         "type": "object",
         "properties": {
+          "colorPalettes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ColorPaletteExport"
+            },
+            "description": "Custom color palettes referenced by vis configs, keyed by export-local key"
+          },
           "dashboard": {
             "description": "Dashboard configuration and layout"
           },
@@ -42806,14 +42884,67 @@
           "workbookModel": {}
         },
         "required": [
+          "colorPalettes",
           "document",
           "exportVersion",
           "queryModels"
         ]
       },
+      "ColorPaletteExport": {
+        "type": "object",
+        "properties": {
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered colors as stored, usually hex"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Palette name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "description": "'discrete' or 'continuous'"
+          }
+        },
+        "required": [
+          "colors",
+          "name",
+          "type"
+        ]
+      },
       "DocumentImportResponse": {
         "type": "object",
         "properties": {
+          "colorPalettes": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ImportedColorPalette"
+                }
+              },
+              "reused": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ImportedColorPalette"
+                }
+              }
+            },
+            "required": [
+              "created",
+              "reused"
+            ],
+            "description": "Custom palettes the import created in this org or matched by name and type"
+          },
           "documentId": {
             "type": "string",
             "format": "uuid",
@@ -42829,6 +42960,36 @@
           "identifier"
         ]
       },
+      "ImportedColorPalette": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Palette ID in this org"
+          },
+          "key": {
+            "type": "string",
+            "description": "Export-local key, e.g. export-palette-1"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "discrete",
+              "continuous"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "type"
+        ]
+      },
       "DocumentImportBody": {
         "type": "object",
         "properties": {
@@ -42836,6 +42997,13 @@
             "type": "string",
             "format": "uuid",
             "description": "Base model ID for the imported document"
+          },
+          "colorPalettes": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ColorPaletteExport"
+            },
+            "description": "Custom color palettes referenced by vis configs, keyed by export-local key"
           },
           "dashboard": {
             "description": "Dashboard export data"
@@ -42979,6 +43147,317 @@
         "required": [
           "records"
         ]
+      },
+      "UserAttributesCreateResponse": {
+        "type": "object",
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default value applied when no user-specific value is set. When multiple_values is true, this is an array. Null if no default is configured.",
+            "example": "us-east"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable description of the attribute and its purpose",
+            "example": "User region for row-level security filtering"
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for custom attributes. Empty string for system-defined attributes.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "label": {
+            "type": "string",
+            "description": "Display name shown in the Omni UI",
+            "example": "Region"
+          },
+          "multiple_values": {
+            "type": "boolean",
+            "description": "Whether the attribute accepts an array of values. When true, default_value and user-specific values are arrays.",
+            "example": false
+          },
+          "name": {
+            "type": "string",
+            "description": "Reference name used in model SQL and in embed SSO URL parameters",
+            "example": "region"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "System-defined attributes (e.g. omni_user_id, omni_user_email) are built-in and read-only. Custom attributes have system=false.",
+            "example": false
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "String",
+              "Number"
+            ],
+            "description": "Data type that determines valid values. String attributes accept text, Number attributes accept numeric values stored as strings for precision.",
+            "example": "String"
+          }
+        },
+        "required": [
+          "default_value",
+          "description",
+          "id",
+          "label",
+          "multiple_values",
+          "name",
+          "system",
+          "type"
+        ]
+      },
+      "UserAttributesCreateBody": {
+        "type": "object",
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number",
+                "minimum": -1.7976931348623157e+308,
+                "maximum": 1.7976931348623157e+308
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number",
+                      "minimum": -1.7976931348623157e+308,
+                      "maximum": 1.7976931348623157e+308
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default value applied when no user-specific value is set. A single value when multiple_values is false, an array when it is true. Strings are trimmed. Number attributes accept numbers or numeric strings and store them as strings. Numbers are converted to strings on receipt, so send anything beyond the JSON safe integer range (2^53 - 1) as a string or it loses precision before Omni sees it. Null or a string that trims to empty means no default. An empty array clears the default of a multi-valued attribute and is rejected for a single-valued one, and a list member that trims to empty is rejected.",
+            "example": "us-east"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable description of the attribute and its purpose. An empty string is stored as null.",
+            "example": "User region for row-level security filtering"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name shown in the Omni UI. Unique among the custom attributes in the organization, and may match the label of a system attribute. Must not start with \"Omni\" and must not be one of the reserved connection labels (Host, Password, Database, Port, Schema, Connection Name).",
+            "example": "Region"
+          },
+          "multiple_values": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the attribute accepts an array of values. Defaults to false.",
+            "example": false
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reference name used in model SQL and in embed SSO URL parameters. Unique within the organization. Must start with a letter, contain only letters, numbers and underscores, and must not start with \"omni_\".",
+            "example": "region"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "String",
+              "Number"
+            ],
+            "description": "Data type that determines valid values. String attributes accept text, Number attributes accept numeric values stored as strings for precision.",
+            "example": "String"
+          }
+        },
+        "required": [
+          "label",
+          "name",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "UserAttributesUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default value applied when no user-specific value is set. When multiple_values is true, this is an array. Null if no default is configured.",
+            "example": "us-east"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable description of the attribute and its purpose",
+            "example": "User region for row-level security filtering"
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for custom attributes. Empty string for system-defined attributes.",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "label": {
+            "type": "string",
+            "description": "Display name shown in the Omni UI",
+            "example": "Region"
+          },
+          "multiple_values": {
+            "type": "boolean",
+            "description": "Whether the attribute accepts an array of values. When true, default_value and user-specific values are arrays.",
+            "example": false
+          },
+          "name": {
+            "type": "string",
+            "description": "Reference name used in model SQL and in embed SSO URL parameters",
+            "example": "region"
+          },
+          "system": {
+            "type": "boolean",
+            "description": "System-defined attributes (e.g. omni_user_id, omni_user_email) are built-in and read-only. Custom attributes have system=false.",
+            "example": false
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "String",
+              "Number"
+            ],
+            "description": "Data type that determines valid values. String attributes accept text, Number attributes accept numeric values stored as strings for precision.",
+            "example": "String"
+          }
+        },
+        "required": [
+          "default_value",
+          "description",
+          "id",
+          "label",
+          "multiple_values",
+          "name",
+          "system",
+          "type"
+        ]
+      },
+      "UserAttributesUpdateBody": {
+        "type": "object",
+        "properties": {
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number",
+                "minimum": -1.7976931348623157e+308,
+                "maximum": 1.7976931348623157e+308
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number",
+                      "minimum": -1.7976931348623157e+308,
+                      "maximum": 1.7976931348623157e+308
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default value applied when no user-specific value is set. A single value when multiple_values is false, an array when it is true. Strings are trimmed. Number attributes accept numbers or numeric strings and store them as strings. Numbers are converted to strings on receipt, so send anything beyond the JSON safe integer range (2^53 - 1) as a string or it loses precision before Omni sees it. Null or a string that trims to empty means no default. An empty array clears the default of a multi-valued attribute and is rejected for a single-valued one, and a list member that trims to empty is rejected.",
+            "example": "us-east"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable description of the attribute and its purpose. An empty string is stored as null.",
+            "example": "User region for row-level security filtering"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name shown in the Omni UI. Unique among the custom attributes in the organization, and may match the label of a system attribute. Must not start with \"Omni\" and must not be one of the reserved connection labels (Host, Password, Database, Port, Schema, Connection Name).",
+            "example": "Region"
+          },
+          "multiple_values": {
+            "type": "boolean",
+            "description": "Whether the attribute accepts an array of values.",
+            "example": false
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reference name used in model SQL and in embed SSO URL parameters. Unique within the organization. Must start with a letter, contain only letters, numbers and underscores, and must not start with \"omni_\".",
+            "example": "region"
+          }
+        },
+        "additionalProperties": false
       },
       "UploadsListResponse": {
         "type": "object",
@@ -43623,6 +44102,115 @@
           "users"
         ]
       },
+      "ApiUsersEmailOnlyUsersBulkDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiEmailOnlyUserResponse"
+            },
+            "description": "The email-only users that were deleted"
+          },
+          "notFound": {
+            "type": "object",
+            "properties": {
+              "emails": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Requested emails that do not belong to an email-only user"
+              },
+              "userIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Requested IDs that do not belong to an email-only user"
+              }
+            },
+            "required": [
+              "emails",
+              "userIds"
+            ],
+            "description": "Requested identifiers that matched no email-only user in the organization"
+          }
+        },
+        "required": [
+          "deleted",
+          "notFound"
+        ]
+      },
+      "ApiEmailOnlyUserResponse": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email address of the user",
+            "example": "user@example.com"
+          },
+          "userId": {
+            "type": "string",
+            "description": "ID of the user"
+          }
+        },
+        "required": [
+          "email",
+          "userId"
+        ]
+      },
+      "ApiUsersEmailOnlyUsersBulkDeleteRequest": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            },
+            "description": "Email addresses of the email-only users to delete",
+            "example": [
+              "user@example.com"
+            ]
+          },
+          "userIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "IDs of the email-only users to delete, as returned by the list and create endpoints",
+            "example": [
+              "9e8719d9-276a-4964-9395-a493e1ba5f64"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "emails": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "emails"
+            ]
+          },
+          {
+            "properties": {
+              "userIds": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "userIds"
+            ]
+          }
+        ]
+      },
       "UserGroupsGetModelRolesResponse": {
         "type": "object",
         "properties": {
@@ -44072,7 +44660,7 @@
         },
         "responses": {
           "200": {
-            "description": "Documentation search completed successfully. Returns a synthesized answer with source links.",
+            "description": "Documentation search result. Check the status field for complete, partial, skipped, or failed outcomes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44768,7 +45356,7 @@
     },
     "/api/v1/ai/conversations/{conversationId}": {
       "get": {
-        "description": "Return a conversation with its full message history (alternating user / assistant turns). Used by clients (iOS app, embed widgets) to restore a prior conversation in their UI.",
+        "description": "Return a conversation with its full message history (alternating user / assistant turns). Used by clients (iOS app, embed widgets) to restore a prior conversation in their UI. Also serves the conversation behind an AI eval run result: pass `results[].agentic_job.conversation_id` from GET /api/v1/ai/eval/runs/{runId}. Eval conversations do not appear in GET /api/v1/ai/conversations; this endpoint is the only way to read one. For a user-scoped token the conversation must belong to the caller; for an eval run that is the user who created the run. Use an organization API key to read another user's eval transcripts. Eval conversations also require at least QUERIER on the run's model, the same gate as the eval API. Assistant text is retained for 30 days; older conversations return only their user turns.",
         "operationId": "aiConversationDetail",
         "summary": "Get AI conversation with messages",
         "tags": [
@@ -44807,7 +45395,7 @@
             }
           },
           "403": {
-            "description": "AI access is required to view chat conversations (no model in the org grants USE_AI to the caller).",
+            "description": "AI access is required to view chat conversations (no model in the org grants USE_AI to the caller), or the conversation belongs to an eval run whose model the caller lacks QUERIER on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45570,7 +46158,7 @@
             }
           },
           "403": {
-            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, the acting user lacks routines access (the Use routines role permission) on the routine model, the request supplied a `condition` but conditional routines are not enabled for the organization, or the target user is an embed user in an organization that has not enabled routines for embed users.",
+            "description": "AI routines or AI query generation are not enabled for the organization, the API key cannot act on behalf of the requested user, or the acting user lacks routines access (the Use routines role permission) on the routine model.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45600,7 +46188,7 @@
             }
           },
           "503": {
-            "description": "An AI or query service was temporarily unavailable while composing or verifying the delivery condition. Retryable.",
+            "description": "Omni was temporarily unable to compose or verify the delivery condition. Retryable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45780,7 +46368,7 @@
             }
           },
           "403": {
-            "description": "AI routines, AI query generation, or conditional routines are not enabled for the organization, the routine owner lacks routines access (the Use routines role permission) on the routine model, or a user-scoped API key tried to update another user's routine.",
+            "description": "AI routines or AI query generation are not enabled for the organization, the routine owner lacks routines access (the Use routines role permission) on the routine model, or a user-scoped API key tried to update another user's routine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45800,7 +46388,7 @@
             }
           },
           "503": {
-            "description": "An AI or query service was temporarily unavailable while composing or verifying the replacement condition. Retryable.",
+            "description": "Omni was temporarily unable to compose or verify the replacement condition. Retryable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -46660,6 +47248,7 @@
                               "snowflake",
                               "motherduck",
                               "mssql",
+                              "fabric",
                               "databricks",
                               "databricks_lakebase",
                               "clickhouse",
@@ -46734,7 +47323,7 @@
                               "string",
                               "null"
                             ],
-                            "description": "Custom Snowflake host, overriding the account identifier",
+                            "description": "Network hostname used to connect to Snowflake. When using a proxy, set `host` to the Snowflake account identifier.",
                             "example": null
                           },
                           "id": {
@@ -47080,6 +47669,7 @@
                       "snowflake",
                       "motherduck",
                       "mssql",
+                      "fabric",
                       "databricks",
                       "databricks_lakebase",
                       "clickhouse",
@@ -47128,7 +47718,7 @@
                   },
                   "hostOverride": {
                     "type": "string",
-                    "description": "Custom Snowflake host (when not using the account identifier). Mutually exclusive with `host`.",
+                    "description": "Network hostname used to connect to Snowflake. When using a proxy, set `host` to the Snowflake account identifier.",
                     "example": "myaccount.snowflakecomputing.com"
                   },
                   "includeOtherCatalogs": {
@@ -47450,6 +48040,7 @@
                             "snowflake",
                             "motherduck",
                             "mssql",
+                            "fabric",
                             "databricks",
                             "databricks_lakebase",
                             "clickhouse",
@@ -47524,7 +48115,7 @@
                             "string",
                             "null"
                           ],
-                          "description": "Custom Snowflake host, overriding the account identifier",
+                          "description": "Network hostname used to connect to Snowflake. When using a proxy, set `host` to the Snowflake account identifier.",
                           "example": null
                         },
                         "id": {
@@ -47931,7 +48522,7 @@
                   },
                   "hostOverride": {
                     "type": "string",
-                    "description": "Custom Snowflake host, overriding the account identifier",
+                    "description": "Network hostname used to connect to Snowflake. When using a proxy, set `host` to the Snowflake account identifier.",
                     "example": "myaccount.snowflakecomputing.com"
                   },
                   "includeOtherCatalogs": {
@@ -48296,6 +48887,14 @@
                           "description": "Path to dbt project root",
                           "example": "dbt_project"
                         },
+                        "publicKey": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "SSH public key to register as a deploy key on the git repository. Reflects the new key after a PUT with rotateKeys: true. Null for non-ssh auth.",
+                          "example": "ssh-rsa AAAA..."
+                        },
                         "sshUrl": {
                           "type": "string",
                           "description": "Clone URL for the git repository — SSH (git@...) for ssh auth, https:// for https_token or github_app auth",
@@ -48322,6 +48921,7 @@
                         "enableVirtualSchemas",
                         "githubAppInstallationId",
                         "projectRootPath",
+                        "publicKey",
                         "sshUrl",
                         "supportsDbt"
                       ],
@@ -48433,8 +49033,8 @@
                       "string",
                       "null"
                     ],
-                    "description": "dbt version to use. Supported: Auto, 1.11, 1.12",
-                    "example": "1.11"
+                    "description": "dbt version to use. Supported: Auto, 1.11, 1.12, 2.0",
+                    "example": "1.12"
                   },
                   "enableSemanticLayer": {
                     "type": "boolean",
@@ -48595,6 +49195,14 @@
                       "description": "Path to dbt project root",
                       "example": "dbt_project"
                     },
+                    "publicKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "SSH public key to register as a deploy key on the git repository. Reflects the new key after a PUT with rotateKeys: true. Null for non-ssh auth.",
+                      "example": "ssh-rsa AAAA..."
+                    },
                     "sshUrl": {
                       "type": "string",
                       "description": "Clone URL for the git repository — SSH (git@...) for ssh auth, https:// for https_token or github_app auth",
@@ -48621,6 +49229,7 @@
                     "enableVirtualSchemas",
                     "githubAppInstallationId",
                     "projectRootPath",
+                    "publicKey",
                     "sshUrl",
                     "supportsDbt"
                   ],
@@ -48711,6 +49320,14 @@
                       "description": "Path to dbt project root",
                       "example": "dbt_project"
                     },
+                    "publicKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "SSH public key to register as a deploy key on the git repository. Reflects the new key after a PUT with rotateKeys: true. Null for non-ssh auth.",
+                      "example": "ssh-rsa AAAA..."
+                    },
                     "sshUrl": {
                       "type": "string",
                       "description": "Clone URL for the git repository — SSH (git@...) for ssh auth, https:// for https_token or github_app auth",
@@ -48737,6 +49354,7 @@
                     "enableVirtualSchemas",
                     "githubAppInstallationId",
                     "projectRootPath",
+                    "publicKey",
                     "sshUrl",
                     "supportsDbt"
                   ],
@@ -50453,6 +51071,8 @@
     },
     "/api/v1/dashboards/{identifier}/filters": {
       "get": {
+        "deprecated": true,
+        "description": "Deprecated. Read a dashboard's filters and controls from `controls` on `GET /api/v2/documents/{identifier}`, or on `GET /api/v2/documents/{identifier}/draft/{draftIdentifier}` for a draft.",
         "operationId": "dashboardsGetFilters",
         "summary": "Get dashboard filters",
         "tags": [
@@ -50505,6 +51125,8 @@
         }
       },
       "patch": {
+        "deprecated": true,
+        "description": "Deprecated. Update filters and controls with a `controls` patch on `PATCH /api/v2/documents/{identifier}/draft`, then publish with `POST /api/v2/documents/{identifier}/draft/publish`. A `config` in `controls.data` replaces that filter or control's stored config whole.",
         "operationId": "dashboardsUpdateFilters",
         "summary": "Update dashboard filters",
         "tags": [
@@ -52080,7 +52702,7 @@
     },
     "/api/v2/documents/{identifier}": {
       "get": {
-        "description": "Read the document's published state — draft edits are never surfaced here. When a draft exists, read it via `GET /api/v2/documents/{identifier}/draft/{draftIdentifier}` before round-tripping the response into a draft PATCH, so you patch the draft's own content rather than published content over it. Returns the full `DocumentsV2ReadResponse` shape.\n\nThe response is structured so a caller can take it verbatim and submit it as the body of the draft PATCH routes. Tiles in `queryPresentations.data` are keyed by a stable record key (e.g. `\"1\"`, `\"2\"`) — the server uses that key to identify existing tiles for updates, so callers do not need to track or send any other identifier. Control IDs and container `instanceKey` / `referenceKey` values also round-trip unchanged.",
+        "description": "For a published identifier, read the document's published state — draft edits are never surfaced under it. When a draft exists, read it via `GET /api/v2/documents/{identifier}/draft/{draftIdentifier}` before round-tripping the response into a draft PATCH, so you patch the draft's own content rather than published content over it. Returns the full `DocumentsV2ReadResponse` shape.\n\nA draft's own identifier reads that draft's state instead. The response then carries `draftOf`, naming the published document the draft belongs to — use it to build the `…/documents/{identifier}/draft/{draftIdentifier}` routes when only the draft identifier is known.\n\nThe response is structured so a caller can take it verbatim and submit it as the body of the draft PATCH routes. Tiles in `queryPresentations.data` are keyed by a stable record key (e.g. `\"1\"`, `\"2\"`) — the server uses that key to identify existing tiles for updates, so callers do not need to track or send any other identifier. Control IDs and container `instanceKey` / `referenceKey` values also round-trip unchanged.",
         "operationId": "documentsV2Get",
         "summary": "Read document state",
         "tags": [
@@ -52198,7 +52820,7 @@
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is not a published document (drafts only attach to published documents), a concurrent request just created the layout for this document (retry), or a supplied `app` does not round-trip: its `url` does not address this document’s app, or the document has no app (`app` is read-only — omit it, or send it as a GET returned it)."
+            "description": "A concurrent request just created the layout for this document (retry), or a supplied `app` does not round-trip: its `url` does not address this document’s app, or the document has no app (`app` is read-only — omit it, or send it as a GET returned it)."
           },
           "422": {
             "description": "The document cannot satisfy the patch: a classic-layout dashboard (upgrade to the advanced layout first), a workbook-only document patched with dashboard-scoped fields but no `containers` payload (or an empty one), or an app document patched with dashboard-scoped fields (a document carries at most one of a dashboard or an app — never both)."
@@ -52346,7 +52968,7 @@
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is not a published document (drafts only attach to published documents), a concurrent request just created the layout for this document (retry), or a supplied `app` does not round-trip: its `url` does not address this document’s app, or the document has no app (`app` is read-only — omit it, or send it as a GET returned it)."
+            "description": "A concurrent request just created the layout for this document (retry), or a supplied `app` does not round-trip: its `url` does not address this document’s app, or the document has no app (`app` is read-only — omit it, or send it as a GET returned it)."
           },
           "422": {
             "description": "The draft cannot satisfy the patch: a classic-layout dashboard (upgrade to the advanced layout first), a workbook-only draft patched with dashboard-scoped fields but no `containers` payload (or an empty one), or an app draft patched with dashboard-scoped fields (a document carries at most one of a dashboard or an app — never both)."
@@ -52409,9 +53031,6 @@
           "405": {
             "description": "Method not allowed."
           },
-          "409": {
-            "description": "The target is not a published document."
-          },
           "422": {
             "description": "The document is an app, not a dashboard."
           }
@@ -52421,7 +53040,7 @@
     "/api/v2/documents/{identifier}/app": {
       "get": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nRead the published app content: the full HTML plus `settings`. This is the only endpoint that returns the HTML body; the document GET carries only the `app` slice. Writes cap the HTML at 2 MiB — apps saved before the cap may read back larger. This reads the published app; an existing draft may have diverged, so read the draft state before building a draft write from this response.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2GetApp",
+        "operationId": "documentsGetApp",
         "summary": "Read app content",
         "tags": [
           "Documents"
@@ -52485,7 +53104,7 @@
     "/api/v2/documents/{identifier}/draft/{draftIdentifier}/app": {
       "get": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nRead the app content on a named draft — the draft-side counterpart of `GET …/app`, and the read half of the draft write loop: app writes are last-write-wins whole-document replaces, so fetch the draft’s latest HTML here before building the next `PUT …/draft/{draftIdentifier}/app` body. Same response shape as the published read. Writes cap the HTML at 2 MiB — apps saved before the cap may read back larger, and a body over the cap is rejected on the way back in. The published document’s content is unaffected by draft edits — read it via `GET …/app`.\n\nA draft with no app is a 404 — including a draft that carries a dashboard, which can never carry an app.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2GetDraftApp",
+        "operationId": "documentsGetDraftApp",
         "summary": "Read app content on a draft",
         "tags": [
           "Documents"
@@ -52557,8 +53176,8 @@
         }
       },
       "put": {
-        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nReplace the app HTML on an existing draft — creating the app when the draft is workbook-only — optionally replacing the app `settings` in the same call. Operates only on the draft named by `draftIdentifier`, which the caller creates first via `PATCH …/draft`; a published app is never addressable for writing, so every edit is draft-then-publish by construction. No auto-publish — publish via `POST …/draft/publish`.\n\nLast-write-wins, like every app write in the UI: the body is applied as given, with no expected-version precondition. Every write appends an immutable `app_history` revision, so nothing is lost — only the head moves.\n\nWrites never reject on app policy. External `<script src>` / `<link rel=\"stylesheet\">` hosts outside the organization’s app policy (resolved over the settings this write produces) come back as non-blocking `warnings` — the render-time CSP is the enforcement, and a disallowed host is inert until an org admin allows it. The same array warns when `settings.allowDefaultMapProviders` is on but the organization turns map providers off for every app; the setting persists and no tile loads until an admin turns them back on.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2PutApp",
+        "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nReplace the app HTML on an existing draft — creating the app when the draft is workbook-only — optionally replacing the app `settings` in the same call. Operates only on the draft named by `draftIdentifier`, which the caller creates first via `PATCH …/draft`; a published app is never addressable for writing, so every edit is draft-then-publish by construction. No auto-publish — publish via `POST …/draft/publish`.\n\nLast-write-wins, like every app write in the UI: the body is applied as given, with no expected-version precondition. Every write appends an immutable `app_history` revision, so nothing is lost — only the head moves.\n\nWrites never reject on app policy. External `<script src>` / `<link rel=\"stylesheet\">` hosts outside the organization’s app policy (resolved over the settings this write produces) come back as non-blocking `warnings` — the render-time CSP is the enforcement, and a disallowed host is inert until an org admin allows it. The same array warns when `settings.allowDefaultMapProviders` is on but the organization turns map providers off for every app, or `settings.allowModals` is on but the organization turns printing and dialogs off; the setting persists and does nothing until an admin turns the capability back on.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
+        "operationId": "documentsPutApp",
         "summary": "Replace app content on a draft",
         "tags": [
           "Documents"
@@ -52600,7 +53219,7 @@
         },
         "responses": {
           "200": {
-            "description": "App written on the draft. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider setting the organization turns off.",
+            "description": "App written on the draft. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider or print-and-dialogs setting the organization turns off.",
             "content": {
               "application/json": {
                 "schema": {
@@ -52624,9 +53243,6 @@
           "405": {
             "description": "Method not allowed."
           },
-          "409": {
-            "description": "The target is not a published document."
-          },
           "422": {
             "description": "The draft is a dashboard, not an app; remove the dashboard first (`DELETE …/draft/{draftIdentifier}/dashboard`)."
           }
@@ -52634,7 +53250,7 @@
       },
       "patch": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nApply targeted edits to the app on an existing draft without resending the HTML body: any subset of `htmlEdits` (exact-substring search/replace operations, applied in order) and `settings` (full replacement). All-or-nothing — an edit that matches zero times, matches more than once without `replaceAll`, or would push the HTML past the 2 MiB cap rejects the whole request with 400 naming the edit, and nothing is applied.\n\nContent addressing buys sequential staleness detection, not concurrency safety: if the text an edit targets moved between your read and your write, the edit fails to match and nothing is applied. There is no version precondition, compare-and-swap, or lock behind it, so two writers patching the same app at the same time can still overwrite each other, orthogonal edits included — serialize writes to one app when that matters. PATCH never creates the app: a draft with no app is a 409 (create it with `PUT`).\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2PatchApp",
+        "operationId": "documentsPatchApp",
         "summary": "Edit app content on a draft",
         "tags": [
           "Documents"
@@ -52701,7 +53317,7 @@
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is not a published document, or the draft has no app to patch."
+            "description": "The draft has no app to patch."
           },
           "422": {
             "description": "The draft is a dashboard, not an app."
@@ -52710,7 +53326,7 @@
       },
       "delete": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nRemove the app from an existing draft, leaving a workbook-only document — the app-side mirror of `DELETE …/dashboard`, with the same contract: no body (the route is draft-scoped, so publish stays the checkpoint behind it). Operates only on the draft named by `draftIdentifier`; no auto-publish, so nothing changes on the published document until `POST …/draft/publish`. Idempotent: a draft that is already workbook-only returns 200 unchanged.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2RemoveApp",
+        "operationId": "documentsRemoveApp",
         "summary": "Remove app from a draft",
         "tags": [
           "Documents"
@@ -52763,9 +53379,6 @@
           "405": {
             "description": "Method not allowed."
           },
-          "409": {
-            "description": "The target is not a published document."
-          },
           "422": {
             "description": "The draft is a dashboard, not an app; there is no app to remove."
           }
@@ -52775,7 +53388,7 @@
     "/api/v2/documents/{identifier}/draft/app": {
       "get": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nRead the app content on the document's main (non-branch) draft — the read counterpart of `PUT …/draft/app`, so a caller in the draft-then-publish loop never has to track the draft identifier. Unlike the PUT sibling this never mints a draft: a document with no main draft is a 404. Writes cap the HTML at 2 MiB — apps saved before the cap may read back larger, and a body over the cap is rejected on the way back in.\n\nA draft with no app is a 404 — including a draft that carries a dashboard, which can never carry an app.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2GetMainDraftApp",
+        "operationId": "documentsGetMainDraftApp",
         "summary": "Read app content on the main draft",
         "tags": [
           "Documents"
@@ -52837,7 +53450,7 @@
       },
       "put": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nCreate (or reuse) the document's main draft and replace the app on it in one call — the app-side counterpart of `PATCH …/draft`'s create-or-reuse behavior, with the same body, validation, and gates as `PUT …/draft/{draftIdentifier}/app`. No auto-publish; the response carries the `draftIdentifier` for `POST …/draft/publish`. Removing the app has no create-or-reuse counterpart — `DELETE` stays draft-explicit.\n\nLast-write-wins, like every app write in the UI: the body is applied as given, with no expected-version precondition.\n\n`app` is a reserved literal under `…/draft/` — the router ranks it above the dynamic `{draftIdentifier}` segment. A draft named `app` would be unaddressable on the draft-scoped app routes; avoid it.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2PutAppAutoDraft",
+        "operationId": "documentsPutAppAutoDraft",
         "summary": "Create-or-reuse the draft and replace app content",
         "tags": [
           "Documents"
@@ -52868,7 +53481,7 @@
         },
         "responses": {
           "200": {
-            "description": "Draft created (or reused) and app written; the response carries the `draftIdentifier`. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider setting the organization turns off.",
+            "description": "Draft created (or reused) and app written; the response carries the `draftIdentifier`. `warnings` names any resource hosts the app’s iframe CSP will block until an org admin allows them, and a map-provider or print-and-dialogs setting the organization turns off.",
             "content": {
               "application/json": {
                 "schema": {
@@ -52892,9 +53505,6 @@
           "405": {
             "description": "Method not allowed."
           },
-          "409": {
-            "description": "The target is not a published document (drafts only attach to published documents)."
-          },
           "422": {
             "description": "The document is a dashboard, not an app."
           }
@@ -52902,7 +53512,7 @@
       },
       "patch": {
         "description": "**Alpha.** The app sub-resource may change shape without a deprecation cycle while apps mature. The document routes are stable.\n\nCreate (or reuse) the document's main draft and apply targeted app edits in one call — the PATCH counterpart of `PUT …/draft/app`, with the same body and all-or-nothing semantics as `PATCH …/draft/{draftIdentifier}/app`. Never creates the app: a document with no published app is a 409, checked before any draft is minted.\n\nContent addressing buys sequential staleness detection, not concurrency safety: if the text an edit targets moved between your read and your write, the edit fails to match and nothing is applied. There is no version precondition, compare-and-swap, or lock behind it, so two writers patching the same app at the same time can still overwrite each other, orthogonal edits included — serialize writes to one app when that matters.\n\nA document carries at most one of a dashboard or an app — never both; workbook-only is valid. The app HTML and settings live only at the app sub-resource routes; the document read carries an `app` slice pointing here, and the whole-document PATCH accepts that slice back only as it was read.",
-        "operationId": "documentsV2PatchAppAutoDraft",
+        "operationId": "documentsPatchAppAutoDraft",
         "summary": "Create-or-reuse the draft and edit app content",
         "tags": [
           "Documents"
@@ -52958,7 +53568,7 @@
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is not a published document, or there is no app to patch."
+            "description": "There is no app to patch."
           },
           "422": {
             "description": "The document is a dashboard, not an app."
@@ -53047,7 +53657,7 @@
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is not a published document, or the query model is already bound to another tile."
+            "description": "The query model is already bound to another tile."
           }
         }
       },
@@ -53119,9 +53729,6 @@
           },
           "405": {
             "description": "Method not allowed."
-          },
-          "409": {
-            "description": "The target is not a published document."
           }
         }
       }
@@ -53172,16 +53779,13 @@
           },
           "405": {
             "description": "Method not allowed."
-          },
-          "409": {
-            "description": "The target is not a published document."
           }
         }
       }
     },
     "/api/v2/documents/{identifier}/identifier": {
       "put": {
-        "description": "Rename a published document's identifier. The change is applied live and immediately — it does not go through the draft/publish workflow — and the former identifier is recorded in the document's rename history.\n\nOnly published documents can be renamed. A draft target returns 409; an unknown or archived target returns 404. The new identifier must be a valid slug (otherwise 400) and unused by any other document in the organization (otherwise 409).",
+        "description": "Rename a published document's identifier. The change is applied live and immediately — it does not go through the draft/publish workflow — and the former identifier is recorded in the document's rename history.\n\nOnly published documents can be renamed. A draft, unknown, or archived target returns 404. The new identifier must be a valid slug (otherwise 400) and unused by any other document in the organization (otherwise 409).",
         "operationId": "documentsV2UpdateIdentifier",
         "summary": "Rename document identifier",
         "tags": [
@@ -53231,13 +53835,13 @@
             "description": "Insufficient permissions to rename the document."
           },
           "404": {
-            "description": "Document not found or archived."
+            "description": "Document not found, archived, or a draft."
           },
           "405": {
             "description": "Method not allowed."
           },
           "409": {
-            "description": "The target is a draft rather than a published document, or the requested identifier is already in use by another document."
+            "description": "The requested identifier is already in use by another document."
           }
         }
       }
@@ -57203,7 +57807,7 @@
     },
     "/api/v1/models/{modelId}/dbt-exposures": {
       "get": {
-        "description": "Returns the dbt exposures for a model, computed on-demand by analyzing which dbt models are referenced by dashboards that use this model. Returns exactly one record per dashboard. The exposure field is null when a dashboard does not reference any dbt models. Exposure names (exposure.name) may contain duplicates when multiple dashboards produce the same name; use deduplication_name for a guaranteed-unique value, or use it as a fallback when names collide.",
+        "description": "Returns the dbt exposures for a model, computed on-demand by analyzing which dbt models are referenced by the published dashboards and apps that use this model. Returns one record per dashboard (type \"dashboard\") or app (type \"application\") that references at least one dbt model; documents with no dbt references are excluded, so a page may hold fewer records than pageSize. Exposure names (exposure.name) may contain duplicates when multiple documents produce the same name; use deduplication_name for a guaranteed-unique value, or use it as a fallback when names collide.",
         "operationId": "modelsDbtExposures",
         "summary": "Get dbt exposures",
         "tags": [
@@ -58731,11 +59335,11 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
-              "example": "job_abc123,job_def456"
+              "description": "Comma-separated list of job UUIDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
+              "example": "123e4567-e89b-42d3-a456-426614174000,123e4567-e89b-42d3-a456-426614174001"
             },
             "required": false,
-            "description": "Comma-separated list of job IDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
+            "description": "Comma-separated list of job UUIDs to wait for. Obtained from the query/run response. Required unless the deprecated `job_ids` is sent.",
             "name": "jobIds",
             "in": "query"
           },
@@ -58743,10 +59347,10 @@
             "schema": {
               "type": "string",
               "deprecated": true,
-              "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job IDs."
+              "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job UUIDs."
             },
             "required": false,
-            "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job IDs.",
+            "description": "Deprecated: use jobIds instead. JSON array or comma-separated list of job UUIDs.",
             "name": "job_ids",
             "in": "query"
           }
@@ -59040,6 +59644,18 @@
                     "description": "Defines the type of condition to use for alerts. Required if conditionQueryMapKey is provided.",
                     "example": "RESULTS_PRESENT"
                   },
+                  "containerPages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "description": "The instanceKeys of the advanced-layout pages to render (pdf, png, csv & xlsx only). png accepts a single page. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                    "example": [
+                      "page_abc123"
+                    ]
+                  },
                   "destinationType": {
                     "type": "string",
                     "enum": [
@@ -59317,6 +59933,7 @@
         }
       },
       "put": {
+        "description": "Replace a scheduled task's configuration. Changes apply to future runs; jobs that are already running are not affected. This is a full replacement, not a partial update: the request must include every required field for the destination type, and any optional property left out is reset to its default instead of keeping its current value. That includes filterConfig (filter values are cleared), fanOut (treated as false, unless your organization always personalizes deliveries), conditionType and conditionQueryMapKey (the alert condition is removed), queryIdentifierMapKey, maxRowLimit, textBody, filename, containerPages (pdf and png fall back to the dashboard's first page; csv and xlsx fall back to every tile), and the paper and layout options. The one exception is timezoneOverride, which keeps its current value when omitted, as long as query timezone overrides are enabled for the connection or document. To change a single property, send the schedule's full configuration with that property changed.",
         "operationId": "schedulesUpdate",
         "summary": "Update schedule",
         "tags": [
@@ -59336,9 +59953,1135 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The name of the scheduled task. Must be at least 1 character.",
+                        "example": "Weekly Sales Report"
+                      },
+                      "schedule": {
+                        "type": "string",
+                        "description": "The cron expression defining when the task should run. Standard cron format: minute hour day-of-month month day-of-week.",
+                        "example": "0 9 * * 1"
+                      },
+                      "timezone": {
+                        "type": "string",
+                        "description": "The IANA timezone for interpreting the schedule. Must be a valid IANA timezone identifier.",
+                        "example": "America/New_York"
+                      },
+                      "timezoneOverride": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "Optional IANA timezone applied to query execution at render time. Distinct from `timezone` (which controls *when* the schedule fires). Omit to leave the existing value unchanged; pass `null` to clear it (use the default).",
+                        "example": "Europe/Paris"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "schedule",
+                      "timezone"
+                    ]
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "conditionQueryMapKey": {
+                            "type": "string",
+                            "description": "Required if conditionType is provided. The ID of the query to monitor for triggering an alert. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "conditionType": {
+                            "type": "string",
+                            "enum": [
+                              "RESULTS_CHANGED",
+                              "RESULTS_UNCHANGED",
+                              "RESULTS_PRESENT",
+                              "RESULTS_MISSING"
+                            ],
+                            "description": "Required if conditionQueryMapKey is provided. Defines the type of condition to use for alerts.",
+                            "example": "RESULTS_PRESENT"
+                          },
+                          "containerPages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                            "example": [
+                              "page_abc123"
+                            ]
+                          },
+                          "enableConditionalFormatting": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with xlsx format only. Defaults to true. When true, conditional formatting rules from the visualization are included in the Excel output — provided the organization has the 'excel-conditional-formatting' feature enabled.",
+                            "example": true
+                          },
+                          "enableFormatting": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, xlsx & json formats. If true, formatting will be enabled in the output. Note: If true for json format, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "expandTablesToShowAllRows": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, up to 1,000 rows in table visualizations will be included in the delivery. Note: This parameter cannot be used when paperFormat: fit_page.",
+                            "example": false
+                          },
+                          "filterConfig": {
+                            "description": "An object specifying the filter conditions to apply to the task. The filter key specified must already exist in the dashboard.",
+                            "example": {
+                              "status": [
+                                "active",
+                                "pending"
+                              ]
+                            }
+                          },
+                          "format": {
+                            "type": "string",
+                            "enum": [
+                              "link_only",
+                              "pdf",
+                              "png",
+                              "csv",
+                              "xlsx",
+                              "json"
+                            ],
+                            "description": "The output format of the task. Must be one of: link_only, pdf, png, csv, xlsx, json",
+                            "example": "pdf"
+                          },
+                          "hideHiddenFields": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv & xlsx formats. If true, fields marked as hidden won't be displayed in the output.",
+                            "example": false
+                          },
+                          "hideTitle": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with pdf & png formats. If true, the content's title will be hidden in the output.",
+                            "example": false
+                          },
+                          "killJobsOnFailure": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, stops the entire job if any queries included in the task fail.",
+                            "example": false
+                          },
+                          "maxRowLimit": {
+                            "type": "number",
+                            "minimum": 1,
+                            "description": "Compatible with csv, json, & xlsx formats. Used with overrideRowLimit. Specifies the maximum number of rows.",
+                            "example": 1000
+                          },
+                          "overrideRowLimit": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, json, & xlsx formats. If true, the default row limit will be overridden. Note: If true for json and xlsx formats, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "paperFormat": {
+                            "type": "string",
+                            "enum": [
+                              "a3",
+                              "a4",
+                              "fit_page",
+                              "legal",
+                              "letter",
+                              "tabloid"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper format (size) of the resulting PDF. Must be one of: a3, a4, letter, legal, fit_page, tabloid.",
+                            "example": "letter"
+                          },
+                          "paperOrientation": {
+                            "type": "string",
+                            "enum": [
+                              "portrait",
+                              "landscape"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper orientation of the resulting PDF. Must be one of: portrait, landscape.",
+                            "example": "landscape"
+                          },
+                          "queryIdentifierMapKey": {
+                            "type": "string",
+                            "description": "Required for single tile tasks. The ID of the query to include in a single tile task. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "rebuildExtracts": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rebuild extracts before running the schedule.",
+                            "example": false
+                          },
+                          "showContentLink": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only. If true, a link to the content will be shown in the output.",
+                            "example": true
+                          },
+                          "showFilters": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only & csv. If true, filters will be shown in the output.",
+                            "example": true
+                          },
+                          "singleColumnLayout": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+                            "example": false
+                          },
+                          "useCache": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries. An alert always runs its condition check fresh. Only the delivery sent once the condition is met uses cached results.",
+                            "example": false
+                          },
+                          "destinationType": {
+                            "type": "string",
+                            "enum": [
+                              "email"
+                            ],
+                            "description": "The destination type for delivering to email recipients.",
+                            "example": "email"
+                          },
+                          "fanOut": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "description": "If true, sends individual emails to each recipient. If false, sends a single email with all recipients in the To field.",
+                            "example": false
+                          },
+                          "filename": {
+                            "type": "string",
+                            "description": "Optional custom filename for the attachment (without extension). Must not contain special characters.",
+                            "example": "weekly-sales-report"
+                          },
+                          "recipients": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "emails": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "default": []
+                                  },
+                                  "userGroupIds": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "default": []
+                                  }
+                                }
+                              }
+                            ],
+                            "description": "Email recipients. Can be email addresses or user group IDs (if allowed)."
+                          },
+                          "subject": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The subject line of the email. Must be at least 1 character.",
+                            "example": "Weekly Sales Report"
+                          },
+                          "textBody": {
+                            "type": "string",
+                            "description": "Optional plain text body content for the email.",
+                            "example": "Please find attached the weekly sales report."
+                          }
+                        },
+                        "required": [
+                          "format",
+                          "destinationType",
+                          "recipients",
+                          "subject"
+                        ],
+                        "title": "Email"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "conditionQueryMapKey": {
+                            "type": "string",
+                            "description": "Required if conditionType is provided. The ID of the query to monitor for triggering an alert. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "conditionType": {
+                            "type": "string",
+                            "enum": [
+                              "RESULTS_CHANGED",
+                              "RESULTS_UNCHANGED",
+                              "RESULTS_PRESENT",
+                              "RESULTS_MISSING"
+                            ],
+                            "description": "Required if conditionQueryMapKey is provided. Defines the type of condition to use for alerts.",
+                            "example": "RESULTS_PRESENT"
+                          },
+                          "containerPages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                            "example": [
+                              "page_abc123"
+                            ]
+                          },
+                          "enableConditionalFormatting": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with xlsx format only. Defaults to true. When true, conditional formatting rules from the visualization are included in the Excel output — provided the organization has the 'excel-conditional-formatting' feature enabled.",
+                            "example": true
+                          },
+                          "enableFormatting": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, xlsx & json formats. If true, formatting will be enabled in the output. Note: If true for json format, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "expandTablesToShowAllRows": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, up to 1,000 rows in table visualizations will be included in the delivery. Note: This parameter cannot be used when paperFormat: fit_page.",
+                            "example": false
+                          },
+                          "filterConfig": {
+                            "description": "An object specifying the filter conditions to apply to the task. The filter key specified must already exist in the dashboard.",
+                            "example": {
+                              "status": [
+                                "active",
+                                "pending"
+                              ]
+                            }
+                          },
+                          "format": {
+                            "type": "string",
+                            "enum": [
+                              "link_only",
+                              "pdf",
+                              "png",
+                              "csv",
+                              "xlsx",
+                              "json"
+                            ],
+                            "description": "The output format of the task. Must be one of: link_only, pdf, png, csv, xlsx, json",
+                            "example": "pdf"
+                          },
+                          "hideHiddenFields": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv & xlsx formats. If true, fields marked as hidden won't be displayed in the output.",
+                            "example": false
+                          },
+                          "hideTitle": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with pdf & png formats. If true, the content's title will be hidden in the output.",
+                            "example": false
+                          },
+                          "killJobsOnFailure": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, stops the entire job if any queries included in the task fail.",
+                            "example": false
+                          },
+                          "maxRowLimit": {
+                            "type": "number",
+                            "minimum": 1,
+                            "description": "Compatible with csv, json, & xlsx formats. Used with overrideRowLimit. Specifies the maximum number of rows.",
+                            "example": 1000
+                          },
+                          "overrideRowLimit": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, json, & xlsx formats. If true, the default row limit will be overridden. Note: If true for json and xlsx formats, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "paperFormat": {
+                            "type": "string",
+                            "enum": [
+                              "a3",
+                              "a4",
+                              "fit_page",
+                              "legal",
+                              "letter",
+                              "tabloid"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper format (size) of the resulting PDF. Must be one of: a3, a4, letter, legal, fit_page, tabloid.",
+                            "example": "letter"
+                          },
+                          "paperOrientation": {
+                            "type": "string",
+                            "enum": [
+                              "portrait",
+                              "landscape"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper orientation of the resulting PDF. Must be one of: portrait, landscape.",
+                            "example": "landscape"
+                          },
+                          "queryIdentifierMapKey": {
+                            "type": "string",
+                            "description": "Required for single tile tasks. The ID of the query to include in a single tile task. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "rebuildExtracts": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rebuild extracts before running the schedule.",
+                            "example": false
+                          },
+                          "showContentLink": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only. If true, a link to the content will be shown in the output.",
+                            "example": true
+                          },
+                          "showFilters": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only & csv. If true, filters will be shown in the output.",
+                            "example": true
+                          },
+                          "singleColumnLayout": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+                            "example": false
+                          },
+                          "useCache": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries. An alert always runs its condition check fresh. Only the delivery sent once the condition is met uses cached results.",
+                            "example": false
+                          },
+                          "destinationType": {
+                            "type": "string",
+                            "enum": [
+                              "webhook"
+                            ],
+                            "description": "The destination type for delivering to a webhook URL.",
+                            "example": "webhook"
+                          },
+                          "filename": {
+                            "type": "string",
+                            "description": "Optional custom filename for the webhook payload.",
+                            "example": "report-data"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "The webhook URL to deliver the content to. Must be a valid HTTPS URL.",
+                            "example": "https://api.example.com/webhooks/reports"
+                          }
+                        },
+                        "required": [
+                          "format",
+                          "destinationType",
+                          "url"
+                        ],
+                        "title": "Webhook"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "conditionQueryMapKey": {
+                            "type": "string",
+                            "description": "Required if conditionType is provided. The ID of the query to monitor for triggering an alert. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "conditionType": {
+                            "type": "string",
+                            "enum": [
+                              "RESULTS_CHANGED",
+                              "RESULTS_UNCHANGED",
+                              "RESULTS_PRESENT",
+                              "RESULTS_MISSING"
+                            ],
+                            "description": "Required if conditionQueryMapKey is provided. Defines the type of condition to use for alerts.",
+                            "example": "RESULTS_PRESENT"
+                          },
+                          "containerPages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                            "example": [
+                              "page_abc123"
+                            ]
+                          },
+                          "enableConditionalFormatting": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with xlsx format only. Defaults to true. When true, conditional formatting rules from the visualization are included in the Excel output — provided the organization has the 'excel-conditional-formatting' feature enabled.",
+                            "example": true
+                          },
+                          "enableFormatting": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, xlsx & json formats. If true, formatting will be enabled in the output. Note: If true for json format, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "expandTablesToShowAllRows": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, up to 1,000 rows in table visualizations will be included in the delivery. Note: This parameter cannot be used when paperFormat: fit_page.",
+                            "example": false
+                          },
+                          "filterConfig": {
+                            "description": "An object specifying the filter conditions to apply to the task. The filter key specified must already exist in the dashboard.",
+                            "example": {
+                              "status": [
+                                "active",
+                                "pending"
+                              ]
+                            }
+                          },
+                          "format": {
+                            "type": "string",
+                            "enum": [
+                              "link_only",
+                              "pdf",
+                              "png",
+                              "csv",
+                              "xlsx",
+                              "json"
+                            ],
+                            "description": "The output format of the task. Must be one of: link_only, pdf, png, csv, xlsx, json",
+                            "example": "pdf"
+                          },
+                          "hideHiddenFields": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv & xlsx formats. If true, fields marked as hidden won't be displayed in the output.",
+                            "example": false
+                          },
+                          "hideTitle": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with pdf & png formats. If true, the content's title will be hidden in the output.",
+                            "example": false
+                          },
+                          "killJobsOnFailure": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, stops the entire job if any queries included in the task fail.",
+                            "example": false
+                          },
+                          "maxRowLimit": {
+                            "type": "number",
+                            "minimum": 1,
+                            "description": "Compatible with csv, json, & xlsx formats. Used with overrideRowLimit. Specifies the maximum number of rows.",
+                            "example": 1000
+                          },
+                          "overrideRowLimit": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, json, & xlsx formats. If true, the default row limit will be overridden. Note: If true for json and xlsx formats, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "paperFormat": {
+                            "type": "string",
+                            "enum": [
+                              "a3",
+                              "a4",
+                              "fit_page",
+                              "legal",
+                              "letter",
+                              "tabloid"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper format (size) of the resulting PDF. Must be one of: a3, a4, letter, legal, fit_page, tabloid.",
+                            "example": "letter"
+                          },
+                          "paperOrientation": {
+                            "type": "string",
+                            "enum": [
+                              "portrait",
+                              "landscape"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper orientation of the resulting PDF. Must be one of: portrait, landscape.",
+                            "example": "landscape"
+                          },
+                          "queryIdentifierMapKey": {
+                            "type": "string",
+                            "description": "Required for single tile tasks. The ID of the query to include in a single tile task. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "rebuildExtracts": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rebuild extracts before running the schedule.",
+                            "example": false
+                          },
+                          "showContentLink": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only. If true, a link to the content will be shown in the output.",
+                            "example": true
+                          },
+                          "showFilters": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only & csv. If true, filters will be shown in the output.",
+                            "example": true
+                          },
+                          "singleColumnLayout": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+                            "example": false
+                          },
+                          "useCache": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries. An alert always runs its condition check fresh. Only the delivery sent once the condition is met uses cached results.",
+                            "example": false
+                          },
+                          "address": {
+                            "type": "string",
+                            "description": "The SFTP server address including the path. Format: sftp://hostname/path/to/directory",
+                            "example": "sftp://sftp.example.com/reports/weekly"
+                          },
+                          "credentialId": {
+                            "type": "string",
+                            "description": "ID of a stored credential to use for SFTP authentication. Required if passwordUnencrypted is not provided.",
+                            "example": "sftp-cred-123"
+                          },
+                          "destinationType": {
+                            "type": "string",
+                            "enum": [
+                              "sftp"
+                            ],
+                            "description": "The destination type for delivering to an SFTP server.",
+                            "example": "sftp"
+                          },
+                          "filename": {
+                            "type": "string",
+                            "description": "Optional custom filename for the uploaded file (without extension).",
+                            "example": "weekly-report"
+                          },
+                          "passwordUnencrypted": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The password for SFTP authentication. Required if credentialId is not provided.",
+                            "example": "secretpassword"
+                          },
+                          "port": {
+                            "type": "number",
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "description": "The SFTP server port. Standard SFTP port is 22.",
+                            "example": 22
+                          },
+                          "username": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The username for SFTP authentication.",
+                            "example": "sftpuser"
+                          }
+                        },
+                        "required": [
+                          "format",
+                          "address",
+                          "destinationType",
+                          "port",
+                          "username"
+                        ],
+                        "description": "Provide either credentialId or passwordUnencrypted. An update does not keep the stored credential when both are left out.",
+                        "title": "SFTP"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "conditionQueryMapKey": {
+                            "type": "string",
+                            "description": "Required if conditionType is provided. The ID of the query to monitor for triggering an alert. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "conditionType": {
+                            "type": "string",
+                            "enum": [
+                              "RESULTS_CHANGED",
+                              "RESULTS_UNCHANGED",
+                              "RESULTS_PRESENT",
+                              "RESULTS_MISSING"
+                            ],
+                            "description": "Required if conditionQueryMapKey is provided. Defines the type of condition to use for alerts.",
+                            "example": "RESULTS_PRESENT"
+                          },
+                          "containerPages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                            "example": [
+                              "page_abc123"
+                            ]
+                          },
+                          "enableConditionalFormatting": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with xlsx format only. Defaults to true. When true, conditional formatting rules from the visualization are included in the Excel output — provided the organization has the 'excel-conditional-formatting' feature enabled.",
+                            "example": true
+                          },
+                          "enableFormatting": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, xlsx & json formats. If true, formatting will be enabled in the output. Note: If true for json format, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "expandTablesToShowAllRows": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, up to 1,000 rows in table visualizations will be included in the delivery. Note: This parameter cannot be used when paperFormat: fit_page.",
+                            "example": false
+                          },
+                          "filterConfig": {
+                            "description": "An object specifying the filter conditions to apply to the task. The filter key specified must already exist in the dashboard.",
+                            "example": {
+                              "status": [
+                                "active",
+                                "pending"
+                              ]
+                            }
+                          },
+                          "format": {
+                            "type": "string",
+                            "enum": [
+                              "link_only",
+                              "pdf",
+                              "png",
+                              "csv",
+                              "xlsx",
+                              "json"
+                            ],
+                            "description": "The output format of the task. Must be one of: link_only, pdf, png, csv, xlsx, json",
+                            "example": "pdf"
+                          },
+                          "hideHiddenFields": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv & xlsx formats. If true, fields marked as hidden won't be displayed in the output.",
+                            "example": false
+                          },
+                          "hideTitle": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with pdf & png formats. If true, the content's title will be hidden in the output.",
+                            "example": false
+                          },
+                          "killJobsOnFailure": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, stops the entire job if any queries included in the task fail.",
+                            "example": false
+                          },
+                          "maxRowLimit": {
+                            "type": "number",
+                            "minimum": 1,
+                            "description": "Compatible with csv, json, & xlsx formats. Used with overrideRowLimit. Specifies the maximum number of rows.",
+                            "example": 1000
+                          },
+                          "overrideRowLimit": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, json, & xlsx formats. If true, the default row limit will be overridden. Note: If true for json and xlsx formats, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "paperFormat": {
+                            "type": "string",
+                            "enum": [
+                              "a3",
+                              "a4",
+                              "fit_page",
+                              "legal",
+                              "letter",
+                              "tabloid"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper format (size) of the resulting PDF. Must be one of: a3, a4, letter, legal, fit_page, tabloid.",
+                            "example": "letter"
+                          },
+                          "paperOrientation": {
+                            "type": "string",
+                            "enum": [
+                              "portrait",
+                              "landscape"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper orientation of the resulting PDF. Must be one of: portrait, landscape.",
+                            "example": "landscape"
+                          },
+                          "queryIdentifierMapKey": {
+                            "type": "string",
+                            "description": "Required for single tile tasks. The ID of the query to include in a single tile task. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "rebuildExtracts": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rebuild extracts before running the schedule.",
+                            "example": false
+                          },
+                          "showContentLink": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only. If true, a link to the content will be shown in the output.",
+                            "example": true
+                          },
+                          "showFilters": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only & csv. If true, filters will be shown in the output.",
+                            "example": true
+                          },
+                          "singleColumnLayout": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+                            "example": false
+                          },
+                          "useCache": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries. An alert always runs its condition check fresh. Only the delivery sent once the condition is met uses cached results.",
+                            "example": false
+                          },
+                          "destinationType": {
+                            "type": "string",
+                            "enum": [
+                              "slack"
+                            ],
+                            "description": "The destination type for delivering to Slack.",
+                            "example": "slack"
+                          },
+                          "recipients": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "minItems": 1
+                              }
+                            ],
+                            "description": "Slack recipient ID(s). Accepts a comma-separated string or an array. For channel: provide exactly one channel ID (e.g., \"C01234567\" or [\"C01234567\"]). For users: provide one or more user IDs (e.g., \"U111,U222\" or [\"U111\", \"U222\"]).",
+                            "example": "C01234567"
+                          },
+                          "slackRecipientType": {
+                            "type": "string",
+                            "enum": [
+                              "channel",
+                              "users"
+                            ],
+                            "description": "The type of Slack recipient. Use \"channel\" to deliver to a single Slack channel, or \"users\" to deliver to one or more Slack users via direct message.",
+                            "example": "channel"
+                          },
+                          "textBody": {
+                            "type": "string",
+                            "description": "Optional message text to include with the Slack delivery.",
+                            "example": "Here is your weekly report!"
+                          }
+                        },
+                        "required": [
+                          "format",
+                          "destinationType",
+                          "recipients",
+                          "slackRecipientType"
+                        ],
+                        "title": "Slack"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "conditionQueryMapKey": {
+                            "type": "string",
+                            "description": "Required if conditionType is provided. The ID of the query to monitor for triggering an alert. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "conditionType": {
+                            "type": "string",
+                            "enum": [
+                              "RESULTS_CHANGED",
+                              "RESULTS_UNCHANGED",
+                              "RESULTS_PRESENT",
+                              "RESULTS_MISSING"
+                            ],
+                            "description": "Required if conditionQueryMapKey is provided. Defines the type of condition to use for alerts.",
+                            "example": "RESULTS_PRESENT"
+                          },
+                          "containerPages": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1,
+                            "description": "Compatible with pdf, png, csv & xlsx formats, on dashboards using the advanced layout. The instanceKeys of the pages to render, as returned in a page's \"instanceKey\". pdf renders each page in storage order; png accepts a single page; csv and xlsx include only the tiles on the selected pages. Defaults to the first page for pdf and png, and to every tile for csv and xlsx. Cannot be combined with queryIdentifierMapKey.",
+                            "example": [
+                              "page_abc123"
+                            ]
+                          },
+                          "enableConditionalFormatting": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with xlsx format only. Defaults to true. When true, conditional formatting rules from the visualization are included in the Excel output — provided the organization has the 'excel-conditional-formatting' feature enabled.",
+                            "example": true
+                          },
+                          "enableFormatting": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, xlsx & json formats. If true, formatting will be enabled in the output. Note: If true for json format, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "expandTablesToShowAllRows": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, up to 1,000 rows in table visualizations will be included in the delivery. Note: This parameter cannot be used when paperFormat: fit_page.",
+                            "example": false
+                          },
+                          "filterConfig": {
+                            "description": "An object specifying the filter conditions to apply to the task. The filter key specified must already exist in the dashboard.",
+                            "example": {
+                              "status": [
+                                "active",
+                                "pending"
+                              ]
+                            }
+                          },
+                          "format": {
+                            "type": "string",
+                            "enum": [
+                              "link_only",
+                              "pdf",
+                              "png",
+                              "csv",
+                              "xlsx",
+                              "json"
+                            ],
+                            "description": "The output format of the task. Must be one of: link_only, pdf, png, csv, xlsx, json",
+                            "example": "pdf"
+                          },
+                          "hideHiddenFields": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv & xlsx formats. If true, fields marked as hidden won't be displayed in the output.",
+                            "example": false
+                          },
+                          "hideTitle": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with pdf & png formats. If true, the content's title will be hidden in the output.",
+                            "example": false
+                          },
+                          "killJobsOnFailure": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, stops the entire job if any queries included in the task fail.",
+                            "example": false
+                          },
+                          "maxRowLimit": {
+                            "type": "number",
+                            "minimum": 1,
+                            "description": "Compatible with csv, json, & xlsx formats. Used with overrideRowLimit. Specifies the maximum number of rows.",
+                            "example": 1000
+                          },
+                          "overrideRowLimit": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Compatible with csv, json, & xlsx formats. If true, the default row limit will be overridden. Note: If true for json and xlsx formats, a queryIdentifierMapKey is required.",
+                            "example": false
+                          },
+                          "paperFormat": {
+                            "type": "string",
+                            "enum": [
+                              "a3",
+                              "a4",
+                              "fit_page",
+                              "legal",
+                              "letter",
+                              "tabloid"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper format (size) of the resulting PDF. Must be one of: a3, a4, letter, legal, fit_page, tabloid.",
+                            "example": "letter"
+                          },
+                          "paperOrientation": {
+                            "type": "string",
+                            "enum": [
+                              "portrait",
+                              "landscape"
+                            ],
+                            "description": "Compatible with pdf formats. Defines the paper orientation of the resulting PDF. Must be one of: portrait, landscape.",
+                            "example": "landscape"
+                          },
+                          "queryIdentifierMapKey": {
+                            "type": "string",
+                            "description": "Required for single tile tasks. The ID of the query to include in a single tile task. Must reference a valid query in the dashboard.",
+                            "example": "Jmn2r3KV"
+                          },
+                          "rebuildExtracts": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rebuild extracts before running the schedule.",
+                            "example": false
+                          },
+                          "showContentLink": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only. If true, a link to the content will be shown in the output.",
+                            "example": true
+                          },
+                          "showFilters": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Compatible with all formats except link_only & csv. If true, filters will be shown in the output.",
+                            "example": true
+                          },
+                          "singleColumnLayout": {
+                            "type": "boolean",
+                            "description": "Compatible with pdf and png formats. If true, dashboard tiles will be arranged into a single vertical column.",
+                            "example": false
+                          },
+                          "useCache": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, allow scheduled queries to use cached results instead of always running fresh queries. An alert always runs its condition check fresh. Only the delivery sent once the condition is met uses cached results.",
+                            "example": false
+                          },
+                          "bucketName": {
+                            "type": "string",
+                            "description": "The S3 bucket name. Must be 3-63 characters, lowercase letters, numbers, hyphens, and dots only.",
+                            "example": "my-reports-bucket"
+                          },
+                          "destinationType": {
+                            "type": "string",
+                            "enum": [
+                              "s3"
+                            ],
+                            "description": "The destination type for delivering to an S3 bucket.",
+                            "example": "s3"
+                          },
+                          "filename": {
+                            "type": "string",
+                            "description": "Optional custom filename for the uploaded file (without extension). Supports Mustache templates like {{currentDate}}.",
+                            "example": "report-{{currentDate}}"
+                          },
+                          "keyPrefix": {
+                            "type": "string",
+                            "description": "Optional S3 key prefix (folder path) for the uploaded file. Leading slashes are normalized.",
+                            "example": "reports/weekly/"
+                          },
+                          "region": {
+                            "type": "string",
+                            "enum": [
+                              "us-east-1",
+                              "us-east-2",
+                              "us-west-1",
+                              "us-west-2",
+                              "eu-west-1",
+                              "eu-west-2",
+                              "eu-west-3",
+                              "eu-central-1",
+                              "ap-northeast-1",
+                              "ap-northeast-2",
+                              "ap-southeast-1",
+                              "ap-southeast-2",
+                              "ap-south-1",
+                              "sa-east-1",
+                              "ca-central-1"
+                            ],
+                            "description": "The AWS region where the S3 bucket is located.",
+                            "example": "us-east-1"
+                          },
+                          "roleArn": {
+                            "type": "string",
+                            "description": "The ARN of the cross-account IAM role that Omni will assume to write to the S3 bucket.",
+                            "example": "arn:aws:iam::123456789012:role/OmniS3DeliveryRole"
+                          }
+                        },
+                        "required": [
+                          "format",
+                          "bucketName",
+                          "destinationType",
+                          "region",
+                          "roleArn"
+                        ],
+                        "title": "S3"
+                      }
+                    ]
+                  }
+                ],
+                "description": "The full configuration of the scheduled task. Required fields vary by destinationType. Optional properties left out of the request are reset to their defaults.",
+                "title": "SchedulesUpdateBody"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Schedule updated successfully"
+            "description": "Schedule updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scheduledTaskId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The UUID of the updated scheduled task",
+                      "example": "123e4567-e89b-12d3-a456-426614174000"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the operation was successful",
+                      "example": true
+                    }
+                  },
+                  "required": [
+                    "scheduledTaskId",
+                    "success"
+                  ],
+                  "description": "Update schedule response",
+                  "title": "SchedulesUpdateResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request body or filter configuration"
@@ -60459,7 +62202,7 @@
     },
     "/api/v1/skills": {
       "get": {
-        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReturns the skills the caller can see: every skill in the organization for an org admin, and the caller's own otherwise. Bodies are omitted; fetch a single skill to read one.",
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReturns the skills the caller can see: every skill in the organization for an org admin, and the caller's own otherwise. Narrow with `q` for free text, or `identifier`/`creatorId` for an exact match. Bodies are omitted; fetch a single skill to read one.",
         "operationId": "skillsList",
         "summary": "List skills",
         "tags": [
@@ -60551,12 +62294,24 @@
               "minLength": 1,
               "maxLength": 48,
               "pattern": "^[a-z0-9][a-z0-9-]*$",
-              "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list.",
+              "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list. Exact match — use `q` to search.",
               "example": "quarterly-report"
             },
             "required": false,
-            "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list.",
+            "description": "Filter to skills holding this handle. A handle is a filter, not an address, so the response is a list. Exact match — use `q` to search.",
             "name": "identifier",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Free-text search over name, handle and description, case-insensitive substring, up to 200 characters. `%` matches text of any length and `_` any single character. Blank is the same as omitting it. Narrows within what the caller can already see, and combines with the other filters rather than replacing them.",
+              "example": "quarterly"
+            },
+            "required": false,
+            "description": "Free-text search over name, handle and description, case-insensitive substring, up to 200 characters. `%` matches text of any length and `_` any single character. Blank is the same as omitting it. Narrows within what the caller can already see, and combines with the other filters rather than replacing them.",
+            "name": "q",
             "in": "query"
           }
         ],
@@ -60917,6 +62672,154 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          }
+        }
+      },
+      "post": {
+        "description": "Creates a custom user attribute definition. Requires the Manage User Attributes permission. The name must be unique within the organization; the label must be unique among the custom attributes and may match the label of a system attribute. Names must not start with \"omni_\", labels must not start with \"Omni\", and the reserved connection labels are rejected.",
+        "operationId": "userAttributesCreate",
+        "summary": "Create a user attribute definition",
+        "tags": [
+          "User Attributes"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserAttributesCreateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User attribute definition created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAttributesCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage User Attributes permission"
+          },
+          "405": {
+            "description": "Method not allowed"
+          },
+          "409": {
+            "description": "A user attribute definition with this name or label already exists"
+          }
+        }
+      }
+    },
+    "/api/v1/user-attributes/{id}": {
+      "put": {
+        "description": "Updates a custom user attribute definition. Omitted fields keep their current values. The type cannot change, and a multi-valued attribute cannot be changed back to a single value. Requires the Manage User Attributes permission.",
+        "operationId": "userAttributesUpdate",
+        "summary": "Update a user attribute definition",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User attribute definition ID",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "User attribute definition ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserAttributesUpdateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User attribute definition updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAttributesUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or definition ID"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage User Attributes permission"
+          },
+          "404": {
+            "description": "User attribute definition does not exist"
+          },
+          "405": {
+            "description": "Method not allowed"
+          },
+          "409": {
+            "description": "Another user attribute definition already has this name or label, or the definition changed while it was being updated"
+          }
+        }
+      },
+      "delete": {
+        "description": "Deletes a custom user attribute definition. Every value users hold for the attribute is removed with it. Any embed SSO login that still passes the attribute name then fails outright, locking out the organization's embed users until those URLs stop sending it; model SQL that references the attribute by name breaks; and a connection that selects an environment by that attribute name stops resolving one, so those users query the default connection instead. Requires the Manage User Attributes permission.",
+        "operationId": "userAttributesDelete",
+        "summary": "Delete a user attribute definition",
+        "tags": [
+          "User Attributes"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User attribute definition ID",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "User attribute definition ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "User attribute definition deleted"
+          },
+          "400": {
+            "description": "Invalid definition ID"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Requires the Manage User Attributes permission"
+          },
+          "404": {
+            "description": "User attribute definition does not exist"
           }
         }
       }
@@ -61477,6 +63380,45 @@
           },
           "403": {
             "description": "Permission denied - admin role required"
+          }
+        }
+      },
+      "delete": {
+        "description": "Deletes up to 100 email-only users, named by ID, by email, or a mix of both, and removes them from every schedule they receive. Only email-only users are deleted: an identifier that belongs to any other kind of user, or to no user, is returned under `notFound` and the rest of the request still succeeds.",
+        "operationId": "usersDeleteEmailOnlyBulk",
+        "summary": "Delete email-only users in bulk",
+        "tags": [
+          "Users"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiUsersEmailOnlyUsersBulkDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The deleted users and any identifiers that matched no email-only user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiUsersEmailOnlyUsersBulkDeleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request - must provide 1-100 valid emails and user IDs in total"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission denied - user-scoped API keys require permission to add and remove users"
           }
         }
       }
