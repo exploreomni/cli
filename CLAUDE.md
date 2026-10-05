@@ -65,4 +65,6 @@ Nothing is written to stdout on failure: HTTP ≥400 bodies, error messages, and
 
 A 2xx body that isn't JSON (e.g. `query run`'s `text/ndjson` stream, or CSV/XLSX when `query run`'s body sets `"resultType"`) is passed through to stdout unchanged and counts as success. The body is read in full before anything is written, so a truncated response never leaves a partial payload on stdout.
 
+A successful `config init` or `config login` at a terminal ends with a welcome banner for the profile just connected (`internal/output/banner.go`: Blobby, the version, the profile's instance and auth method, the working directory). `bannerAllowed` in `cmd/omni/banner.go` is the gate: stdout and stderr both TTYs, human output format, and none of `CI`, `TERM=dumb`, `OMNI_NO_BANNER`, or a coding agent's marker variable (`CLAUDECODE`, `AI_AGENT`, …) — so agents and scripts never see it, and no other command prints it. The banner is drawn to the terminal's width (the sky is cropped below 103 columns; under 72 there is no banner) and reads only the saved config: no network, no secrets.
+
 A group command with no subcommand (`omni models`) prints its help to stderr and exits 1; an unknown subcommand errors with suggestions, `--help` or not (`omni models list-branches --help` is a typo, not a help request).

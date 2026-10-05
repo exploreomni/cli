@@ -149,6 +149,7 @@ accepted as a flag, so it can't leak into shell history.`,
 			}
 
 			fmt.Printf("Profile %q saved to %s\n", name, config.ConfigPath())
+			maybePrintBanner(cmd, name, cfg)
 			return nil
 		},
 	}
@@ -467,6 +468,7 @@ func configLoginCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Login successful! Profile %q updated.\n", name)
+			maybePrintBanner(cmd, name, cfg)
 			return nil
 		},
 	}
