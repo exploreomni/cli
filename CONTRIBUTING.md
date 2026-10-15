@@ -6,7 +6,13 @@ Issues and pull requests are welcome.
 
 Before we can merge your first pull request, you need to sign the [Contributor License Agreement](CLA.md). It's modeled on the Apache Individual CLA: you keep the rights to your contribution and grant Omni a license to use and distribute it.
 
-When you open a pull request, the CLA Assistant bot comments with a link. Sign in with GitHub to sign; it takes a few seconds and covers all your future contributions. The PR's `license/cla` check passes once you've signed.
+When you open your first pull request, a bot comments with a link to the CLA. To sign, reply on the PR with exactly:
+
+```
+I have read the CLA and I hereby sign it
+```
+
+The PR's `license/cla` status passes once you've signed, and your signature covers all your future contributions.
 
 If you're contributing on behalf of your employer, make sure you're allowed to (see section 4 of the CLA). If your employer needs a Corporate CLA, open an issue and we'll follow up.
 

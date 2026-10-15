@@ -28,4 +28,4 @@ You accept and agree to the following terms and conditions for Your Contribution
 
 This Agreement is based on the Apache Software Foundation Individual Contributor License Agreement v2.2.
 
-You sign this Agreement electronically through CLA Assistant, which records your GitHub username and the time you signed. Signing once covers all of Your Contributions to repositories that use this Agreement.
+You sign this Agreement electronically by commenting the signing phrase on a pull request, as described in CONTRIBUTING.md. Omni records your GitHub username, account ID, and the comment and time you signed. Signing once covers all of Your Contributions to repositories that use this Agreement.
