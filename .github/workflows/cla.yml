@@ -1,0 +1,103 @@
+name: CLA
+
+# Pull request authors sign CLA.md by commenting the phrase below on their PR.
+# Signatures are kept in signatures.json on the cla-signatures branch, and each
+# PR's head commit gets a `license/cla` status.
+#
+# pull_request_target runs with a write token on PRs from forks, so this
+# workflow must never check out or run the PR's code. It only calls the API.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const PHRASE = 'I have read the CLA and I hereby sign it';
+            const BRANCH = 'cla-signatures';
+            const FILE = 'signatures.json';
+            const MARKER = '<!-- cla-check -->';
+            const EXEMPT = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            const { owner, repo } = context.repo;
+            const claUrl = `https://github.com/${owner}/${repo}/blob/main/CLA.md`;
+
+            const pr = context.eventName === 'pull_request_target'
+              ? context.payload.pull_request
+              : (await github.rest.pulls.get({ owner, repo, pull_number: context.issue.number })).data;
+            const author = pr.user;
+
+            const setStatus = (state, description) => github.rest.repos.createCommitStatus({
+              owner, repo, sha: pr.head.sha, state, description, context: 'license/cla',
+              target_url: claUrl,
+            });
+
+            if (author.type === 'Bot' || EXEMPT.includes(pr.author_association)) {
+              await setStatus('success', 'Not required for maintainers and bots');
+              return;
+            }
+
+            const comment = context.payload.comment;
+            const signing = context.eventName === 'issue_comment'
+              && comment.user.id === author.id
+              && comment.body.trim().toLowerCase() === PHRASE.toLowerCase();
+
+            // Two signatures landing at once make the second write conflict on
+            // the file's sha, so re-read and retry.
+            let signed = false;
+            for (let attempt = 1; ; attempt++) {
+              const { data: file } = await github.rest.repos.getContent({ owner, repo, path: FILE, ref: BRANCH });
+              const signatures = JSON.parse(Buffer.from(file.content, 'base64').toString());
+              signed = signatures.signedContributors.some(s => s.id === author.id);
+              if (signed || !signing) break;
+              signatures.signedContributors.push({
+                name: author.login,
+                id: author.id,
+                pullRequestNo: pr.number,
+                commentId: comment.id,
+                created_at: comment.created_at,
+                repoId: context.payload.repository.id,
+              });
+              try {
+                await github.rest.repos.createOrUpdateFileContents({
+                  owner, repo, path: FILE, branch: BRANCH, sha: file.sha,
+                  message: `@${author.login} signed the CLA in #${pr.number}`,
+                  content: Buffer.from(JSON.stringify(signatures, null, 2) + '\n').toString('base64'),
+                });
+                signed = true;
+                break;
+              } catch (err) {
+                if (err.status !== 409 || attempt === 3) throw err;
+              }
+            }
+
+            // Other comments on an unsigned PR leave its status alone.
+            if (context.eventName === 'issue_comment' && !signed) return;
+
+            if (signed) {
+              await setStatus('success', 'CLA signed');
+              return;
+            }
+
+            await setStatus('failure', 'CLA not signed');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number,
+            });
+            if (!comments.some(c => c.body.includes(MARKER))) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr.number,
+                body: `${MARKER}\nThanks for the contribution, @${author.login}! Before we can merge it, please read our [Contributor License Agreement](${claUrl}) and sign it by replying to this PR with exactly:\n\n\`\`\`\n${PHRASE}\n\`\`\`\n\nYou only need to sign once; it covers your future contributions too.`,
+              });
+            }
