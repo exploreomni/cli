@@ -1,3 +1,12 @@
 {
-  "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "ItsM0rty",
+      "id": 133975972,
+      "pullRequestNo": 108,
+      "commentId": 6192481483,
+      "created_at": "2026-10-15T12:51:08Z",
+      "repoId": 1176524410
+    }
+  ]
 }
