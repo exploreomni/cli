@@ -44,7 +44,19 @@ jobs:
               target_url: claUrl,
             });
 
-            if (author.type === 'Bot' || EXEMPT.includes(pr.author_association)) {
+            // GITHUB_TOKEN can't see private org memberships, so an Omni member
+            // with private membership shows up as CONTRIBUTOR. Anyone who can
+            // push to the repo is exempt regardless. The legacy `permission`
+            // field folds maintain into write and triage into read.
+            const { data: access } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner, repo, username: author.login,
+            }).catch(err => {
+              if (err.status === 404) return { data: { permission: 'none' } };
+              throw err;
+            });
+            const canPush = ['admin', 'write'].includes(access.permission);
+
+            if (author.type === 'Bot' || canPush || EXEMPT.includes(pr.author_association)) {
               await setStatus('success', 'Not required for maintainers and bots');
               return;
             }
