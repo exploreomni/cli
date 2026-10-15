@@ -290,3 +290,5 @@ make test        # Run tests
 make sync-spec   # Update spec from monorepo
 make clean       # Remove built binary
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute. Pull requests require a signed [CLA](CLA.md).
