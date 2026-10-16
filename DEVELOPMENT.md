@@ -104,7 +104,8 @@ The phase-1 tap formula is intentionally separate from the eventual `homebrew/co
 For the release workflow to publish the tap formula, the following must be in place:
 
 - The public tap repo `exploreomni/homebrew-tap` exists with `main` as its default branch.
-- The `HOMEBREW_TAP_GITHUB_TOKEN` secret is set on the `exploreomni/cli` repo. This token needs `contents:write` access to `exploreomni/homebrew-tap` so GitHub Actions can update the tap from the release workflow.
+- The `HOMEBREW_TAP_DEPLOY_KEY` secret is set on the `exploreomni/cli` repo, holding the private half of an ed25519 deploy key. The public half is registered on `exploreomni/homebrew-tap` with write access, so GitHub Actions can update the tap from the release workflow. The key is scoped to the tap alone — it grants nothing anywhere else.
+- The tap's `protect-main` ruleset requires pull requests on `main` and lists deploy keys as a bypass actor, so the release workflow is the only thing that can push to it directly.
 
 ### What Gets Built
 
