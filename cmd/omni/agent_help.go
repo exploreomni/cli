@@ -151,6 +151,18 @@ available; binary values in its JSON object are interpreted as file paths.
 
 ## Common Flags
   --compact       Non-indented JSON output
+  --chart         Draw query run / query wait results as a terminal bar table:
+                  every dimension a column, every measure a column of bars on
+                  its own scale; a query with pivots is drawn pivoted. Leave
+                  resultType out of the body. Cannot be combined with an
+                  explicitly requested JSON format.
+  --chart-value FIELDS
+                  Only these measures get bars, by field name or label;
+                  comma-separated or repeated. Works on pivots too.
+  --chart-rows N  Most rows to draw (default 50)
+  --workbook      Also open the query in an ephemeral workbook; the link prints
+                  under human output, or as {"workbookUrl": ...} on stderr in
+                  JSON mode
   --token TOKEN   API token (overrides env/config)
   --base-url URL  API base URL (overrides config)
   --profile NAME  Config profile to use

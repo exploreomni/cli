@@ -57,14 +57,13 @@ func ValidOutputFormat(s string) bool {
 // Precedence: flag > OMNI_OUTPUT_FORMAT env > config file > auto(TTY).
 // An "auto" result from any layer resolves to "human" when isTTY, else "json".
 func ResolveOutputFormat(flagValue string, isTTY bool) string {
-	chosen := ""
-	if flagValue != "" {
-		chosen = flagValue
-	} else if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
-		chosen = v
-	} else if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
-		chosen = cfg.DefaultOutputFormat
-	}
+	return FormatFromChoice(ChosenOutputFormat(flagValue), isTTY)
+}
+
+// FormatFromChoice resolves an explicit choice (or none) to the effective
+// format. Callers that already hold the choice use this to avoid a second
+// read of the config file.
+func FormatFromChoice(chosen string, isTTY bool) string {
 	if chosen == "" || chosen == FormatAuto {
 		if isTTY {
 			return FormatHuman
@@ -72,6 +71,23 @@ func ResolveOutputFormat(flagValue string, isTTY bool) string {
 		return FormatJSON
 	}
 	return chosen
+}
+
+// ChosenOutputFormat reports the format a user actually asked for, by flag,
+// env, or config file, before the TTY fallback. It returns "" when nobody
+// chose and the format is therefore down to auto-detection — the difference
+// between "this output must be JSON" and "this happens to be a pipe".
+func ChosenOutputFormat(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
+		return v
+	}
+	if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
+		return cfg.DefaultOutputFormat
+	}
+	return ""
 }
 
 // ResolvedConfig is the final runtime config after merging flags, env, and file.

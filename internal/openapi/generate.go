@@ -251,6 +251,7 @@ type responseInfo struct {
 	ContentType string
 	Description string
 	Schema      *base.SchemaProxy // nil when the status declares no body/schema
+	Streams     bool              // a text/ndjson query stream is among the declared media types
 }
 
 func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*operationInfo) {
@@ -351,12 +352,21 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		long = "DEPRECATED: " + long
 	}
 
+	annotations := map[string]string{}
+	if props := bodyProperties(op); len(props) > 0 {
+		annotations[BodyPropsAnnotation] = strings.Join(props, ",")
+	}
+	if op.Response != nil && op.Response.Streams {
+		annotations[StreamAnnotation] = "true"
+	}
+
 	cmd := &cobra.Command{
-		Use:        use,
-		Short:      short,
-		Long:       long,
-		Deprecated: deprecatedMsg(op),
-		Args:       cobra.ExactArgs(len(op.PathParams)),
+		Use:         use,
+		Short:       short,
+		Long:        long,
+		Deprecated:  deprecatedMsg(op),
+		Annotations: annotations,
+		Args:        cobra.ExactArgs(len(op.PathParams)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Flags parsed and args validated: anything that fails from here on
 			// (bad body, HTTP 4xx/5xx) is a runtime error, and dumping the usage
@@ -472,7 +482,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		if qf.Param.Required {
 			desc = strings.TrimSpace(desc + " (required)")
 		}
-		cmd.Flags().String(qf.Name, "", desc)
+		cmd.Flags().String(qf.Name, "", flagUsage(desc))
 		if qf.Param.Required {
 			cmd.MarkFlagRequired(qf.Name)
 			hasRequiredQuery = true
@@ -603,6 +613,13 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// flagUsage quotes a description's `code` spans with ' instead: pflag reads the
+// first backquoted word in a flag's usage as its value placeholder, so a spec
+// description mentioning `job_ids` would print as --job-ids job_ids.
+func flagUsage(desc string) string {
+	return strings.ReplaceAll(desc, "`", "'")
+}
+
 // queryFlagName is the generic escape hatch flag for query params the spec
 // doesn't declare.
 const queryFlagName = "query"
@@ -685,6 +702,49 @@ func hasNonEmptyValue(vals []string) bool {
 func schemaRequested(cmd *cobra.Command, name string) bool {
 	v, err := cmd.Flags().GetBool(name)
 	return err == nil && v
+}
+
+// BodyPropsAnnotation lists the top-level property names of a command's JSON
+// request body, so callers outside this package can ask what a body accepts
+// without re-parsing the spec. Read off the spec rather than hard-coded, so an
+// endpoint growing a field is covered without a code change.
+const BodyPropsAnnotation = "omni/body-props"
+
+// StreamAnnotation marks a command whose success response is a query stream.
+const StreamAnnotation = "omni/stream"
+
+// ReturnsStream reports whether cmd's success response is a query stream.
+func ReturnsStream(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[StreamAnnotation] == "true"
+}
+
+// BodyDeclares reports whether cmd's JSON request body has a top-level
+// property called name.
+func BodyDeclares(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return false
+	}
+	for _, p := range strings.Split(cmd.Annotations[BodyPropsAnnotation], ",") {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
+func bodyProperties(op *operationInfo) []string {
+	if op.BodySchema == nil || op.BodyMediaType != "application/json" {
+		return nil
+	}
+	schema := op.BodySchema.Schema()
+	if schema == nil || schema.Properties == nil {
+		return nil
+	}
+	var props []string
+	for pair := schema.Properties.First(); pair != nil; pair = pair.Next() {
+		props = append(props, pair.Key())
+	}
+	return props
 }
 
 // requestBodyMediaType returns the media type and definition the CLI will use,
@@ -770,6 +830,13 @@ func successResponse(resps *v3.Responses) *responseInfo {
 
 	info := &responseInfo{Status: bestCode, Description: bestResp.Description}
 	info.ContentType, info.Schema = pickMediaType(bestResp.Content)
+	if bestResp.Content != nil {
+		for pair := bestResp.Content.First(); pair != nil; pair = pair.Next() {
+			if strings.HasPrefix(pair.Key(), "text/ndjson") {
+				info.Streams = true
+			}
+		}
+	}
 	return info
 }
 
@@ -909,11 +976,15 @@ func isPluralS(rs []rune, i int) bool {
 // choosing the host it is sent to.
 var globalFlagKeys = map[string]string{
 	// Root persistent flags.
-	flagLookupKey("profile"):  "profile",
-	flagLookupKey("token"):    "token",
-	flagLookupKey("base-url"): "base-url",
-	flagLookupKey("compact"):  "compact",
-	flagLookupKey("format"):   "format",
+	flagLookupKey("profile"):     "profile",
+	flagLookupKey("token"):       "token",
+	flagLookupKey("base-url"):    "base-url",
+	flagLookupKey("compact"):     "compact",
+	flagLookupKey("format"):      "format",
+	flagLookupKey("chart"):       "chart",
+	flagLookupKey("chart-value"): "chart-value",
+	flagLookupKey("chart-rows"):  "chart-rows",
+	flagLookupKey("workbook"):    "workbook",
 	// Added by cobra on every command; must stay a bool.
 	flagLookupKey("help"): "help",
 }

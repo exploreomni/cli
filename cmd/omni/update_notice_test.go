@@ -159,8 +159,8 @@ func TestAutomaticUpdateNotice(t *testing.T) {
 	result := updatecheck.Result{
 		UpdateAvailable: true,
 		LatestVersion:   "v1.3.0",
-		ReleaseURL:      "https://example.test/v1.3.0",
-		Upgrade:         updatecheck.UpgradeInstructions{Homebrew: "brew upgrade omni", Other: "install command"},
+		ReleaseURL:      "https://github.com/exploreomni/cli/releases/tag/v1.3.0",
+		Upgrade:         updatecheck.UpgradeInstructions{Homebrew: "brew update && brew upgrade omni", Other: "install command"},
 	}
 	ch := make(chan updateOutcome, 1)
 	ch <- updateOutcome{result: result}
@@ -282,15 +282,15 @@ func TestRecentHomebrewReleaseIsSuppressed(t *testing.T) {
 }
 
 func TestUpgradeHint(t *testing.T) {
-	unix := updatecheck.UpgradeInstructions{Homebrew: "brew upgrade omni", Other: "curl ... | sh"}
-	if got := upgradeHint(unix, true); got != "run: brew upgrade omni" {
+	unix := updatecheck.UpgradeInstructions{Homebrew: "brew update && brew upgrade omni", Other: "curl ... | sh"}
+	if got := upgradeHint(unix, true); got != "run: brew update && brew upgrade omni" {
 		t.Errorf("homebrew hint = %q", got)
 	}
 	if got := upgradeHint(unix, false); got != "run: curl ... | sh" {
 		t.Errorf("unix hint = %q", got)
 	}
 	// Windows has no Homebrew and no install.sh, so the advice is prose.
-	windows := updatecheck.UpgradeInstructions{Other: "download the latest release from https://example.test/latest"}
+	windows := updatecheck.UpgradeInstructions{Other: "download the latest release from https://github.com/exploreomni/cli/releases/latest"}
 	if got := upgradeHint(windows, false); got != windows.Other {
 		t.Errorf("windows hint = %q", got)
 	}

@@ -17,6 +17,12 @@ make test        # Run tests
 make clean       # Remove built binary
 ```
 
+To check table and chart rendering by eye, `scripts/chart-demo.sh` runs read-only queries (tables, charts, pivots, a workbook link) against a sales pipeline demo model:
+
+```bash
+OMNI_PROFILE=my-profile MODEL_ID=<model-id> PAUSE=1 scripts/chart-demo.sh
+```
+
 ## Updating the OpenAPI Spec
 
 The CLI auto-generates commands from the embedded OpenAPI spec. The default sync fetches it from `exploreomni/omni@main` via `gh`:

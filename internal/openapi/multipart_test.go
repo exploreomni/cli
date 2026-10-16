@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const multipartTestSpec = `{
@@ -425,5 +426,16 @@ func TestRegisterMultipartFlags_ResolvesCollisions(t *testing.T) {
 		if command.Flags().Lookup(field.FlagName) == nil {
 			t.Errorf("flag --%s was not registered", field.FlagName)
 		}
+	}
+}
+
+func TestRegisterMultipartFlags_BackticksKeepTypePlaceholder(t *testing.T) {
+	cmd := &cobra.Command{Use: "upload"}
+	registerMultipartFlags(cmd, []multipartFieldInfo{
+		{Name: "file", FlagName: "file", Description: "CSV to upload; see `format`", Binary: true, Required: true},
+	})
+	name, usage := pflag.UnquoteUsage(cmd.Flags().Lookup("file"))
+	if name != "string" || usage != "CSV to upload; see 'format' (file path) [required unless supplied via --body]" {
+		t.Errorf("placeholder %q, usage %q", name, usage)
 	}
 }

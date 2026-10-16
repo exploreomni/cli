@@ -306,7 +306,7 @@ func applyBodyShorthand(cmd *cobra.Command, op *operationInfo, sh *BodyShorthand
 		if err != nil {
 			fieldType = "string"
 		}
-		cmd.Flags().Var(&shorthandFlagValue{value: f.Default, typeName: fieldType}, f.FlagName, f.Description+bodyExclusiveSuffix)
+		cmd.Flags().Var(&shorthandFlagValue{value: f.Default, typeName: fieldType}, f.FlagName, flagUsage(f.Description+bodyExclusiveSuffix))
 	}
 
 	// Say the same thing from the other side: --body's own description on a

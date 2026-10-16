@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -45,7 +47,7 @@ func HumanBytes(w io.Writer, data []byte) error {
 		fmt.Fprintln(w)
 		return werr
 	}
-	renderValue(w, v)
+	renderValue(w, sanitizeJSON(v))
 	return nil
 }
 
@@ -56,6 +58,7 @@ func HumanError(statusCode int, detail string) {
 
 // HumanErrorTo prints a plain-text error message to w.
 func HumanErrorTo(w io.Writer, statusCode int, detail string) {
+	detail = sanitize(detail)
 	if detail == "" {
 		detail = fmt.Sprintf("HTTP %d", statusCode)
 	}
@@ -237,28 +240,25 @@ func renderTable(w io.Writer, rows []any) {
 	}
 
 	t := table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(styleBorder).
 		Headers(headers...).
 		StyleFunc(styleFor(columns))
 
 	for _, rec := range records {
 		row := make([]string, len(columns))
 		for i, c := range columns {
-			row[i] = truncate(formatScalar(rec[c]), 60)
+			row[i] = truncateCells(formatField(c, rec[c]), 60)
 		}
 		t.Row(row...)
 	}
 	fmt.Fprintln(w, t.Render())
 }
 
-// styleFor returns a StyleFunc that dims identifier columns and greys out
-// timestamps, keeping names and other scalars at default foreground.
+// styleFor returns a StyleFunc that mutes identifier and timestamp columns,
+// keeping names and other scalars at default foreground.
 func styleFor(columns []string) func(row, col int) lipgloss.Style {
-	dim := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("8"))
-	grey := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("244"))
-	header := lipgloss.NewStyle().Padding(0, 1).Bold(true)
-	base := lipgloss.NewStyle().Padding(0, 1)
+	dim, grey, header, base := styleMuted, styleMuted, styleHeader, styleCell
 
 	return func(row, col int) lipgloss.Style {
 		if row == table.HeaderRow {
@@ -310,7 +310,7 @@ func renderKeyValue(w io.Writer, obj map[string]any) {
 			fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", summarizeComplex(v))
 			continue
 		}
-		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatScalar(v))
+		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatField(k, v))
 	}
 }
 
@@ -406,6 +406,26 @@ func summarizeComplex(v any) string {
 	return ""
 }
 
+// formatField renders a value under the field name it arrived with. An
+// identifier is a value someone copies back into a command, so it keeps its
+// digits ungrouped; everything else reads better with separators.
+func formatField(key string, v any) string {
+	if f, ok := v.(float64); ok && identifierKey(key) {
+		return formatNumberPlain(f)
+	}
+	return formatScalar(v)
+}
+
+// identifierKey reports whether a field name reads as an identifier or a port
+// rather than a magnitude.
+func identifierKey(k string) bool {
+	switch k {
+	case "id", "port", "version":
+		return true
+	}
+	return strings.HasSuffix(k, "Id") || strings.HasSuffix(k, "ID")
+}
+
 func formatScalar(v any) string {
 	switch x := v.(type) {
 	case nil:
@@ -424,16 +444,94 @@ func formatScalar(v any) string {
 		}
 		return "false"
 	case float64:
-		// JSON numbers decode as float64; print without trailing .0 when integral.
-		if x == float64(int64(x)) {
-			return fmt.Sprintf("%d", int64(x))
-		}
-		return fmt.Sprintf("%g", x)
+		return formatNumber(x)
 	case json.Number:
 		return x.String()
 	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// formatNumber renders a JSON number for reading: no exponent, no invented
+// precision, and thousands separators once the digits outrun a glance.
+// Separators start at five digits so a year stays 2026 rather than 2,026.
+func formatNumber(f float64) string {
+	return formatNumberGrouped(f, 5)
+}
+
+// formatNumberPlain is formatNumber without separators, for fields named as
+// identifiers: a grouped id is a value someone copies back wrong.
+func formatNumberPlain(f float64) string {
+	return formatNumberGrouped(f, math.MaxInt)
+}
+
+// formatNumberGrouped groups thousands once the integer part has minDigits digits.
+func formatNumberGrouped(f float64, minDigits int) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Sprintf("%g", f)
+	}
+	abs := math.Abs(f)
+	integral := f == math.Trunc(f)
+	// Outside these ranges the plain form is longer than it is useful. Whole
+	// numbers get far more room: a 16-digit warehouse ID is a value someone
+	// reads, not a magnitude they skim.
+	switch {
+	case abs == 0:
+	case integral && abs >= 1e18:
+		return fmt.Sprintf("%g", f)
+	case !integral && (abs >= 1e15 || abs < 1e-6):
+		return fmt.Sprintf("%g", f)
+	}
+
+	// Shortest form that round-trips: a coordinate keeps its digits. Model
+	// formats, not this, decide decimals for query results.
+	s := strconv.FormatFloat(f, 'f', -1, 64)
+
+	sign := ""
+	if strings.HasPrefix(s, "-") {
+		sign, s = "-", s[1:]
+	}
+	intPart, frac := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		intPart, frac = s[:i], s[i:]
+	}
+	if len(intPart) < minDigits {
+		return sign + intPart + frac
+	}
+
+	var b strings.Builder
+	for i := range intPart {
+		if i > 0 && (len(intPart)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte(intPart[i])
+	}
+	return sign + b.String() + frac
+}
+
+// truncateCells shortens s to max terminal cells. Runes aren't cells: a CJK
+// label of 28 runes occupies 56 columns, which would blow the layout its
+// width was budgeted for.
+func truncateCells(s string, max int) string {
+	switch {
+	case lipgloss.Width(s) <= max:
+		return s
+	case max <= 0:
+		return ""
+	case max == 1:
+		return "…"
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		w := lipgloss.Width(string(r))
+		if used+w > max-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += w
+	}
+	return b.String() + "…"
 }
 
 func parseTime(s string) (time.Time, bool) {
@@ -466,13 +564,6 @@ func relativeTime(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dy ago", int(d.Hours()/(24*365)))
 	}
-}
-
-func truncate(s string, max int) string {
-	if max <= 1 || len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
 }
 
 // humanizeKey converts API field names like "modelKind", "MODEL_KIND", or

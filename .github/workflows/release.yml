@@ -34,7 +34,7 @@ jobs:
         with:
           repository: exploreomni/homebrew-tap
           ref: main
-          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: homebrew-tap
 
       - name: Render Homebrew formula from release artifacts
@@ -52,3 +52,17 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "Brew formula update for omni version ${GITHUB_REF_NAME}"
           git push origin HEAD:main
+
+      - name: Notify omni-agent-skills
+        if: ${{ !contains(github.ref_name, '-') }}
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
+        with:
+          token: ${{ secrets.SKILLS_REPO_TOKEN }}
+          repository: exploreomni/omni-agent-skills
+          event-type: cli-update
+          client-payload: >-
+            {
+              "release_tag": "${{ github.ref_name }}",
+              "release_url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+              "commit_sha": "${{ github.sha }}"
+            }
