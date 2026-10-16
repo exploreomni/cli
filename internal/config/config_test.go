@@ -306,6 +306,57 @@ func TestValidateEndpoint_InsecureBypass(t *testing.T) {
 
 // --- OAuth refresh safety ---
 
+func TestResolve_ExplicitTokenSkipsOAuthRefresh(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tokenFlag string
+		tokenEnv  string
+		want      string
+	}{
+		{"flag", "flag-token", "", "flag-token"},
+		{"env", "", "env-token", "env-token"},
+		{"flag_over_env", "flag-token", "env-token", "flag-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+			}))
+			defer srv.Close()
+
+			writeConfig(t, &Config{
+				Version:        1,
+				DefaultProfile: "test",
+				Profiles: map[string]Profile{
+					"test": {
+						APIEndpoint:    srv.URL,
+						AuthMethod:     "oauth",
+						AccessToken:    "old-access",
+						RefreshToken:   "old-refresh",
+						TokenExpiresAt: time.Now().Add(-time.Hour).Format(time.RFC3339),
+					},
+				},
+			})
+			t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+			t.Setenv("OMNI_API_TOKEN", tc.tokenEnv)
+
+			rc, err := Resolve("", tc.tokenFlag, "")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if rc.Token != tc.want {
+				t.Errorf("Token = %q, want %q", rc.Token, tc.want)
+			}
+			if hits.Load() != 0 {
+				t.Errorf("refresh requests = %d, want 0 with an explicit token", hits.Load())
+			}
+		})
+	}
+}
+
 // If the saved profile's apiEndpoint isn't an allowlisted HTTPS Omni domain,
 // Resolve() must NOT send the refresh token there, even if env vars or flags
 // point rc.BaseURL at a legitimate host. This protects against a poisoned
