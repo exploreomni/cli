@@ -1202,3 +1202,185 @@ func TestSchema_QueryFlagsReflectCollisionRenames(t *testing.T) {
 		}
 	}
 }
+
+// unionTestSpec: a discriminated oneOf inside an allOf (like schedules), and an
+// anyOf whose branches only name an outer property.
+const unionTestSpec = `{
+  "openapi": "3.1.0",
+  "info": {"title": "t", "version": "1"},
+  "paths": {
+    "/deliveries": {
+      "post": {
+        "tags": ["Union"],
+        "operationId": "create",
+        "requestBody": {"content": {"application/json": {"schema": {
+          "allOf": [
+            {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+            {"oneOf": [
+              {"type": "object", "description": "Email", "required": ["destinationType", "recipients"],
+               "properties": {"destinationType": {"type": "string", "enum": ["email"]},
+                              "recipients": {"type": "array", "items": {"type": "string"}}}},
+              {"type": "object", "description": "Webhook", "required": ["destinationType", "url"],
+               "properties": {"destinationType": {"const": "webhook"}, "url": {"type": "string"}}}
+            ]}
+          ]
+        }}}},
+        "responses": {"200": {"description": "ok"}}
+      }
+    },
+    "/removals": {
+      "post": {
+        "tags": ["Union"],
+        "operationId": "remove",
+        "requestBody": {"content": {"application/json": {"schema": {
+          "type": "object",
+          "properties": {
+            "emails": {"type": "array", "items": {"type": "string"}, "example": ["a@example.com"]},
+            "ids": {"type": "array", "items": {"type": "string"}}
+          },
+          "anyOf": [
+            {"type": "object", "required": ["emails"], "properties": {"emails": {}}},
+            {"required": ["ids"]}
+          ]
+        }}}},
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  }
+}`
+
+func TestSchema_UnionBodyListsVariants(t *testing.T) {
+	doc, err := runSchemaWith(t, unionTestSpec)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(doc.Required, ",") != "name" {
+		t.Errorf("required = %v, want only the shared [name]", doc.Required)
+	}
+	if len(doc.Variants) != 2 {
+		t.Fatalf("variants = %+v, want 2", doc.Variants)
+	}
+	email, webhook := doc.Variants[0], doc.Variants[1]
+	if email.When["destinationType"] != "email" || webhook.When["destinationType"] != "webhook" {
+		t.Errorf("when = %v / %v, want destinationType email / webhook (enum and const)", email.When, webhook.When)
+	}
+	if got := strings.Join(email.Required, ","); got != "name,destinationType,recipients" {
+		t.Errorf("email required = %s", got)
+	}
+	if got := strings.Join(webhook.Required, ","); got != "name,destinationType,url" {
+		t.Errorf("webhook required = %s", got)
+	}
+	if email.Description != "Email" {
+		t.Errorf("email description = %q", email.Description)
+	}
+
+	ex, _ := doc.Example.(map[string]interface{})
+	if ex["destinationType"] != "email" || ex["name"] == nil {
+		t.Errorf("example = %v, want the shared fields plus the email branch's", ex)
+	}
+	if _, ok := ex["recipients"].([]interface{}); !ok {
+		t.Errorf("example recipients = %#v, want an array", ex["recipients"])
+	}
+}
+
+func TestSchema_FieldDrillsIntoUnionBranch(t *testing.T) {
+	doc, err := runSchemaWith(t, unionTestSpec, "--field", "url")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body, _ := doc.Body.(map[string]interface{}); body["type"] != "string" {
+		t.Errorf("drilled url = %v, want the webhook branch's string", doc.Body)
+	}
+}
+
+func TestSchema_UnionBranchRequiringOuterProperty(t *testing.T) {
+	doc, err := execSchema(t, unionTestSpec, "remove", "--schema")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(doc.Variants) != 2 || doc.Variants[1].Required[0] != "ids" {
+		t.Errorf("variants = %+v, want [emails] and [ids]", doc.Variants)
+	}
+	ex, _ := doc.Example.(map[string]interface{})
+	if got, ok := ex["emails"].([]interface{}); !ok || len(got) != 1 || got[0] != "a@example.com" {
+		t.Errorf("example = %v, want emails from the outer property's example", ex)
+	}
+}
+
+func TestBodyDeclares_SeesComposedProperties(t *testing.T) {
+	cmd := subcommand(t, unionTestSpec, "create")
+	for _, name := range []string{"name", "recipients", "url"} {
+		if !BodyDeclares(cmd, name) {
+			t.Errorf("BodyDeclares(%q) = false, want true", name)
+		}
+	}
+}
+
+// Every real-spec example must satisfy its required fields and one variant, so
+// a spec sync that adds a shape the describer misses fails here.
+func TestRealSpec_ExamplesSatisfyRequired(t *testing.T) {
+	cmds, err := GenerateCommands(loadSpec(t), func(APIRequest) error { return nil })
+	if err != nil {
+		t.Fatalf("GenerateCommands: %v", err)
+	}
+	checked := 0
+	for _, group := range cmds {
+		for _, sub := range group.Commands() {
+			name := group.Name() + " " + sub.Name()
+			doc, err := execSchemaCmd(t, group, sub.Name())
+			if err != nil {
+				t.Errorf("%s --schema: %v", name, err)
+				continue
+			}
+			ex, ok := doc.Example.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			checked++
+			for _, r := range doc.Required {
+				if _, ok := ex[r]; !ok {
+					t.Errorf("%s: example %v lacks required %q", name, ex, r)
+				}
+			}
+			if len(doc.Variants) == 0 {
+				continue
+			}
+			satisfied := false
+			for _, v := range doc.Variants {
+				all := true
+				for _, r := range v.Required {
+					if _, ok := ex[r]; !ok {
+						all = false
+						break
+					}
+				}
+				satisfied = satisfied || all
+			}
+			if !satisfied {
+				t.Errorf("%s: example %v satisfies none of the variants %+v", name, ex, doc.Variants)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no example bodies checked")
+	}
+}
+
+// execSchemaCmd runs `<sub> --schema` on an already generated group.
+func execSchemaCmd(t *testing.T, group *cobra.Command, sub string) (SchemaDoc, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	group.SilenceUsage = true
+	group.SilenceErrors = true
+	group.SetOut(&buf)
+	group.SetErr(&buf)
+	group.SetArgs([]string{sub, "--schema"})
+	if err := group.Execute(); err != nil {
+		return SchemaDoc{}, err
+	}
+	var doc SchemaDoc
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("unmarshal %s schema: %v\n%s", sub, err, buf.String())
+	}
+	return doc, nil
+}

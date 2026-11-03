@@ -130,6 +130,11 @@ token or positional args needed):
   - queryParams: query flags, with type, enum, required, description
   - body:        the request body's JSON schema plus a filled-in example
                  (null when the operation takes no body)
+  - required:    body fields every request needs
+  - variants:    for a body that is one of several shapes (e.g. schedules
+                 create, one per destinationType), each shape's full required
+                 list and the value that selects it ("when"); the example
+                 follows the first
   - response:    the success response's shape (status, content type, schema)
 Use it instead of guessing the JSON for --body, or the shape of a response you
 are about to parse.
