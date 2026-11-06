@@ -99,8 +99,8 @@ verify_checksum() {
     elif command -v shasum >/dev/null 2>&1; then
         actual=$(shasum -a 256 "${dir}/${file}" | awk '{print $1}')
     else
-        echo "Warning: No sha256 tool found, skipping checksum verification" >&2
-        return
+        echo "Error: No sha256 tool found (need sha256sum or shasum); refusing to install without checksum verification" >&2
+        exit 1
     fi
 
     if [ "$expected" != "$actual" ]; then
