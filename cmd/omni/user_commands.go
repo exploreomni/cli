@@ -177,11 +177,76 @@ func setAttributesSchemaDoc() openapi.SchemaDoc {
 				"properties": map[string]interface{}{
 					"active":      map[string]interface{}{"type": "boolean", "description": "Whether the user is active"},
 					"displayName": schemaString("Display name"),
-					"id":          map[string]interface{}{"type": "string", "format": "uuid", "description": "SCIM user ID"},
-					"schemas":     map[string]interface{}{"type": "array", "description": "SCIM schema URIs", "items": map[string]interface{}{"type": "string"}},
-					"userName":    map[string]interface{}{"type": "string", "format": "email", "description": "Username (email)"},
+					"emails": map[string]interface{}{
+						"type":        "array",
+						"description": "The user's email, as the single primary entry",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"primary": map[string]interface{}{"type": "boolean", "description": "Whether this is the primary email"},
+								"value":   map[string]interface{}{"type": "string", "format": "email", "description": "Email address"},
+							},
+							"required": []string{"primary", "value"},
+						},
+					},
+					"embedEmail":      map[string]interface{}{"type": "string | null", "description": "Email from the embed SSO request. Present only on `/api/scim/v2/embed/Users` responses."},
+					"embedEntity":     map[string]interface{}{"type": "string | null", "description": "Embed entity the user belongs to. Present only on `/api/scim/v2/embed/Users` responses."},
+					"embedExternalId": map[string]interface{}{"type": "string | null", "description": "External identifier for the embed user (from your system). Present only on `/api/scim/v2/embed/Users` responses."},
+					"groups": map[string]interface{}{
+						"type":        "array",
+						"description": "Groups the user belongs to",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"display": schemaString("Group name"),
+								"value":   schemaString("Group ID (miniUuid)"),
+							},
+							"required": []string{"display", "value"},
+						},
+					},
+					"id": map[string]interface{}{"type": "string", "format": "uuid", "description": "SCIM user ID"},
+					"meta": map[string]interface{}{
+						"type":        "object",
+						"description": "Resource metadata",
+						"properties": map[string]interface{}{
+							"created":      map[string]interface{}{"type": "string", "format": "date-time", "description": "When the user was added to the organization"},
+							"lastModified": map[string]interface{}{"type": "string", "format": "date-time", "description": "When the user was last modified"},
+							"resourceType": map[string]interface{}{"type": "string", "enum": []string{"User"}},
+						},
+						"required": []string{"created", "lastModified", "resourceType"},
+					},
+					"schemas":  map[string]interface{}{"type": "array", "description": "SCIM schema URIs", "items": map[string]interface{}{"type": "string"}},
+					"userName": map[string]interface{}{"type": "string", "format": "email", "description": "Username (email)"},
+					userAttributePrefix: map[string]interface{}{
+						"type":        "object",
+						"description": "User attribute values keyed by attribute name, including system attributes that are set. A multi-value attribute holds an array. Number attributes hold strings, except values stored before they were kept as strings, which can still be JSON numbers.",
+						"additionalProperties": map[string]interface{}{
+							"anyOf": []interface{}{
+								map[string]interface{}{"type": "string"},
+								map[string]interface{}{"type": "number"},
+								map[string]interface{}{
+									"type": "array",
+									"items": map[string]interface{}{"anyOf": []interface{}{
+										map[string]interface{}{"type": "string"},
+										map[string]interface{}{"type": "number"},
+									}},
+								},
+								map[string]interface{}{"type": "null"},
+							},
+						},
+					},
+					"urn:omni:params:scim:schemas:extension:user:2.0": map[string]interface{}{
+						"type":        "object",
+						"description": "Omni user extension. `userType` is `Admin` for an Organization Admin.",
+						"properties": map[string]interface{}{
+							"emailLinkSignIn": map[string]interface{}{"type": "boolean", "description": "Whether the user can sign in with an email link while the organization requires SSO"},
+							"lastLogin":       map[string]interface{}{"type": "string | null", "format": "date-time"},
+							"userType":        map[string]interface{}{"type": "string", "description": "`Admin`, `Member` or `External`", "enum": []string{"Admin", "External", "Member"}},
+						},
+						"required": []string{"emailLinkSignIn", "lastLogin", "userType"},
+					},
 				},
-				"required": []string{"active", "displayName", "id", "schemas", "userName"},
+				"required": []string{"active", "displayName", "emails", "groups", "id", "meta", "schemas", "userName", userAttributePrefix, "urn:omni:params:scim:schemas:extension:user:2.0"},
 			},
 		},
 	}
