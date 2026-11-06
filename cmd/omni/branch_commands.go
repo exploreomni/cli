@@ -162,6 +162,11 @@ func createBranchSchemaDoc() openapi.SchemaDoc {
 							"id":        map[string]interface{}{"type": "string", "format": "uuid", "description": "Created model ID"},
 							"modelKind": schemaString("Kind of model created"),
 							"name":      map[string]interface{}{"type": "string | null", "description": "Model name"},
+							"orgBranchId": map[string]interface{}{
+								"type":        "string | null",
+								"format":      "uuid",
+								"description": "For a branch: the ID of the org-wide branch it is a member of, which the /api/v1/branches endpoints take",
+							},
 						},
 						"required": []string{"id", "modelKind", "name"},
 					},
