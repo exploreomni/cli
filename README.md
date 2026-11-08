@@ -164,6 +164,19 @@ A request body can be given three ways: inline JSON (`--body '{"name":"x"}'`), a
 checked as JSON before the request is sent, so a typo fails locally instead of coming
 back as a generic API 400.
 
+Add `--dry-run` to any API command to check the whole request against the embedded spec
+without sending it (no token or network needed): unknown keys (with a "did you mean"),
+missing required fields, types, enums, bounds, UUID fields and query flag enums. Every
+problem is reported in one JSON document on stderr, with a non-zero exit; a clean
+request prints `{"valid": true, ...}` and exits 0. It only checks the request's shape:
+whether a model, field or topic exists is still up to the API.
+
+```bash
+omni query run --dry-run --body '{"query":{"modelId":"...","fields":["orders.count"]},"resultTyp":"csv"}'
+# {"error": "request failed validation (1 problem); nothing was sent",
+#  "violations": [{"path": "body.resultTyp", "message": "unknown field \"resultTyp\" (did you mean \"resultType\"?)"}]}
+```
+
 Endpoints whose request body is `multipart/form-data` (`uploads create`,
 `uploads replace-data`) take the same `--body` forms: the JSON is a map of field
 values, checked locally and then framed into form parts, with binary fields given

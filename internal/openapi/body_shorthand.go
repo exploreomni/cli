@@ -177,8 +177,8 @@ var bodyShorthands = map[string]*BodyShorthand{
 			{FlagName: "commit-message", FieldPath: "commitMessage", Description: "commit message for git sync"},
 			{FlagName: "git-ref", FieldPath: "gitRef", Description: "git reference"},
 		},
-		ExampleShort: `omni models migrate <model-id> <target-model-id>`,
-		ExampleJSON:  `omni models migrate <model-id> --body '{"targetModelId":"..."}'`,
+		ExampleShort: `omni models migrate <model-id> <target-model-id> --git-ref <ref>`,
+		ExampleJSON:  `omni models migrate <model-id> --body '{"targetModelId":"...","gitRef":"main"}'`,
 	},
 	"modelsBranchDbt": {
 		Args: []ArgMapping{
