@@ -237,6 +237,7 @@ type operationInfo struct {
 	PathParams    []paramInfo
 	QueryParams   []paramInfo
 	HasBody       bool
+	BodyRequired  bool              // the spec marks the request body required
 	BodySchema    *base.SchemaProxy // request body schema, when HasBody
 	BodyMediaType string
 	BodyFields    []multipartFieldInfo
@@ -317,6 +318,7 @@ func extractOperations(pathStr string, item *v3.PathItem, groups map[string][]*o
 		// Check for request body
 		if op.RequestBody != nil {
 			info.HasBody = true
+			info.BodyRequired = boolVal(op.RequestBody.Required)
 			mediaType, media := requestBodyMediaType(op.RequestBody)
 			info.BodyMediaType = mediaType
 			if media != nil {
@@ -359,6 +361,9 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 	if op.Response != nil && op.Response.Streams {
 		annotations[StreamAnnotation] = "true"
 	}
+
+	// Resolved once the flags are registered below; RunE runs after that.
+	var dryRunName string
 
 	cmd := &cobra.Command{
 		Use:         use,
@@ -410,6 +415,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 
 			// Read body from stdin, a file, or the flag value itself.
 			var body []byte
+			bodyProvided := false
 			contentType := op.BodyMediaType
 			if op.HasBody {
 				// Flag selection goes by Changed, not by value: an explicitly
@@ -424,7 +430,7 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 					flagName = "json-body"
 				}
 
-				bodyProvided := cmd.Flags().Changed(flagName)
+				bodyProvided = cmd.Flags().Changed(flagName)
 				if bodyProvided {
 					raw, _ := cmd.Flags().GetString(flagName)
 					var err error
@@ -444,6 +450,12 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 						return err
 					}
 				}
+			}
+
+			// --dry-run stops here: everything above (args, query flags, body
+			// input, multipart assembly) has run, nothing has been sent.
+			if dryRun(cmd, dryRunName) {
+				return emitDryRun(cmd, op, queryFlags, query, path, body, bodyProvided)
 			}
 
 			return exec(APIRequest{
@@ -528,6 +540,10 @@ func buildCommand(op *operationInfo, exec Executor) *cobra.Command {
 		}
 		cmd.Long = strings.TrimRight(cmd.Long, "\n") + "\n\n" + args
 	}
+
+	// --dry-run is registered after every spec-derived flag so a spec
+	// parameter of the same name keeps it and --dry-run falls back instead.
+	dryRunName = registerDryRunFlag(cmd)
 
 	// Add the --schema discovery flag last, after any shorthand has replaced
 	// Args/RunE, so the short-circuit wraps the final versions. Registered for

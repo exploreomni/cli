@@ -38,7 +38,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ## Common Workflows
 
 ### Answer a question about your data (recommended first approach)
-  omni ai generate-query --body '{"modelId":"MODEL_ID","prompt":"how many users","executeQuery":true}'
+  omni ai generate-query --body '{"modelId":"MODEL_ID","prompt":"how many users","runQuery":true}'
 
 ### List models (to find model IDs)
   omni models list --compact
@@ -47,7 +47,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   omni models create-branch <model-id> --name "my-branch"
 
 ### Run a semantic query directly
-  omni query run --body '{"modelId":"MODEL_ID","query":{"fields":["view_name/field_name"],"limit":100}}'
+  omni query run --body '{"query":{"modelId":"MODEL_ID","fields":["view_name/field_name"],"limit":100}}'
 
 ### List dashboards
   omni content list --compact
@@ -95,7 +95,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   accepted shape of a subtree instead of guessing from the v2-get output.
 
 ### Search Omni documentation
-  omni ai search-omni-docs --body '{"query":"how do I..."}'
+  omni ai search-omni-docs --body '{"question":"how do I..."}'
 
 ### Upload a CSV
 Multipart body fields are generated as flags; binary fields take file paths.
@@ -150,6 +150,27 @@ and maps, so you can name a leaf without knowing the container shape:
   omni documents v2-create --schema --field queryPresentations.data # just the tiles map
   omni documents v2-create --schema --field queryPresentations.data.query
 
+## Checking a request before sending it
+Every API command accepts --dry-run. It runs everything a real call runs up to
+the network (positional args, query flags, body input) and then checks the
+request against the embedded spec instead of sending it: no token, no network.
+It reports every problem at once, so fix them all before retrying:
+  - unknown body keys, with the closest declared name ("did you mean")
+  - missing required fields, wrong JSON types, values outside an enum
+  - lengths, numeric bounds, item counts, patterns, UUID fields
+  - fields that cannot be combined, and read-only fields echoed from a GET
+  - query flag values outside their enum
+A clean request prints {"valid": true, "method", "path", "bodyChecked"} to
+stdout and exits 0. Otherwise one JSON document goes to stderr and the exit
+code is non-zero:
+  {"error": "request failed validation (2 problems); nothing was sent",
+   "violations": [{"path": "body.resultTyp", "message": "unknown field \"resultTyp\" (did you mean \"resultType\"?)"}, ...]}
+Paths are dotted from "body"; a key containing dots is quoted
+(body.query.filters["orders.status"].type). Query flags appear as "--flag".
+It is a static check against the spec, so it cannot see whether a model,
+field or topic exists; the API still decides that.
+  omni query run --dry-run --body @query.json
+
 For multipart/form-data commands, top-level schema properties are also exposed
 as flags. Binary properties are labeled "file path" in --help. --body remains
 available; binary values in its JSON object are interpreted as file paths.
@@ -178,6 +199,8 @@ available; binary values in its JSON object are interpreted as file paths.
                   fields take file paths.
   --schema        Print args, flags, body schema + example, and response shape,
                   then exit (works on every API command)
+  --dry-run       Check the request against the spec and exit without sending
+                  it; reports every problem at once (works on every API command)
   --field PATH    With --schema: drill into a dotted field path of the body
   --depth N       With --schema: cap nesting depth (lower = smaller)
   --query K=V     Extra query parameter not declared in the spec (repeatable)
