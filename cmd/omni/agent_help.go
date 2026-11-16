@@ -38,7 +38,7 @@ Set OMNI_API_TOKEN env var, or run: omni config init
 ## Common Workflows
 
 ### Answer a question about your data (recommended first approach)
-  omni ai generate-query --body '{"modelId":"MODEL_ID","prompt":"how many users","executeQuery":true}'
+  omni ai generate-query --body '{"modelId":"MODEL_ID","prompt":"how many users","runQuery":true}'
 
 ### List models (to find model IDs)
   omni models list --compact
@@ -47,14 +47,15 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   omni models create-branch <model-id> --name "my-branch"
 
 ### Run a semantic query directly
-  omni query run --body '{"modelId":"MODEL_ID","query":{"fields":["view_name/field_name"],"limit":100}}'
+  omni query run --body '{"query":{"modelId":"MODEL_ID","table":"view_name","fields":["view_name.field_name"],"limit":100}}'
 
 ### List dashboards
   omni content list --compact
   # Returns all content (dashboards, workbooks, folders). Dashboards have "hasDashboard": true.
 
 ### Download a dashboard
-  omni dashboards download <dashboard-id>
+  omni dashboards download <dashboard-id> --body '{"format":"pdf"}'
+  # Starts a job; poll "omni dashboards download-status", then fetch with "omni dashboards download-file".
 
 ### Read or edit a document (v2)
   # Read live state.
@@ -95,7 +96,8 @@ Set OMNI_API_TOKEN env var, or run: omni config init
   accepted shape of a subtree instead of guessing from the v2-get output.
 
 ### Search Omni documentation
-  omni ai search-omni-docs --body '{"query":"how do I..."}'
+  omni ai search-omni-docs "how do I..."
+  # or: omni ai search-omni-docs --body '{"question":"how do I..."}'
 
 ### Upload a CSV
 Multipart body fields are generated as flags; binary fields take file paths.
