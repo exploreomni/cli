@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exploreomni/omni-cli/internal/useragent"
 	"golang.org/x/oauth2"
 )
 
@@ -34,6 +35,14 @@ func Config(apiEndpoint, redirectURI string) *oauth2.Config {
 		},
 		RedirectURL: redirectURI,
 	}
+}
+
+// Context returns ctx carrying an HTTP client that identifies the CLI, so that
+// token-endpoint traffic driven by x/oauth2 sends the same User-Agent as our
+// own API requests. Pass it wherever an oauth2.Config or TokenSource takes a
+// context.
+func Context(ctx context.Context) context.Context {
+	return context.WithValue(ctx, oauth2.HTTPClient, useragent.Client())
 }
 
 // Login performs the full OAuth 2.1 authorization code flow with PKCE.
@@ -121,7 +130,7 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 		return nil, result.err
 	}
 
-	return conf.Exchange(context.Background(), result.code, oauth2.VerifierOption(verifier))
+	return conf.Exchange(Context(context.Background()), result.code, oauth2.VerifierOption(verifier))
 }
 
 // openBrowser opens the given URL in the user's default browser.

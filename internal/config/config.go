@@ -5,11 +5,13 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,14 +57,13 @@ func ValidOutputFormat(s string) bool {
 // Precedence: flag > OMNI_OUTPUT_FORMAT env > config file > auto(TTY).
 // An "auto" result from any layer resolves to "human" when isTTY, else "json".
 func ResolveOutputFormat(flagValue string, isTTY bool) string {
-	chosen := ""
-	if flagValue != "" {
-		chosen = flagValue
-	} else if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
-		chosen = v
-	} else if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
-		chosen = cfg.DefaultOutputFormat
-	}
+	return FormatFromChoice(ChosenOutputFormat(flagValue), isTTY)
+}
+
+// FormatFromChoice resolves an explicit choice (or none) to the effective
+// format. Callers that already hold the choice use this to avoid a second
+// read of the config file.
+func FormatFromChoice(chosen string, isTTY bool) string {
 	if chosen == "" || chosen == FormatAuto {
 		if isTTY {
 			return FormatHuman
@@ -70,6 +71,23 @@ func ResolveOutputFormat(flagValue string, isTTY bool) string {
 		return FormatJSON
 	}
 	return chosen
+}
+
+// ChosenOutputFormat reports the format a user actually asked for, by flag,
+// env, or config file, before the TTY fallback. It returns "" when nobody
+// chose and the format is therefore down to auto-detection — the difference
+// between "this output must be JSON" and "this happens to be a pipe".
+func ChosenOutputFormat(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
+		return v
+	}
+	if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
+		return cfg.DefaultOutputFormat
+	}
+	return ""
 }
 
 // ResolvedConfig is the final runtime config after merging flags, env, and file.
@@ -82,8 +100,13 @@ type ResolvedConfig struct {
 func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
 
-	// Start from config file
-	cfg, _ := Load()
+	// Start from config file. A missing file is normal (env/flags may carry
+	// everything); any other failure is remembered and reported below if the
+	// config turns out to be needed, instead of masquerading as "no token".
+	cfg, loadErr := Load()
+	if loadErr != nil && errors.Is(loadErr, os.ErrNotExist) {
+		loadErr = nil
+	}
 	var profile *Profile
 	if cfg != nil {
 		name := profileName
@@ -91,15 +114,26 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 			name = cfg.DefaultProfile
 		}
 		if name != "" {
-			if p, ok := cfg.Profiles[name]; ok {
-				profile = &p
-				rc.BaseURL = p.APIEndpoint
-				switch p.AuthMethod {
-				case "oauth":
-					rc.Token = p.AccessToken
-				default: // "api-key"
-					rc.Token = p.APIKey
+			p, ok := cfg.Profiles[name]
+			if !ok {
+				names := make([]string, 0, len(cfg.Profiles))
+				for n := range cfg.Profiles {
+					names = append(names, n)
 				}
+				sort.Strings(names)
+				which := "profile"
+				if profileName == "" {
+					which = "default profile"
+				}
+				return nil, fmt.Errorf("%s %q not found in %s (available: %s)", which, name, ConfigPath(), strings.Join(names, ", "))
+			}
+			profile = &p
+			rc.BaseURL = p.APIEndpoint
+			switch p.AuthMethod {
+			case "oauth":
+				rc.Token = p.AccessToken
+			default: // "api-key"
+				rc.Token = p.APIKey
 			}
 		}
 	}
@@ -135,7 +169,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 			RefreshToken: profile.RefreshToken,
 			Expiry:       expiry,
 		}
-		src := oauth.Config(profile.APIEndpoint, "").TokenSource(context.Background(), current)
+		src := oauth.Config(profile.APIEndpoint, "").TokenSource(oauth.Context(context.Background()), current)
 		if refreshed, err := src.Token(); err == nil && refreshed.AccessToken != current.AccessToken {
 			profile.AccessToken = refreshed.AccessToken
 			profile.RefreshToken = refreshed.RefreshToken
@@ -151,6 +185,9 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	}
 
 	// Validate
+	if loadErr != nil && (rc.Token == "" || rc.BaseURL == "") {
+		return nil, fmt.Errorf("loading config %s: %w", ConfigPath(), loadErr)
+	}
 	if rc.Token == "" {
 		return nil, fmt.Errorf("no API token configured. Set OMNI_API_TOKEN, use --token, or run `omni config init`")
 	}
@@ -256,4 +293,3 @@ func ConfigPath() string {
 	}
 	return filepath.Join(configDir(), "config.json")
 }
-

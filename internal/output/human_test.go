@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // List with `records` + `pageInfo` (the models/dashboards shape).
@@ -215,5 +216,119 @@ func TestHumanErrorTo(t *testing.T) {
 	}
 	if !strings.Contains(out, "HTTP 404") {
 		t.Errorf("expected status code, got: %q", out)
+	}
+}
+
+func TestFormatNumber(t *testing.T) {
+	tests := map[float64]string{
+		0:    "0",
+		999:  "999",
+		1000: "1000",
+		// Separators start at five digits, so a year is left alone.
+		2026:     "2026",
+		10000:    "10,000",
+		-1234567: "-1,234,567",
+		// No exponent, and every digit kept: model formats decide decimals
+		// for query results; the generic table shows what the API sent.
+		1284220.5:          "1,284,220.5",
+		1602513.8052352013: "1,602,513.8052352013",
+		1.005:              "1.005",
+		37.774929:          "37.774929",
+		// Below 1 the digits are the whole story, so they all survive.
+		0.123456: "0.123456",
+		-0.25:    "-0.25",
+		1e9:      "1,000,000,000",
+		// Whole numbers stay readable well past the float64 integer range;
+		// a warehouse ID is read, not skimmed.
+		9007199254740992: "9,007,199,254,740,992",
+		// Beyond that, fall back to the compact form.
+		1e18: "1e+18",
+		// A tiny fraction is a magnitude, not a number anyone reads digit by
+		// digit, so it keeps the compact form.
+		1e-9: "1e-09",
+	}
+	for in, want := range tests {
+		if got := formatNumber(in); got != want {
+			t.Errorf("formatNumber(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Large floats used to reach the table as scientific notation.
+func TestHumanBytes_LargeFloatInTable(t *testing.T) {
+	var buf bytes.Buffer
+	body := []byte(`[{"region":"east","revenue":1284220.5}]`)
+	if err := HumanBytes(&buf, body); err != nil {
+		t.Fatalf("HumanBytes: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "1,284,220.5") {
+		t.Errorf("expected a readable number, got:\n%s", out)
+	}
+	if strings.Contains(out, "e+") {
+		t.Errorf("expected no scientific notation, got:\n%s", out)
+	}
+}
+
+// An id is a value someone copies back into a command, so it keeps its
+// digits; the measure beside it still reads as a magnitude.
+func TestHumanBytes_IdentifiersAreNotGrouped(t *testing.T) {
+	var buf bytes.Buffer
+	body := []byte(`[{"id":123456,"connectionId":987654,"revenue":1284220.5}]`)
+	if err := HumanBytes(&buf, body); err != nil {
+		t.Fatalf("HumanBytes: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"123456", "987654", "1,284,220.5"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestTruncate_DoesNotSplitRunes(t *testing.T) {
+	s := "متجر إلكتروني - لوحة المبيعات"
+	got := truncateCells(s, 10)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncate produced invalid UTF-8: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != 10 {
+		t.Errorf("expected 10 runes, got %d (%q)", n, got)
+	}
+	if truncateCells("short", 10) != "short" {
+		t.Error("a string under the limit should pass through")
+	}
+	if got := truncateCells("Stage", 1); got != "…" {
+		t.Errorf("truncateCells(_, 1) = %q, want an ellipsis", got)
+	}
+	if got := truncateCells("Stage", 0); got != "" {
+		t.Errorf("truncateCells(_, 0) = %q, want nothing", got)
+	}
+	if got := truncateCells("#", 1); got != "#" {
+		t.Errorf("a one-cell string fits one cell, got %q", got)
+	}
+}
+
+// Values are data: an escape sequence in one must not reach the terminal.
+func TestHumanBytes_StripsControlCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	body := `{"records":[{"id":"1","name":"evil\u001b]52;c;aGk=\u0007name\u001b[2J"}]}`
+	if err := HumanBytes(&buf, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, "evil]52;c;aGk=name[2J") {
+		t.Errorf("control characters should be dropped, text kept:\n%q", out)
+	}
+}
+
+func TestSanitizeJSON_KeyCollisionKeepsBothFields(t *testing.T) {
+	v := sanitizeJSON(map[string]any{"ab": "clean", "a\x00b": "dirty"}).(map[string]any)
+	if len(v) != 2 || v["ab"] != "clean" || v["ab (2)"] != "dirty" {
+		t.Errorf("expected both fields kept, got %#v", v)
+	}
+	for k := range v {
+		if strings.ContainsRune(k, 0) {
+			t.Errorf("key %q still has a control character", k)
+		}
 	}
 }
