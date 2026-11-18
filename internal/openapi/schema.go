@@ -69,10 +69,22 @@ type SchemaDoc struct {
 	Args        []SchemaArg        `json:"args,omitempty"`
 	QueryParams []SchemaQueryParam `json:"queryParams,omitempty"`
 	Required    []string           `json:"required,omitempty"`
+	Variants    []SchemaVariant    `json:"variants,omitempty"`
 	Body        interface{}        `json:"body"`
 	Example     interface{}        `json:"example,omitempty"`
 	Response    *SchemaResponse    `json:"response"`
 }
+
+// SchemaVariant is one branch of a union request body: its full required list
+// and the properties it pins to a single value (e.g. destinationType: email).
+type SchemaVariant struct {
+	When        map[string]interface{} `json:"when,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Required    []string               `json:"required"`
+}
+
+// maxSchemaVariants caps the variants of a body composing several unions.
+const maxSchemaVariants = 32
 
 // describer carries the per-invocation expansion budget so --depth can override
 // the default cap without threading it through every recursive call or reaching
@@ -428,8 +440,149 @@ func describeBody(op *operationInfo, field string, maxDepth int, names SchemaFla
 			doc.Required = req
 		}
 	}
+	if sch := root.Schema(); sch != nil {
+		doc.Variants = describeVariants(sch, doc.Required)
+	}
 	doc.Example = d.synth(root, "", 0, nil)
 	return doc, nil
+}
+
+// describeVariants lists the variants of a body whose top level is a union, or
+// nil when it isn't one. always leads every variant's Required.
+func describeVariants(sch *base.Schema, always []string) []SchemaVariant {
+	unions := unionsOf(sch, nil)
+	if len(unions) == 0 {
+		return nil
+	}
+	combos := [][]*base.SchemaProxy{nil}
+	for _, branches := range unions {
+		var next [][]*base.SchemaProxy
+		for _, c := range combos {
+			for _, b := range branches {
+				if len(next) == maxSchemaVariants {
+					break
+				}
+				next = append(next, append(append([]*base.SchemaProxy{}, c...), b))
+			}
+		}
+		combos = next
+	}
+
+	var out []SchemaVariant
+	for _, combo := range combos {
+		v := SchemaVariant{Required: append([]string{}, always...)}
+		have := map[string]bool{}
+		for _, r := range always {
+			have[r] = true
+		}
+		var descs []string
+		for _, b := range combo {
+			bs := b.Schema()
+			if bs == nil {
+				continue
+			}
+			if bs.Description != "" {
+				descs = append(descs, bs.Description)
+			} else if bs.Title != "" {
+				descs = append(descs, bs.Title)
+			}
+			reqSet, props := gatherObject(bs, nil)
+			for _, r := range sortedKeys(reqSet) {
+				if !have[r] {
+					have[r] = true
+					v.Required = append(v.Required, r)
+				}
+			}
+			for _, k := range sortedKeys(props) {
+				if val, ok := pinnedValue(props[k]); ok {
+					if v.When == nil {
+						v.When = map[string]interface{}{}
+					}
+					v.When[k] = val
+				}
+			}
+		}
+		v.Description = strings.Join(descs, "; ")
+		out = append(out, v)
+	}
+	return out
+}
+
+// pinnedValue reports the single value a schema allows: a const or one-value enum.
+func pinnedValue(proxy *base.SchemaProxy) (interface{}, bool) {
+	if proxy == nil || proxy.Schema() == nil {
+		return nil, false
+	}
+	sch := proxy.Schema()
+	if v := decodeNode(sch.Const); v != nil {
+		return v, true
+	}
+	if enum := decodeNodes(sch.Enum); len(enum) == 1 {
+		return enum[0], true
+	}
+	return nil, false
+}
+
+// unionsOf returns the oneOf/anyOf branch lists at sch's level, its own and its
+// allOf members'.
+func unionsOf(sch *base.Schema, seen map[string]bool) [][]*base.SchemaProxy {
+	var out [][]*base.SchemaProxy
+	if len(sch.OneOf) > 0 {
+		out = append(out, sch.OneOf)
+	}
+	if len(sch.AnyOf) > 0 {
+		out = append(out, sch.AnyOf)
+	}
+	for _, member := range sch.AllOf {
+		if member == nil {
+			continue
+		}
+		memberSeen := seen
+		if member.IsReference() {
+			ref := member.GetReference()
+			if seen[ref] {
+				continue
+			}
+			memberSeen = cloneSeen(seen, ref)
+		}
+		if ms := member.Schema(); ms != nil {
+			out = append(out, unionsOf(ms, memberSeen)...)
+		}
+	}
+	return out
+}
+
+// firstBranch returns the first non-null branch.
+func firstBranch(branches []*base.SchemaProxy) *base.SchemaProxy {
+	for _, b := range branches {
+		if b == nil {
+			continue
+		}
+		if bs := b.Schema(); bs != nil && len(bs.Type) == 1 && bs.Type[0] == "null" {
+			continue
+		}
+		return b
+	}
+	return nil
+}
+
+// unionProps collects the properties declared by any union branch at sch's level.
+func unionProps(sch *base.Schema, seen map[string]bool) map[string]*base.SchemaProxy {
+	props := map[string]*base.SchemaProxy{}
+	for _, branches := range unionsOf(sch, seen) {
+		for _, b := range branches {
+			if b == nil || b.Schema() == nil {
+				continue
+			}
+			_, bp := gatherObject(b.Schema(), seen)
+			for k, v := range bp {
+				if _, ok := props[k]; !ok {
+					props[k] = v
+				}
+			}
+		}
+	}
+	return props
 }
 
 // describeResponse renders the captured success response. --field deliberately
@@ -498,6 +651,13 @@ func descendTo(proxy *base.SchemaProxy, seg string) (*base.SchemaProxy, error) {
 		_, props := gatherObject(sch, nil)
 		if p, ok := props[seg]; ok {
 			return p, nil
+		}
+		branchProps := unionProps(sch, nil)
+		if p, ok := branchProps[seg]; ok {
+			return p, nil
+		}
+		for k, v := range branchProps {
+			props[k] = v
 		}
 
 		// Not a direct property — unwrap one container layer and retry the same
@@ -723,6 +883,15 @@ func (d *describer) synth(proxy *base.SchemaProxy, name string, depth int, seen 
 
 	t := firstType(sch)
 
+	// A bare union is exemplified by its first branch.
+	if t == "" && sch.Properties == nil && len(sch.AllOf) == 0 {
+		for _, branches := range unionsOf(sch, childSeen) {
+			if b := firstBranch(branches); b != nil {
+				return d.synth(b, name, depth, childSeen)
+			}
+		}
+	}
+
 	if t == "object" || sch.Properties != nil || len(sch.AllOf) > 0 {
 		obj := map[string]interface{}{}
 		if depth > d.maxDepth {
@@ -742,6 +911,36 @@ func (d *describer) synth(proxy *base.SchemaProxy, name string, depth int, seen 
 				obj[fieldName] = d.synth(p, fieldName, depth+1, childSeen)
 			} else {
 				obj[fieldName] = placeholder(fieldName, "string")
+			}
+		}
+		// Merge in the first union branch so the example is a complete body.
+		for _, branches := range unionsOf(sch, childSeen) {
+			b := firstBranch(branches)
+			if b == nil {
+				continue
+			}
+			branchReq, branchProps := gatherObject(b.Schema(), childSeen)
+			if sub, ok := d.synth(b, name, depth, childSeen).(map[string]interface{}); ok {
+				for k, v := range sub {
+					// An empty re-declaration ({}) shouldn't shadow the typed outer property.
+					if bp := branchProps[k]; bp != nil && bp.Schema() != nil && isMetadataOnly(bp.Schema()) {
+						if _, outer := props[k]; outer {
+							continue
+						}
+					}
+					obj[k] = v
+				}
+			}
+			// Branches like {required: [a]} name outer properties.
+			for _, fieldName := range sortedKeys(branchReq) {
+				if _, ok := obj[fieldName]; ok {
+					continue
+				}
+				if p, ok := props[fieldName]; ok {
+					obj[fieldName] = d.synth(p, fieldName, depth+1, childSeen)
+				} else {
+					obj[fieldName] = placeholder(fieldName, "string")
+				}
 			}
 		}
 		// Pure map type (additionalProperties, no fixed properties) — show one

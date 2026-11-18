@@ -10,6 +10,12 @@ import (
 	"github.com/exploreomni/omni-cli/internal/useragent"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 // These tests use httptest.NewServer to spin up a local HTTP server, then
 // call auth.Do() against it. This lets us inspect exactly what HTTP request
 // the CLI would send to the real Omni API — headers, method, path, and body —
@@ -202,5 +208,69 @@ func TestDo_BaseURLTrailingSlash(t *testing.T) {
 
 	if gotPath != "/api/v1/test" {
 		t.Errorf("path = %q, want %q (possible double slash)", gotPath, "/api/v1/test")
+	}
+}
+
+func TestDo_PreservesBasePathPrefix(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := &config.ResolvedConfig{Token: "tok", BaseURL: srv.URL + "/prefix/"}
+	resp, err := Do(cfg, http.MethodGet, "/api/v1/test", nil)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	resp.Body.Close()
+	if gotPath != "/prefix/api/v1/test" {
+		t.Errorf("path = %q, want %q", gotPath, "/prefix/api/v1/test")
+	}
+}
+
+func TestDo_RejectsUnsafePathBeforeSending(t *testing.T) {
+	originalClient := http.DefaultClient
+	sent := false
+	var destination, authorization string
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		sent = true
+		destination = req.URL.Host
+		authorization = req.Header.Get("Authorization")
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = originalClient })
+
+	cfg := &config.ResolvedConfig{Token: "secret-token", BaseURL: "https://tenant.omniapp.co"}
+	for _, path := range []string{
+		"@outside.example/steal",
+		"outside.example/steal",
+		"https://outside.example/steal",
+		"",
+	} {
+		t.Run(path, func(t *testing.T) {
+			sent = false
+			resp, err := Do(cfg, http.MethodGet, path, nil)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if err == nil {
+				t.Fatal("expected unsafe path to be rejected")
+			}
+			if sent {
+				t.Fatal("sent request for unsafe path")
+			}
+		})
+	}
+
+	sent = false
+	resp, err := Do(cfg, http.MethodGet, "/api/v1/resources?limit=1", nil)
+	if err != nil {
+		t.Fatalf("valid API path rejected: %v", err)
+	}
+	resp.Body.Close()
+	if !sent || destination != "tenant.omniapp.co" || authorization != "Bearer secret-token" {
+		t.Errorf("valid request: sent=%t, destination=%q, authorization=%q", sent, destination, authorization)
 	}
 }

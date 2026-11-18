@@ -737,14 +737,14 @@ func bodyProperties(op *operationInfo) []string {
 		return nil
 	}
 	schema := op.BodySchema.Schema()
-	if schema == nil || schema.Properties == nil {
+	if schema == nil {
 		return nil
 	}
-	var props []string
-	for pair := schema.Properties.First(); pair != nil; pair = pair.Next() {
-		props = append(props, pair.Key())
+	_, props := gatherObject(schema, nil)
+	for k, v := range unionProps(schema, nil) {
+		props[k] = v
 	}
-	return props
+	return sortedKeys(props)
 }
 
 // requestBodyMediaType returns the media type and definition the CLI will use,
