@@ -2,6 +2,10 @@
 set -e
 
 REPO="exploreomni/cli"
+# GitHub's numeric IDs for the repo and its owner, checked against the
+# attestation's signing certificate.
+REPO_ID="1176524410"
+REPO_OWNER_ID="100505341"
 BINARY="omni"
 
 main() {
@@ -117,9 +121,10 @@ verify_checksum() {
 # this repo's release workflow from the tag being installed. The checksum
 # alone can't show that, since checksums.txt ships in the same release.
 #
-# OMNI_VERIFY_ATTESTATION=auto (default) verifies when the GitHub CLI is
-#   available and skips with a note otherwise; =require fails instead of
-#   skipping; =skip turns it off. A failed verification always aborts.
+# OMNI_VERIFY_ATTESTATION=auto (default) verifies when it can and skips with
+#   a note when it can't (no suitable gh, no bundle, Sigstore unreachable);
+#   =require fails instead of skipping; =skip turns it off. A verification
+#   that runs and fails always aborts.
 verify_attestation() {
     dir="$1"
     file="$2"
@@ -133,10 +138,10 @@ verify_attestation() {
         *) echo "Error: OMNI_VERIFY_ATTESTATION must be auto, require or skip (got '${mode}')" >&2; exit 1 ;;
     esac
 
-    # `gh attestation` needs gh 2.49+. With --bundle it verifies offline and
-    # works without `gh auth login`.
-    if ! command -v gh >/dev/null 2>&1 || ! gh attestation verify --help >/dev/null 2>&1; then
-        attestation_unavailable "$mode" "GitHub CLI (gh 2.49+) not found"
+    # --source-ref arrived in gh 2.68, the newest flag used below. With
+    # --bundle, gh verifies without `gh auth login` or any GitHub API call.
+    if ! command -v gh >/dev/null 2>&1 || ! gh attestation verify --help 2>/dev/null | grep -q -- '--source-ref'; then
+        attestation_unavailable "$mode" "GitHub CLI 2.68+ not found"
         return 0
     fi
 
@@ -146,16 +151,33 @@ verify_attestation() {
     fi
 
     echo "Verifying build provenance..."
-    if ! gh attestation verify "${dir}/${file}" \
+    # Prints the signing repo's numeric IDs: names can be renamed or
+    # re-registered, IDs can't.
+    if ids=$(gh attestation verify "${dir}/${file}" \
         --bundle "${dir}/attestation.sigstore.json" \
         --repo "$REPO" \
         --signer-workflow "${REPO}/.github/workflows/release.yml" \
         --source-ref "refs/tags/${version}" \
-        --deny-self-hosted-runners >/dev/null 2>"${dir}/attestation.err"; then
-        echo "Error: Build provenance verification failed for ${file}" >&2
-        sed 's/^/  /' "${dir}/attestation.err" >&2
+        --deny-self-hosted-runners \
+        --format json \
+        --jq '.[0].verificationResult.signature.certificate | "\(.sourceRepositoryIdentifier) \(.sourceRepositoryOwnerIdentifier)"' \
+        2>"${dir}/attestation.err"); then
+        if [ "$ids" = "${REPO_ID} ${REPO_OWNER_ID}" ]; then
+            return 0
+        fi
+        echo "Error: Build provenance for ${file} was signed by repository ID '${ids}', expected '${REPO_ID} ${REPO_OWNER_ID}'" >&2
         exit 1
     fi
+
+    # gh fetches Sigstore's trust root over the network; behind a proxy that
+    # blocks it, nothing was checked, so that's "unavailable", not a failure.
+    if grep -q 'error creating Sigstore verifier' "${dir}/attestation.err"; then
+        attestation_unavailable "$mode" "could not reach Sigstore to fetch its trust root"
+        return 0
+    fi
+    echo "Error: Build provenance verification failed for ${file}" >&2
+    sed 's/^/  /' "${dir}/attestation.err" >&2
+    exit 1
 }
 
 attestation_unavailable() {
