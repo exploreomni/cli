@@ -177,7 +177,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 		if err != nil {
 			return nil, err
 		}
-		if token != "" && token != profile.AccessToken {
+		if token != "" {
 			rc.Token = token
 		}
 	}
