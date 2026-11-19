@@ -244,3 +244,144 @@ func TestConfigInit_OAuthBrowserSavesProfile(t *testing.T) {
 		t.Errorf("config = %+v, want the existing profile and default kept", cfg)
 	}
 }
+
+// The guards that keep a login from saving tokens onto a profile that moved
+// under it while the person was approving.
+func TestConfigLogin_ProfileChangedDuringLogin(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(cfg *config.Config)
+		want   string
+	}{
+		{"removed", func(cfg *config.Config) { delete(cfg.Profiles, "prod") }, `profile "prod" was removed during login`},
+		{"endpoint changed", func(cfg *config.Config) {
+			p := cfg.Profiles["prod"]
+			p.APIEndpoint = "https://elsewhere.omniapp.co"
+			cfg.Profiles["prod"] = p
+		}, `profile "prod" changed endpoint during login; run login again`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			loginTestEnv(t)
+			srv := refusingServer(t)
+			withConfig(t, &config.Config{
+				Version:        1,
+				DefaultProfile: "prod",
+				Profiles:       map[string]config.Profile{"prod": {APIEndpoint: srv.URL, AuthMethod: "oauth"}},
+			})
+			stubBrowserLogin(t, func(string) (*oauth2.Token, error) {
+				cfg, _ := config.Load()
+				tc.change(cfg)
+				if err := config.Save(cfg); err != nil {
+					t.Fatalf("saving config: %v", err)
+				}
+				return &oauth2.Token{AccessToken: "browser-access", RefreshToken: "browser-refresh"}, nil
+			})
+
+			var err error
+			captureStdout(t, func() { err = rootWithConfig("config", "login", "prod", "--browser").Execute() })
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("login error = %v, want %q", err, tc.want)
+			}
+			cfg, _ := config.Load()
+			if p, ok := cfg.Profiles["prod"]; ok && p.AccessToken != "" {
+				t.Errorf("prod profile = %+v, want no tokens saved", p)
+			}
+		})
+	}
+}
+
+// The tokens go onto the profile as it is on disk after the login: a
+// change to the same profile made meanwhile survives.
+func TestConfigLogin_AppliesTokensToFreshProfile(t *testing.T) {
+	loginTestEnv(t)
+	srv := refusingServer(t)
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {APIEndpoint: srv.URL, AuthMethod: "api-key", APIKey: "old-key"}},
+	})
+	stubBrowserLogin(t, func(string) (*oauth2.Token, error) {
+		cfg, _ := config.Load()
+		p := cfg.Profiles["prod"]
+		p.APIKey = "new-key"
+		cfg.Profiles["prod"] = p
+		if err := config.Save(cfg); err != nil {
+			t.Fatalf("saving config: %v", err)
+		}
+		return &oauth2.Token{AccessToken: "browser-access", RefreshToken: "browser-refresh"}, nil
+	})
+
+	captureStdout(t, func() {
+		if err := rootWithConfig("config", "login", "prod", "--browser").Execute(); err != nil {
+			t.Errorf("login: %v", err)
+		}
+	})
+	cfg, _ := config.Load()
+	p := cfg.Profiles["prod"]
+	if p.APIKey != "new-key" || p.AccessToken != "browser-access" {
+		t.Errorf("prod profile = %+v, want the concurrent APIKey change kept alongside the new tokens", p)
+	}
+}
+
+// init refuses a config file it can't parse before running any login, and
+// leaves the file alone.
+func TestConfigInit_CorruptConfigFailsBeforeLogin(t *testing.T) {
+	loginTestEnv(t)
+	srv := refusingServer(t)
+	path := withConfig(t, nil)
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubBrowserLogin(t, func(string) (*oauth2.Token, error) {
+		t.Error("login ran against a config file init can't save to")
+		return &oauth2.Token{AccessToken: "a"}, nil
+	})
+
+	var err error
+	captureStdout(t, func() {
+		err = rootWithConfig("config", "init", "--name", "prod", "--endpoint", srv.URL, "--auth", "oauth", "--browser").Execute()
+	})
+	if err == nil || !strings.Contains(err.Error(), "fix or delete "+path) {
+		t.Fatalf("init error = %v, want a hint to fix or delete %s", err, path)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{not json" {
+		t.Errorf("config file = %q, want it untouched", b)
+	}
+}
+
+// The device login opens a browser only when stdin and stdout are both
+// terminals.
+func TestDeviceOpener_RequiresBothTTYs(t *testing.T) {
+	prevTerm, prevOpener := isTerminal, browserOpener
+	t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
+	browserOpener = func() func(string) { return func(string) {} }
+
+	stdin, stdout := int(os.Stdin.Fd()), int(os.Stdout.Fd())
+	if stdin == stdout {
+		t.Skip("stdin and stdout share a descriptor")
+	}
+	for _, tc := range []struct {
+		stdinTTY, stdoutTTY, want bool
+	}{
+		{true, true, true},
+		{true, false, false},
+		{false, true, false},
+		{false, false, false},
+	} {
+		isTerminal = func(fd int) bool {
+			if fd == stdin {
+				return tc.stdinTTY
+			}
+			return fd == stdout && tc.stdoutTTY
+		}
+		if got := deviceOpener() != nil; got != tc.want {
+			t.Errorf("stdin TTY %v, stdout TTY %v: opener set = %v, want %v", tc.stdinTTY, tc.stdoutTTY, got, tc.want)
+		}
+	}
+	isTerminal = func(int) bool { return true }
+	browserOpener = func() func(string) { return nil }
+	if deviceOpener() != nil {
+		t.Error("opener set with no browser to open")
+	}
+}

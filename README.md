@@ -122,6 +122,8 @@ jq -r '"Open \(.verification_uri_complete) (code \(.user_code))"' login.json
 wait "$login_pid"   # returns once the code is approved, denied or expired
 ```
 
+A server error (HTTP 5xx) while the CLI is waiting for approval ends the login; run it again.
+
 If the Omni instance doesn't offer device login, the CLI falls back to the browser login and no JSON line is written, so a script should also watch for the process exiting, as above.
 
 ### Set your API token

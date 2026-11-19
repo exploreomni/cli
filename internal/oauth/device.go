@@ -7,14 +7,15 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/exploreomni/omni-cli/internal/useragent"
 	"golang.org/x/oauth2"
@@ -36,8 +37,8 @@ const cliLoginDisabledDescription = "This organization does not allow CLI login"
 // defaultDeviceTimeout caps the whole device login, whatever expires_in says.
 const defaultDeviceTimeout = 10 * time.Minute
 
-// deviceAuthRequestTimeout bounds the device authorization request.
-const deviceAuthRequestTimeout = 30 * time.Second
+// defaultDeviceAuthRequestTimeout bounds the device authorization request.
+const defaultDeviceAuthRequestTimeout = 30 * time.Second
 
 // Device login failures callers (and tests) can tell apart with errors.Is.
 var (
@@ -78,6 +79,9 @@ type DeviceOptions struct {
 	Interval time.Duration
 	// Timeout caps the whole login; zero means ten minutes.
 	Timeout time.Duration
+	// RequestTimeout bounds the device authorization request; zero means
+	// 30 seconds.
+	RequestTimeout time.Duration
 }
 
 // deviceLine is the JSON line written to DeviceOptions.JSON.
@@ -106,19 +110,24 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 	// gets a client timeout of its own; Ctrl-C during it still exits the
 	// process the default way.
 	client := useragent.Client()
-	client.Timeout = deviceAuthRequestTimeout
+	client.Timeout = opts.RequestTimeout
+	if client.Timeout <= 0 {
+		client.Timeout = defaultDeviceAuthRequestTimeout
+	}
 	conf := DeviceConfig(apiEndpoint)
 	da, err := conf.DeviceAuth(context.WithValue(ctx, oauth2.HTTPClient, client))
 	if err != nil {
-		var re *oauth2.RetrieveError
-		if errors.As(err, &re) && re.Response != nil && re.Response.StatusCode == http.StatusNotFound {
-			return nil, ErrDeviceUnsupported
-		}
-		return nil, deviceError("requesting a device code", err)
+		return nil, deviceAuthError(apiEndpoint, err)
 	}
 	if da.DeviceCode == "" || da.UserCode == "" || da.VerificationURI == "" {
 		return nil, fmt.Errorf("requesting a device code: the response is missing device_code, user_code or verification_uri")
 	}
+	if !printableASCII(da.UserCode) {
+		return nil, fmt.Errorf("requesting a device code: the server sent a user code that isn't printable ASCII")
+	}
+	// Server text bound for the terminal can't carry escape sequences.
+	verificationURI := stripControl(da.VerificationURI)
+	verificationURIComplete := stripControl(da.VerificationURIComplete)
 
 	// The code lives until the earlier of the server's expiry and our cap.
 	// x/oauth2 dates expires_in from when the request was sent, so measuring
@@ -134,14 +143,14 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		stderr = io.Discard
 	}
 	fmt.Fprintf(stderr, "To sign in, open %s\nand enter code %s\nWaiting for approval (expires in %s)…\n",
-		da.VerificationURI, da.UserCode, shortDuration(expiresIn))
+		verificationURI, da.UserCode, shortDuration(expiresIn))
 
 	if opts.JSON != nil {
 		enc := json.NewEncoder(opts.JSON)
 		enc.SetEscapeHTML(false)
 		if err := enc.Encode(deviceLine{
-			VerificationURI:         da.VerificationURI,
-			VerificationURIComplete: da.VerificationURIComplete,
+			VerificationURI:         verificationURI,
+			VerificationURIComplete: verificationURIComplete,
 			UserCode:                da.UserCode,
 			ExpiresIn:               int64(expiresIn / time.Second),
 		}); err != nil {
@@ -154,9 +163,8 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		if target == "" {
 			target = da.VerificationURI
 		}
-		// The URL comes from the server and goes to an OS command; open
-		// only a web URL.
-		if u, err := url.Parse(target); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
+		// The URL comes from the server and goes to an OS command.
+		if openableVerificationURL(target, apiEndpoint) {
 			opts.OpenBrowser(target)
 		}
 	}
@@ -172,6 +180,87 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		return nil, deviceError("waiting for approval", err)
 	}
 	return tok, nil
+}
+
+// openableVerificationURL reports whether target, a URL the server sent, may
+// be handed to the OS browser opener: it must be on apiEndpoint's own host
+// and port, over https (or http when apiEndpoint itself is http, as in local
+// development), with no userinfo and no whitespace or control characters.
+func openableVerificationURL(target, apiEndpoint string) bool {
+	for _, r := range target {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	base, err := url.Parse(apiEndpoint)
+	if err != nil {
+		return false
+	}
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && base.Scheme == "http":
+	default:
+		return false
+	}
+	return u.Hostname() != "" && strings.EqualFold(u.Hostname(), base.Hostname()) && effectivePort(u) == effectivePort(base)
+}
+
+// effectivePort is u's port, or its scheme's default.
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return "443"
+}
+
+// stripControl removes control characters (escape sequences start with one)
+// from server text before it reaches the terminal.
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// printableASCII reports whether s is non-empty printable ASCII.
+func printableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// deviceAuthError turns a failed device authorization request into the
+// message the person sees. No code has been shown yet, so a timeout here is
+// the request's, not the code's.
+func deviceAuthError(apiEndpoint string, err error) error {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		if re.Response != nil && re.Response.StatusCode == http.StatusNotFound {
+			return ErrDeviceUnsupported
+		}
+		return deviceError("requesting a device code", err)
+	}
+	host := apiEndpoint
+	if u, perr := url.Parse(apiEndpoint); perr == nil && u.Host != "" {
+		host = u.Host
+	}
+	var ne net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+		return fmt.Errorf("timed out requesting a device code from %s", host)
+	}
+	return fmt.Errorf("requesting a device code from %s: %w", host, err)
 }
 
 // deviceError turns a device-grant failure into the message the person sees.
@@ -212,40 +301,50 @@ func shortDuration(d time.Duration) string {
 	return s
 }
 
-// DeviceLoginAdvertised reports whether apiEndpoint's RFC 8414 discovery
-// document lists a device_authorization_endpoint. A missing or unreadable
-// document reads as "not advertised", so the caller falls back to the
-// browser login; a 403 is returned as ErrForbidden, since the login requests
-// would be refused the same way.
-func DeviceLoginAdvertised(ctx context.Context, apiEndpoint string) (bool, error) {
+// notOffered is the fallback note when the org doesn't offer the device grant.
+const notOffered = "This Omni instance doesn't offer device login; using browser login."
+
+// discoverDeviceLogin reports whether apiEndpoint's RFC 8414 discovery
+// document lists a device_authorization_endpoint. When it doesn't, fallback
+// is the note to show before the browser login: the instance doesn't offer
+// device login (no field, or no document), or the document couldn't be read
+// (another status, or not JSON). A 403 is returned as ErrForbidden, since the
+// login requests would be refused the same way.
+func discoverDeviceLogin(ctx context.Context, apiEndpoint string) (advertised bool, fallback string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	docURL := strings.TrimRight(apiEndpoint, "/") + discoveryPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, docURL, nil)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := useragent.Client().Do(req)
 	if err != nil {
-		return false, fmt.Errorf("reading %s: %w", discoveryPath, err)
+		return false, "", fmt.Errorf("reading %s: %w", discoveryPath, err)
 	}
 	defer resp.Body.Close()
 
-	switch {
-	case resp.StatusCode == http.StatusForbidden:
-		return false, ErrForbidden
-	case resp.StatusCode != http.StatusOK:
-		return false, nil
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusForbidden:
+		return false, "", ErrForbidden
+	case http.StatusNotFound:
+		return false, notOffered, nil
+	default:
+		return false, fmt.Sprintf("Couldn't read the login settings at %s (HTTP %d); falling back to browser login.", discoveryPath, resp.StatusCode), nil
 	}
 	var doc struct {
 		DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
-		return false, nil
+		return false, fmt.Sprintf("Couldn't read the login settings at %s (not valid JSON); falling back to browser login.", discoveryPath), nil
 	}
-	return doc.DeviceAuthorizationEndpoint != "", nil
+	if doc.DeviceAuthorizationEndpoint == "" {
+		return false, notOffered, nil
+	}
+	return true, "", nil
 }
 
 // LoginOptions selects and configures the login flow for LoginDefault.
@@ -274,7 +373,7 @@ func LoginDefault(ctx context.Context, apiEndpoint string, opts LoginOptions) (*
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	advertised, err := DeviceLoginAdvertised(ctx, apiEndpoint)
+	advertised, fallback, err := discoverDeviceLogin(ctx, apiEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -283,8 +382,9 @@ func LoginDefault(ctx context.Context, apiEndpoint string, opts LoginOptions) (*
 		if !errors.Is(err, ErrDeviceUnsupported) {
 			return tok, err
 		}
+		fallback = notOffered
 	}
-	fmt.Fprintln(stderr, "This Omni instance doesn't offer device login; using browser login.")
+	fmt.Fprintln(stderr, fallback)
 	return browserLogin(apiEndpoint)
 }
 
@@ -292,18 +392,15 @@ func LoginDefault(ctx context.Context, apiEndpoint string, opts LoginOptions) (*
 // or nil when there is no opener to run: the platform's opener command isn't
 // installed, or, on Linux and the BSDs, there is no display to open it on.
 func BrowserOpener() func(string) {
-	name := "xdg-open"
 	switch runtime.GOOS {
-	case "darwin":
-		name = "open"
-	case "windows":
-		name = "cmd"
+	case "darwin", "windows":
 	default:
 		if os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
 			return nil
 		}
 	}
-	if _, err := exec.LookPath(name); err != nil {
+	// exec.Command records a failed PATH lookup in Err.
+	if browserCommand(runtime.GOOS, "").Err != nil {
 		return nil
 	}
 	return openBrowser

@@ -141,14 +141,20 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 // Best-effort — if it fails, the URL is already printed to the terminal.
 // It's a var (not a func) so tests can replace it to drive the callback flow.
 var openBrowser = func(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	_ = browserCommand(runtime.GOOS, url).Start()
+}
+
+// browserCommand is the command that opens url on goos. On Windows it is
+// rundll32's URL handler, which takes url as a single argument; `cmd /c
+// start` would run it through cmd.exe, where an & in the query string ends
+// the URL and starts another command.
+func browserCommand(goos, url string) *exec.Cmd {
+	switch goos {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		return exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		return exec.Command("xdg-open", url)
 	}
-	_ = cmd.Start()
 }

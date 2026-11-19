@@ -27,12 +27,24 @@ func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
 	p.TokenExpiresAt = tok.Expiry.Format(time.RFC3339)
 }
 
-// Test seams for the OAuth login: the browser flow, and an override for the
-// device grant's polling interval (zero keeps the server's).
+// Test seams for the OAuth login: the browser flow, an override for the
+// device grant's polling interval (zero keeps the server's), and the TTY
+// check and browser opener behind deviceOpener.
 var (
 	browserLogin       = oauth.Login
 	devicePollInterval time.Duration
+	isTerminal         = term.IsTerminal
+	browserOpener      = oauth.BrowserOpener
 )
+
+// deviceOpener is how the device login opens its URL: only for a person at a
+// terminal (stdin and stdout both TTYs) with a browser to open, else nil.
+func deviceOpener() func(string) {
+	if isTerminal(int(os.Stdin.Fd())) && isTerminal(int(os.Stdout.Fd())) {
+		return browserOpener()
+	}
+	return nil
+}
 
 // oauthLogin logs in to endpoint with the device grant, or with the browser
 // flow when --browser is set or the server doesn't offer the device grant.
@@ -41,12 +53,9 @@ var (
 // stdout as one JSON line before polling starts.
 func oauthLogin(cmd *cobra.Command, endpoint string, jsonOut bool) (*oauth2.Token, error) {
 	forceBrowser, _ := cmd.Flags().GetBool("browser")
-	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval}
+	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval, OpenBrowser: deviceOpener()}
 	if jsonOut {
 		device.JSON = os.Stdout
-	}
-	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
-		device.OpenBrowser = oauth.BrowserOpener()
 	}
 	return oauth.LoginDefault(context.Background(), endpoint, oauth.LoginOptions{
 		Browser:      forceBrowser,
@@ -153,7 +162,7 @@ line before the CLI waits for approval.`,
 			// Fail before the login, not after it, on a config file that
 			// exists but can't be read.
 			if _, err := config.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("loading config %s: %w", config.ConfigPath(), err)
+				return fmt.Errorf("loading config %s: %w (fix or delete %s, then run init again)", config.ConfigPath(), err, config.ConfigPath())
 			}
 
 			jsonOut := jsonOutputChosen(cmd)

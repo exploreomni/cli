@@ -41,10 +41,10 @@ type deviceServer struct {
 	*httptest.Server
 
 	// Set before start.
-	discovery    string   // fixture for the discovery document; "" answers 404
+	discovery    string   // fixture for the discovery document; "" answers 404, "503" answers 503, "garbage" answers non-JSON
 	deviceStatus int      // device authorization status; 0 answers 200 with the fixture
 	tokens       []string // fixtures for successive token polls; the last repeats; "403" answers 403
-	deviceBody   []byte   // replaces the device authorization fixture when set
+	deviceBody   string   // replaces the device authorization fixture when set; BASE becomes the server's URL
 	deviceDelay  time.Duration
 	onPoll       func(n int)
 
@@ -63,8 +63,15 @@ func (s *deviceServer) start(t *testing.T) *deviceServer {
 		case discoveryPath:
 			s.discoveries++
 			s.mu.Unlock()
-			if s.discovery == "" {
+			switch s.discovery {
+			case "":
 				http.NotFound(w, r)
+				return
+			case "503":
+				http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+				return
+			case "garbage":
+				_, _ = w.Write([]byte("<html>maintenance</html>"))
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -77,9 +84,9 @@ func (s *deviceServer) start(t *testing.T) *deviceServer {
 				http.Error(w, http.StatusText(s.deviceStatus), s.deviceStatus)
 				return
 			}
-			body := s.deviceBody
-			if body == nil {
-				body = fixture(t, "device_authorization")
+			body := fixture(t, "device_authorization")
+			if s.deviceBody != "" {
+				body = []byte(strings.ReplaceAll(s.deviceBody, "BASE", s.URL))
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(body)
@@ -297,7 +304,7 @@ func TestDeviceLogin_CancelStopsPolling(t *testing.T) {
 }
 
 // The JSON line is written, whole and alone, before the first poll, and the
-// browser opens the URL that carries the code.
+// fixture's URL, on another host than the test server, is not opened.
 func TestDeviceLogin_JSONLineBeforePolling(t *testing.T) {
 	t.Parallel()
 	var jsonOut syncBuffer
@@ -346,8 +353,8 @@ func TestDeviceLogin_JSONLineBeforePolling(t *testing.T) {
 			t.Errorf("JSON %s = %v, want %v", k, line[k], v)
 		}
 	}
-	if len(opened) != 1 || opened[0] != "https://acme.omniapp.co/oauth/device?user_code=BDKF-QRTW" {
-		t.Errorf("opened = %v, want verification_uri_complete once", opened)
+	if len(opened) != 0 {
+		t.Errorf("opened %v, want nothing: the URL is not on the endpoint's host", opened)
 	}
 }
 
@@ -368,22 +375,164 @@ func TestDeviceLogin_ExpiryIgnoresRequestLatency(t *testing.T) {
 	}
 }
 
-// Only a web URL from the server reaches the OS opener.
-func TestDeviceLogin_OpensOnlyWebURLs(t *testing.T) {
+// The opener gets the server's URL unchanged, and only when it is on the
+// endpoint's own host and free of whitespace and control characters.
+func TestDeviceLogin_OpensOnlySameHostURLs(t *testing.T) {
 	t.Parallel()
+	body := func(uri, complete string) string {
+		b, _ := json.Marshal(map[string]any{
+			"device_code": "d", "user_code": "BDKF-QRTW", "expires_in": 600, "interval": 5,
+			"verification_uri": uri, "verification_uri_complete": complete,
+		})
+		return string(b)
+	}
+	cases := []struct {
+		name, uri, complete, want string
+	}{
+		{"same host, query with &", "BASE/oauth/device", `BASE/oauth/device?user_code=X&\\evil\share\p.exe`, `BASE/oauth/device?user_code=X&\\evil\share\p.exe`},
+		{"falls back to verification_uri", "BASE/oauth/device", "", "BASE/oauth/device"},
+		{"foreign host", "BASE/oauth/device", "https://evil.example/oauth/device?user_code=X", ""},
+		{"control character", "BASE/oauth/device", "BASE/oauth/device?user_code=X\u001b[2J", ""},
+		{"newline", "BASE/oauth/device", "BASE/oauth/device?user_code=X\nfoo", ""},
+		{"not a web URL", "BASE/oauth/device", "calc.exe & whoami", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceBody: body(tc.uri, tc.complete)}).start(t)
+			var mu sync.Mutex
+			var opened []string
+			if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
+				OpenBrowser: func(u string) { mu.Lock(); opened = append(opened, u); mu.Unlock() },
+				Interval:    time.Second,
+			}); err != nil {
+				t.Fatalf("DeviceLogin: %v", err)
+			}
+			want := []string(nil)
+			if tc.want != "" {
+				want = []string{strings.ReplaceAll(tc.want, "BASE", srv.URL)}
+			}
+			if strings.Join(opened, "\n") != strings.Join(want, "\n") || len(opened) != len(want) {
+				t.Errorf("opened %q, want %q", opened, want)
+			}
+		})
+	}
+}
+
+func TestOpenableVerificationURL(t *testing.T) {
+	const endpoint = "https://acme.omniapp.co"
+	for target, want := range map[string]bool{
+		"https://acme.omniapp.co/oauth/device?user_code=X":                    true,
+		"https://ACME.omniapp.co/oauth/device":                                true,
+		"https://acme.omniapp.co:443/oauth/device":                            true,
+		`https://acme.omniapp.co/oauth/device?user_code=X&\\evil\share\p.exe`: true,
+		"https://acme.omniapp.co:8443/oauth/device":                           false,
+		"http://acme.omniapp.co/oauth/device":                                 false,
+		"https://acme.omniapp.co.evil.example/oauth/device":                   false,
+		"https://evil.example/oauth/device":                                   false,
+		"https://user@acme.omniapp.co/oauth/device":                           false,
+		"https://acme.omniapp.co/oauth/device?a=b c":                          false,
+		"https://acme.omniapp.co/oauth/device?a=\tb":                          false,
+		"https://acme.omniapp.co/oauth/device\u0085":                          false,
+		"javascript:alert(1)":                                                 false,
+	} {
+		if got := openableVerificationURL(target, endpoint); got != want {
+			t.Errorf("openableVerificationURL(%q) = %v, want %v", target, got, want)
+		}
+	}
+	// A local http endpoint may open http URLs on its own host and port.
+	if !openableVerificationURL("http://localhost:3000/oauth/device", "http://localhost:3000") {
+		t.Error("http URL on an http endpoint's host refused")
+	}
+	if openableVerificationURL("http://localhost:3001/oauth/device", "http://localhost:3000") {
+		t.Error("http URL on another port accepted")
+	}
+}
+
+// Windows opens URLs through rundll32's URL handler, which takes the URL as
+// one argument; cmd /c start would run an & in it as a second command.
+func TestBrowserCommand(t *testing.T) {
+	const u = `https://acme.omniapp.co/oauth/device?user_code=X&\\evil\share\p.exe`
+	for goos, want := range map[string][]string{
+		"windows": {"rundll32", "url.dll,FileProtocolHandler", u},
+		"darwin":  {"open", u},
+		"linux":   {"xdg-open", u},
+	} {
+		if got := browserCommand(goos, u).Args; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+			t.Errorf("browserCommand(%s) args = %q, want %q", goos, got, want)
+		}
+	}
+}
+
+// expires_in beyond ten minutes is cut to ten, in the prompt and the JSON.
+func TestDeviceLogin_ExpiryCappedAtTenMinutes(t *testing.T) {
+	t.Parallel()
+	var jsonOut, stderr syncBuffer
 	srv := (&deviceServer{
 		tokens:     []string{"device_token_success"},
-		deviceBody: []byte(`{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"file:///etc/passwd","verification_uri_complete":"calc.exe & whoami","expires_in":600,"interval":5}`),
+		deviceBody: `{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"BASE/oauth/device","expires_in":900,"interval":5}`,
 	}).start(t)
-	var opened []string
-	if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
-		OpenBrowser: func(u string) { opened = append(opened, u) },
-		Interval:    time.Second,
-	}); err != nil {
+	if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Stderr: &stderr, JSON: &jsonOut, Interval: time.Second}); err != nil {
 		t.Fatalf("DeviceLogin: %v", err)
 	}
-	if len(opened) != 0 {
-		t.Errorf("opened %v, want nothing", opened)
+	if !strings.Contains(stderr.String(), "(expires in 10m)") {
+		t.Errorf("stderr = %q, want expires in 10m", stderr.String())
+	}
+	if !strings.Contains(jsonOut.String(), `"expires_in":600`) {
+		t.Errorf("JSON = %q, want expires_in 600", jsonOut.String())
+	}
+}
+
+// Server text is printed without control characters, and a user code that
+// isn't printable ASCII is refused.
+func TestDeviceLogin_SanitizesServerText(t *testing.T) {
+	t.Parallel()
+	t.Run("verification_uri", func(t *testing.T) {
+		t.Parallel()
+		var stderr syncBuffer
+		srv := (&deviceServer{
+			tokens:     []string{"device_token_success"},
+			deviceBody: `{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"https://acme.omniapp.co/oauth/\u001b[2Jdevice\u0007","expires_in":600,"interval":5}`,
+		}).start(t)
+		if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Stderr: &stderr, Interval: time.Second}); err != nil {
+			t.Fatalf("DeviceLogin: %v", err)
+		}
+		if got := stderr.String(); strings.ContainsAny(got, "\x1b\x07") || !strings.Contains(got, "open https://acme.omniapp.co/oauth/[2Jdevice\n") {
+			t.Errorf("stderr = %q, want the URL with its control characters removed", got)
+		}
+	})
+	t.Run("user_code", func(t *testing.T) {
+		t.Parallel()
+		var stderr syncBuffer
+		srv := (&deviceServer{
+			tokens:     []string{"device_token_success"},
+			deviceBody: `{"device_code":"d","user_code":"BDKF\u001b[2J","verification_uri":"https://acme.omniapp.co/oauth/device","expires_in":600,"interval":5}`,
+		}).start(t)
+		_, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Stderr: &stderr, Interval: time.Second})
+		if err == nil || !strings.Contains(err.Error(), "isn't printable ASCII") {
+			t.Fatalf("err = %v, want the unprintable user code refused", err)
+		}
+		if stderr.String() != "" {
+			t.Errorf("stderr = %q, want nothing printed", stderr.String())
+		}
+		if _, _, polls := srv.snapshot(); len(polls) != 0 {
+			t.Errorf("token polls = %d, want 0", len(polls))
+		}
+	})
+}
+
+// A device authorization request that times out says so; no code was ever
+// shown, so it isn't "code expired".
+func TestDeviceLogin_RequestTimeout(t *testing.T) {
+	t.Parallel()
+	srv := (&deviceServer{deviceDelay: 500 * time.Millisecond}).start(t)
+	_, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{RequestTimeout: 100 * time.Millisecond})
+	host := strings.TrimPrefix(srv.URL, "http://")
+	if err == nil || err.Error() != "timed out requesting a device code from "+host {
+		t.Fatalf("err = %v, want a request timeout naming %s", err, host)
+	}
+	if errors.Is(err, ErrCodeExpired) {
+		t.Errorf("err = %v reads as an expired code", err)
 	}
 }
 
@@ -410,12 +559,15 @@ func TestLoginDefault_ChoosesFlow(t *testing.T) {
 		wantBrowser  bool
 		wantDiscover int
 		wantDevice   int
+		wantNote     string
 	}{
-		{"device when advertised", "discovery_with_device", 0, false, false, 1, 1},
-		{"browser when discovery lacks the endpoint", "discovery_without_device", 0, false, true, 1, 0},
-		{"browser when there is no discovery document", "", 0, false, true, 1, 0},
-		{"browser when device authorization is 404", "discovery_with_device", http.StatusNotFound, false, true, 1, 1},
-		{"--browser skips device login entirely", "discovery_with_device", 0, true, true, 0, 0},
+		{"device when advertised", "discovery_with_device", 0, false, false, 1, 1, ""},
+		{"browser when discovery lacks the endpoint", "discovery_without_device", 0, false, true, 1, 0, notOffered},
+		{"browser when there is no discovery document", "", 0, false, true, 1, 0, notOffered},
+		{"browser when device authorization is 404", "discovery_with_device", http.StatusNotFound, false, true, 1, 1, notOffered},
+		{"browser when discovery fails", "503", 0, false, true, 1, 0, "Couldn't read the login settings at /.well-known/oauth-authorization-server (HTTP 503); falling back to browser login."},
+		{"browser when discovery isn't JSON", "garbage", 0, false, true, 1, 0, "Couldn't read the login settings at /.well-known/oauth-authorization-server (not valid JSON); falling back to browser login."},
+		{"--browser skips device login entirely", "discovery_with_device", 0, true, true, 0, 0, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -426,13 +578,20 @@ func TestLoginDefault_ChoosesFlow(t *testing.T) {
 				tokens:       []string{"device_token_success"},
 			}).start(t)
 			var stub browserStub
+			var stderr syncBuffer
 			tok, err := LoginDefault(context.Background(), srv.URL, LoginOptions{
 				Browser:      tc.browser,
-				Device:       DeviceOptions{Interval: time.Second},
+				Device:       DeviceOptions{Stderr: &stderr, Interval: time.Second},
 				BrowserLogin: stub.login,
 			})
 			if err != nil {
 				t.Fatalf("LoginDefault: %v", err)
+			}
+			if tc.wantNote != "" && !strings.Contains(stderr.String(), tc.wantNote+"\n") {
+				t.Errorf("stderr = %q, want the note %q", stderr.String(), tc.wantNote)
+			}
+			if tc.wantNote != notOffered && strings.Contains(stderr.String(), notOffered) {
+				t.Errorf("stderr = %q, says the instance doesn't offer device login", stderr.String())
 			}
 			wantToken := "device-access-token"
 			if tc.wantBrowser {
