@@ -630,49 +630,88 @@ func TestResolve_ConcurrentRefreshRotatesOnce(t *testing.T) {
 	}
 }
 
-// A refresh must never run without the lock: if another process holds it past
-// the wait, Resolve errors instead of presenting the refresh token.
-func TestResolve_RefreshLockTimeout(t *testing.T) {
-	clearEnv(t)
+// A refresh must never run without the lock. If the lock can't be taken (held
+// by another process past the wait, or not creatable in a read-only config
+// directory), Resolve fails the command rather than present the refresh token
+// or fall through with the expired one, and the config on disk is untouched.
+func TestResolve_RefreshLockFailureFailsCommand(t *testing.T) {
+	for _, blocker := range []string{"lock held", "dir unwritable"} {
+		t.Run(blocker, func(t *testing.T) {
+			clearEnv(t)
+			if blocker == "dir unwritable" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("directory permissions are not enforced here")
+			}
 
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-	}))
-	defer srv.Close()
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+			}))
+			defer srv.Close()
 
-	path := writeConfig(t, &Config{
-		Version:        1,
-		DefaultProfile: "test",
-		Profiles: map[string]Profile{
-			"test": {
-				APIEndpoint:    srv.URL,
-				AuthMethod:     "oauth",
-				AccessToken:    "old-access",
-				RefreshToken:   "old-refresh",
-				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
-			},
-		},
-	})
-	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+			path := writeConfig(t, &Config{
+				Version:        1,
+				DefaultProfile: "test",
+				Profiles: map[string]Profile{
+					"test": {
+						APIEndpoint:    srv.URL,
+						AuthMethod:     "oauth",
+						AccessToken:    "old-access",
+						RefreshToken:   "old-refresh",
+						TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+					},
+				},
+			})
+			t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
 
-	held := flock.New(path + ".lock")
-	if ok, err := held.TryLock(); err != nil || !ok {
-		t.Fatalf("taking lock: ok=%v err=%v", ok, err)
-	}
-	defer held.Unlock()
+			orig := refreshLockTimeout
+			refreshLockTimeout = 100 * time.Millisecond
+			t.Cleanup(func() { refreshLockTimeout = orig })
 
-	orig := refreshLockTimeout
-	refreshLockTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { refreshLockTimeout = orig })
+			lockPath := path + ".lock"
+			switch blocker {
+			case "lock held":
+				held := flock.New(lockPath)
+				if ok, err := held.TryLock(); err != nil || !ok {
+					t.Fatalf("taking lock: ok=%v err=%v", ok, err)
+				}
+				defer held.Unlock()
+			case "dir unwritable":
+				dir := filepath.Dir(path)
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			}
 
-	_, err := Resolve("", "", "")
-	want := "timed out after 100ms waiting for " + path + ".lock (held by another omni process)"
-	if err == nil || err.Error() != want {
-		t.Fatalf("Resolve error = %v, want %q", err, want)
-	}
-	if hits.Load() != 0 {
-		t.Errorf("token endpoint received %d request(s) without the lock, want 0", hits.Load())
+			rc, err := Resolve("", "", "")
+			if err == nil {
+				t.Fatalf("Resolve returned token %q, want a lock error", rc.Token)
+			}
+			switch blocker {
+			case "lock held":
+				want := "timed out after 100ms waiting for " + lockPath + " (held by another omni process)"
+				if err.Error() != want {
+					t.Errorf("Resolve error = %q, want %q", err, want)
+				}
+			case "dir unwritable":
+				want := "cannot create OAuth refresh lock " + lockPath + " (is the config directory writable?): "
+				if !strings.HasPrefix(err.Error(), want) {
+					t.Errorf("Resolve error = %q, want prefix %q", err, want)
+				}
+			}
+			if got := hits.Load(); got != 0 {
+				t.Errorf("token endpoint received %d request(s) without the lock, want 0", got)
+			}
+			loaded, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := loaded.Profiles["test"].RefreshToken; got != "old-refresh" {
+				t.Errorf("persisted RefreshToken = %q, want %q", got, "old-refresh")
+			}
+		})
 	}
 }
 
