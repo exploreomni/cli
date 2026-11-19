@@ -168,7 +168,7 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	// refresh token there just because a flag/env has since redirected rc.BaseURL
 	// to a legitimate host.
 	explicitToken := tokenFlag != "" || os.Getenv("OMNI_API_TOKEN") != ""
-	if !explicitToken && profile != nil && profile.AuthMethod == "oauth" && profile.RefreshToken != "" && ValidateEndpoint(profile.APIEndpoint) == nil {
+	if !explicitToken && profile != nil && refreshable(profile) {
 		name := profileName
 		if name == "" {
 			name = cfg.DefaultProfile
@@ -234,7 +234,7 @@ func refreshOAuthToken(name string, profile *Profile) (string, error) {
 		return "", nil
 	}
 	latest, ok := cfg.Profiles[name]
-	if !ok || latest.AuthMethod != "oauth" || latest.RefreshToken == "" || ValidateEndpoint(latest.APIEndpoint) != nil {
+	if !ok || !refreshable(&latest) {
 		return "", nil
 	}
 	current := profileToken(&latest)
@@ -259,6 +259,11 @@ func refreshOAuthToken(name string, profile *Profile) (string, error) {
 		fmt.Fprintf(warnOut, "warning: could not save the refreshed OAuth token to %s (%v); the next command will need `omni config login`\n", ConfigPath(), err)
 	}
 	return refreshed.AccessToken, nil
+}
+
+// refreshable reports whether p's refresh token may be sent to its endpoint.
+func refreshable(p *Profile) bool {
+	return p.AuthMethod == "oauth" && p.RefreshToken != "" && ValidateEndpoint(p.APIEndpoint) == nil
 }
 
 func profileToken(p *Profile) *oauth2.Token {
