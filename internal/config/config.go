@@ -161,7 +161,9 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	// so it isn't refreshed. If the refresh request fails, fall through with the
 	// stale token and let the API return 401. If the refresh lock can't be taken
 	// (held past refreshLockTimeout, or the config directory isn't writable),
-	// return that error rather than refresh unserialized.
+	// return that error rather than refresh unserialized; if the config file
+	// can't be written, return an error rather than spend a refresh token whose
+	// replacement can't be saved.
 	//
 	// Validate the profile's endpoint before hitting the network: if an attacker-
 	// supplied APIEndpoint ever made it into the config, we must not POST the
@@ -217,7 +219,9 @@ var warnOut io.Writer = os.Stderr
 // one refresh token is presented twice, so two commands refreshing at once
 // would log the user out. The refresh therefore runs under a file lock next to
 // the config file, and re-reads the profile once it holds the lock: if another
-// process already refreshed, its token is used and no request is sent.
+// process already refreshed, its token is used and no request is sent. For the
+// same reason it sends no request unless the config file can be written, so
+// the rotated refresh token isn't lost.
 func refreshOAuthToken(name string, profile *Profile) (string, error) {
 	if profileToken(profile).Valid() {
 		return "", nil
@@ -241,6 +245,15 @@ func refreshOAuthToken(name string, profile *Profile) (string, error) {
 	if current.Valid() {
 		return current.AccessToken, nil
 	}
+
+	// Holding the lock doesn't prove Save will succeed: once the lock file
+	// exists, it can be locked in a read-only directory. Save rewrites the
+	// existing config in place, so it needs only write permission on the file.
+	f, err := os.OpenFile(ConfigPath(), os.O_WRONLY, 0)
+	if err != nil {
+		return "", fmt.Errorf("cannot save a refreshed OAuth token to %s (is the config file writable?): %w", ConfigPath(), err)
+	}
+	_ = f.Close()
 
 	ctx, cancel := context.WithTimeout(oauth.Context(context.Background()), refreshRequestTimeout)
 	defer cancel()

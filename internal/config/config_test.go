@@ -630,16 +630,18 @@ func TestResolve_ConcurrentRefreshRotatesOnce(t *testing.T) {
 	}
 }
 
-// A refresh must never run without the lock. If the lock can't be taken (held
-// by another process past the wait, or not creatable in a read-only config
-// directory), Resolve fails the command rather than present the refresh token
-// or fall through with the expired one, and the config on disk is untouched.
+// A refresh must never run without the lock, or when the rotated token can't be
+// saved. If the lock can't be taken (held by another process past the wait, or
+// not creatable in a read-only config directory), or the lock file already
+// exists but the config isn't writable, Resolve fails the command rather than
+// present the refresh token or fall through with the expired one, and the
+// config on disk is untouched.
 func TestResolve_RefreshLockFailureFailsCommand(t *testing.T) {
-	for _, blocker := range []string{"lock held", "dir unwritable"} {
+	for _, blocker := range []string{"lock held", "dir unwritable", "lock file exists, config read-only"} {
 		t.Run(blocker, func(t *testing.T) {
 			clearEnv(t)
-			if blocker == "dir unwritable" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
-				t.Skip("directory permissions are not enforced here")
+			if blocker != "lock held" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("file permissions are not enforced here")
 			}
 
 			var hits atomic.Int32
@@ -683,11 +685,25 @@ func TestResolve_RefreshLockFailureFailsCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			case "lock file exists, config read-only":
+				// An earlier refresh left the lock file, so the lock succeeds
+				// even though neither the directory nor the config is writable.
+				if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				dir := filepath.Dir(path)
+				if err := os.Chmod(path, 0o400); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 			}
 
 			rc, err := Resolve("", "", "")
 			if err == nil {
-				t.Fatalf("Resolve returned token %q, want a lock error", rc.Token)
+				t.Fatalf("Resolve returned token %q, want an error", rc.Token)
 			}
 			switch blocker {
 			case "lock held":
@@ -700,9 +716,14 @@ func TestResolve_RefreshLockFailureFailsCommand(t *testing.T) {
 				if !strings.HasPrefix(err.Error(), want) {
 					t.Errorf("Resolve error = %q, want prefix %q", err, want)
 				}
+			case "lock file exists, config read-only":
+				want := "cannot save a refreshed OAuth token to " + path + " (is the config file writable?): "
+				if !strings.HasPrefix(err.Error(), want) {
+					t.Errorf("Resolve error = %q, want prefix %q", err, want)
+				}
 			}
 			if got := hits.Load(); got != 0 {
-				t.Errorf("token endpoint received %d request(s) without the lock, want 0", got)
+				t.Errorf("token endpoint received %d request(s), want 0", got)
 			}
 			loaded, err := Load()
 			if err != nil {
@@ -791,21 +812,26 @@ func TestResolve_ExplicitTokenSkipsOAuthRefresh(t *testing.T) {
 	}
 }
 
-// If the refreshed token can't be saved, the command still runs with it, but
-// the user is warned: the rotated-out refresh token left on disk is spent.
+// If the refreshed token can't be saved (here the config turns read-only during
+// the request, after the writability check), the command still runs with it,
+// but the user is warned: the rotated-out refresh token left on disk is spent.
 func TestResolve_RefreshSaveFailureWarns(t *testing.T) {
 	clearEnv(t)
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("file permissions are not enforced here")
 	}
 
+	var path string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := os.Chmod(path, 0o400); err != nil {
+			t.Error(err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
 	}))
 	defer srv.Close()
 
-	path := writeConfig(t, &Config{
+	path = writeConfig(t, &Config{
 		Version:        1,
 		DefaultProfile: "test",
 		Profiles: map[string]Profile{
@@ -819,9 +845,6 @@ func TestResolve_RefreshSaveFailureWarns(t *testing.T) {
 		},
 	})
 	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
-	if err := os.Chmod(path, 0o400); err != nil {
-		t.Fatal(err)
-	}
 
 	var warnings strings.Builder
 	origOut := warnOut
