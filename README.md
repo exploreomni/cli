@@ -44,6 +44,14 @@ Verify a downloaded archive with the GitHub CLI:
 gh attestation verify omni_1.2.3_linux_amd64.tar.gz --repo exploreomni/cli
 ```
 
+Homebrew checks the formula's SHA-256 but not attestations (it only verifies attestations for bottles, and the formula installs the release archive). To check a Homebrew install yourself:
+
+```bash
+brew fetch exploreomni/tap/omni
+gh attestation verify "$(brew --cache exploreomni/tap/omni)" --repo exploreomni/cli \
+  --signer-workflow exploreomni/cli/.github/workflows/release.yml
+```
+
 ### Build from source
 
 ```bash
