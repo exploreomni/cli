@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,6 +63,15 @@ func refusingServer(t *testing.T) *httptest.Server {
 // stubBrowserLogin replaces the browser login for the test; fn runs in its
 // place and returns the token to save.
 func stubBrowserLogin(t *testing.T, fn func(endpoint string) (*oauth2.Token, error)) {
+	t.Helper()
+	stubBrowserLoginWithOpener(t, func(endpoint string, _ func(string)) (*oauth2.Token, error) {
+		return fn(endpoint)
+	})
+}
+
+// stubBrowserLoginWithOpener is stubBrowserLogin for a test that checks the
+// opener the browser login is handed.
+func stubBrowserLoginWithOpener(t *testing.T, fn func(endpoint string, open func(string)) (*oauth2.Token, error)) {
 	t.Helper()
 	prev := browserLogin
 	browserLogin = fn
@@ -352,7 +362,7 @@ func TestConfigInit_CorruptConfigFailsBeforeLogin(t *testing.T) {
 
 // The device login opens a browser only when stdin and stdout are both
 // terminals.
-func TestDeviceOpener_RequiresBothTTYs(t *testing.T) {
+func TestLoginOpener_RequiresBothTTYs(t *testing.T) {
 	prevTerm, prevOpener := isTerminal, browserOpener
 	t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
 	browserOpener = func() func(string) { return func(string) {} }
@@ -375,13 +385,86 @@ func TestDeviceOpener_RequiresBothTTYs(t *testing.T) {
 			}
 			return fd == stdout && tc.stdoutTTY
 		}
-		if got := deviceOpener() != nil; got != tc.want {
+		if got := loginOpener() != nil; got != tc.want {
 			t.Errorf("stdin TTY %v, stdout TTY %v: opener set = %v, want %v", tc.stdinTTY, tc.stdoutTTY, got, tc.want)
 		}
 	}
 	isTerminal = func(int) bool { return true }
 	browserOpener = func() func(string) { return nil }
-	if deviceOpener() != nil {
+	if loginOpener() != nil {
 		t.Error("opener set with no browser to open")
+	}
+}
+
+// The browser login, whether forced by --browser or fallen back to because
+// the server doesn't offer the device grant, opens a browser only when stdin
+// and stdout are both terminals.
+func TestConfigLogin_BrowserLoginOpensOnlyOnATerminal(t *testing.T) {
+	// 404s discovery, so login falls back to the browser login.
+	noDeviceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/oauth-authorization-server" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(noDeviceSrv.Close)
+
+	for _, flow := range []struct {
+		name string
+		args []string
+	}{
+		{"fallback", nil},
+		{"--browser", []string{"--browser"}},
+	} {
+		for _, tty := range []struct {
+			stdin, stdout, wantOpen bool
+		}{
+			{true, true, true},
+			{true, false, false},
+			{false, true, false},
+			{false, false, false},
+		} {
+			name := fmt.Sprintf("%s/stdin TTY %v, stdout TTY %v", flow.name, tty.stdin, tty.stdout)
+			t.Run(name, func(t *testing.T) {
+				loginTestEnv(t)
+				prevTerm, prevOpener := isTerminal, browserOpener
+				t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
+				// captureStdout swaps os.Stdout, so any descriptor but stdin's
+				// stands for stdout.
+				stdin := int(os.Stdin.Fd())
+				isTerminal = func(fd int) bool {
+					if fd == stdin {
+						return tty.stdin
+					}
+					return tty.stdout
+				}
+				var opened []string
+				browserOpener = func() func(string) {
+					return func(url string) { opened = append(opened, url) }
+				}
+				stubBrowserLoginWithOpener(t, func(_ string, open func(string)) (*oauth2.Token, error) {
+					if open != nil {
+						open("https://auth.example/authorize")
+					}
+					return &oauth2.Token{AccessToken: "browser-access", RefreshToken: "browser-refresh"}, nil
+				})
+				withConfig(t, &config.Config{
+					Version:        1,
+					DefaultProfile: "prod",
+					Profiles:       map[string]config.Profile{"prod": {APIEndpoint: noDeviceSrv.URL, AuthMethod: "oauth"}},
+				})
+
+				var err error
+				captureStdout(t, func() {
+					err = rootWithConfig(append([]string{"config", "login", "prod"}, flow.args...)...).Execute()
+				})
+				if err != nil {
+					t.Fatalf("login: %v", err)
+				}
+				if got := len(opened) == 1; got != tty.wantOpen {
+					t.Errorf("browser opened %v times, want opened = %v", len(opened), tty.wantOpen)
+				}
+			})
+		}
 	}
 }

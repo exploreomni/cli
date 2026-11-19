@@ -29,7 +29,7 @@ func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
 
 // Test seams for the OAuth login: the browser flow, an override for the
 // device grant's polling interval (zero keeps the server's), and the TTY
-// check and browser opener behind deviceOpener.
+// check and browser opener behind loginOpener.
 var (
 	browserLogin       = oauth.Login
 	devicePollInterval time.Duration
@@ -37,9 +37,10 @@ var (
 	browserOpener      = oauth.BrowserOpener
 )
 
-// deviceOpener is how the device login opens its URL: only for a person at a
-// terminal (stdin and stdout both TTYs) with a browser to open, else nil.
-func deviceOpener() func(string) {
+// loginOpener is how the device and browser logins open their URL: only for a
+// person at a terminal (stdin and stdout both TTYs) with a browser to open,
+// else nil.
+func loginOpener() func(string) {
 	if isTerminal(int(os.Stdin.Fd())) && isTerminal(int(os.Stdout.Fd())) {
 		return browserOpener()
 	}
@@ -48,12 +49,12 @@ func deviceOpener() func(string) {
 
 // oauthLogin logs in to endpoint with the device grant, or with the browser
 // flow when --browser is set or the server doesn't offer the device grant.
-// The verification URL opens in a browser only for a person at a terminal
-// with a browser to open. With jsonOut, the device code is also written to
+// Either flow's URL opens in a browser only for a person at a terminal with
+// a browser to open. With jsonOut, the device code is also written to
 // stdout as one JSON line before polling starts.
 func oauthLogin(cmd *cobra.Command, endpoint string, jsonOut bool) (*oauth2.Token, error) {
 	forceBrowser, _ := cmd.Flags().GetBool("browser")
-	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval, OpenBrowser: deviceOpener()}
+	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval, OpenBrowser: loginOpener()}
 	if jsonOut {
 		device.JSON = os.Stdout
 	}

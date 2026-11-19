@@ -71,8 +71,9 @@ type DeviceOptions struct {
 	// JSON, when set, receives one JSON line with the verification URI, user
 	// code and expiry before polling starts.
 	JSON io.Writer
-	// OpenBrowser, when set, is called with the verification URL. Leave it
-	// nil when no browser can or should be opened.
+	// OpenBrowser, when set, is called with the verification URL, and by
+	// LoginDefault with the browser login's authorization URL. Leave it nil
+	// when no browser can or should be opened.
 	OpenBrowser func(url string)
 	// Interval overrides the server's polling interval when positive. x/oauth2
 	// polls in whole seconds, so it is rounded up to one.
@@ -353,8 +354,9 @@ type LoginOptions struct {
 	Browser bool
 	// Device configures the device grant.
 	Device DeviceOptions
-	// BrowserLogin runs the browser login; nil means Login.
-	BrowserLogin func(apiEndpoint string) (*oauth2.Token, error)
+	// BrowserLogin runs the browser login with Device.OpenBrowser as its
+	// opener; nil means Login.
+	BrowserLogin func(apiEndpoint string, open func(url string)) (*oauth2.Token, error)
 }
 
 // LoginDefault logs in with the device grant when the server offers it, and
@@ -366,7 +368,7 @@ func LoginDefault(ctx context.Context, apiEndpoint string, opts LoginOptions) (*
 		browserLogin = Login
 	}
 	if opts.Browser {
-		return browserLogin(apiEndpoint)
+		return browserLogin(apiEndpoint, opts.Device.OpenBrowser)
 	}
 
 	stderr := opts.Device.Stderr
@@ -385,7 +387,7 @@ func LoginDefault(ctx context.Context, apiEndpoint string, opts LoginOptions) (*
 		fallback = notOffered
 	}
 	fmt.Fprintln(stderr, fallback)
-	return browserLogin(apiEndpoint)
+	return browserLogin(apiEndpoint, opts.Device.OpenBrowser)
 }
 
 // BrowserOpener returns a function that opens a URL in the default browser,

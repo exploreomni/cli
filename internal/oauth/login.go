@@ -48,9 +48,11 @@ func Context(ctx context.Context) context.Context {
 }
 
 // Login performs the full OAuth 2.1 authorization code flow with PKCE.
-// It starts a local HTTP server, opens the browser to the authorization endpoint,
-// waits for the callback, and exchanges the code for tokens.
-func Login(apiEndpoint string) (*oauth2.Token, error) {
+// It starts a local HTTP server, prints the authorization URL to stderr, opens
+// it with open when open is non-nil, waits for the callback, and exchanges the
+// code for tokens. With a nil open, the person opens the URL themselves in a
+// browser on this machine, which the localhost callback needs.
+func Login(apiEndpoint string, open func(url string)) (*oauth2.Token, error) {
 	listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return nil, fmt.Errorf("starting local server: %w", err)
@@ -117,9 +119,13 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 
 	// Instructions go to stderr: stdout is for data, and `--format json`
 	// promises nothing but JSON there.
-	fmt.Fprintf(os.Stderr, "Opening browser to log in...\n")
-	fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
-	openBrowser(authURL)
+	if open != nil {
+		fmt.Fprintf(os.Stderr, "Opening browser to log in...\n")
+		fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
+		open(authURL)
+	} else {
+		fmt.Fprintf(os.Stderr, "To log in, open this URL in a browser on this machine:\n%s\n\n", authURL)
+	}
 
 	var result authResult
 	select {

@@ -542,7 +542,7 @@ type browserStub struct {
 	calls int
 }
 
-func (b *browserStub) login(string) (*oauth2.Token, error) {
+func (b *browserStub) login(string, func(string)) (*oauth2.Token, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.calls++
