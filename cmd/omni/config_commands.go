@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -23,6 +25,47 @@ func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
 	p.AccessToken = tok.AccessToken
 	p.RefreshToken = tok.RefreshToken
 	p.TokenExpiresAt = tok.Expiry.Format(time.RFC3339)
+}
+
+// Test seams for the OAuth login: the browser flow, and an override for the
+// device grant's polling interval (zero keeps the server's).
+var (
+	browserLogin       = oauth.Login
+	devicePollInterval time.Duration
+)
+
+// oauthLogin logs in to endpoint with the device grant, or with the browser
+// flow when --browser is set or the server doesn't offer the device grant.
+// The verification URL opens in a browser only for a person at a terminal
+// with a browser to open. With jsonOut, the device code is also written to
+// stdout as one JSON line before polling starts.
+func oauthLogin(cmd *cobra.Command, endpoint string, jsonOut bool) (*oauth2.Token, error) {
+	forceBrowser, _ := cmd.Flags().GetBool("browser")
+	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval}
+	if jsonOut {
+		device.JSON = os.Stdout
+	}
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		device.OpenBrowser = oauth.BrowserOpener()
+	}
+	return oauth.LoginDefault(context.Background(), endpoint, oauth.LoginOptions{
+		Browser:      forceBrowser,
+		Device:       device,
+		BrowserLogin: browserLogin,
+	})
+}
+
+// jsonOutputChosen reports whether JSON output was explicitly asked for (by
+// --format, OMNI_OUTPUT_FORMAT or the config default), as opposed to a pipe
+// auto-detecting it. Login then keeps stdout to the device code's JSON line.
+func jsonOutputChosen(cmd *cobra.Command) bool {
+	format, _ := cmd.Flags().GetString("format")
+	return config.ChosenOutputFormat(format) == config.FormatJSON
+}
+
+// addBrowserFlag registers --browser on a command that runs the OAuth login.
+func addBrowserFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool("browser", false, "log in through a browser on this machine (localhost callback) instead of with a device code")
 }
 
 func addConfigCommands(root *cobra.Command) {
@@ -57,11 +100,18 @@ func configInitCmd() *cobra.Command {
 Prompts interactively for any value not supplied via flags. With --name,
 --endpoint, and --auth oauth set, OAuth setup runs with no prompts. For
 api-key auth the key is always read from a hidden prompt — it is never
-accepted as a flag, so it can't leak into shell history.`,
+accepted as a flag, so it can't leak into shell history.
+
+OAuth signs in with a device code: the CLI prints a URL and a code, you
+approve it in a browser on any device, and the CLI picks up the tokens. Pass
+--browser to use a browser on this machine instead (localhost callback); the
+CLI also falls back to it when the Omni instance doesn't offer device login.
+With --format json the URL and code are also printed to stdout as one JSON
+line before the CLI waits for approval.`,
 		Example: `  # Interactive setup
   omni config init
 
-  # Non-interactive OAuth (opens browser for login)
+  # Non-interactive OAuth (prints a URL and code to approve)
   omni config init --name prod --endpoint https://myorg.omniapp.co --auth oauth
 
   # API key (prompts securely for the key)
@@ -92,7 +142,7 @@ accepted as a flag, so it can't leak into shell history.`,
 			case choice == "":
 				fmt.Println("Authentication method:")
 				fmt.Println("  1) API key")
-				fmt.Println("  2) OAuth (browser login)")
+				fmt.Println("  2) OAuth (sign in with your Omni account)")
 				fmt.Print("Choose [1/2]: ")
 				choice, _ = reader.ReadString('\n')
 				choice = strings.TrimSpace(strings.ToLower(choice))
@@ -100,27 +150,26 @@ accepted as a flag, so it can't leak into shell history.`,
 				return fmt.Errorf("invalid --auth %q — must be %q or %q", authMethod, "api-key", "oauth")
 			}
 
-			cfg, err := config.Load()
-			if err != nil {
-				cfg = &config.Config{
-					Version:  1,
-					Profiles: make(map[string]config.Profile),
-				}
+			// Fail before the login, not after it, on a config file that
+			// exists but can't be read.
+			if _, err := config.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("loading config %s: %w", config.ConfigPath(), err)
 			}
 
+			jsonOut := jsonOutputChosen(cmd)
+			var p config.Profile
 			switch choice {
 			case "2", "o", "oauth":
 				if err := config.ValidateEndpoint(endpoint); err != nil {
 					return err
 				}
-				tok, err := oauth.Login(endpoint)
+				tok, err := oauthLogin(cmd, endpoint, jsonOut)
 				if err != nil {
 					return fmt.Errorf("OAuth login failed: %w", err)
 				}
 
-				p := config.Profile{APIEndpoint: endpoint}
+				p = config.Profile{APIEndpoint: endpoint}
 				applyOAuthToken(&p, tok)
-				cfg.Profiles[name] = p
 
 			default: // "1", "a", "api-key", or empty
 				// The key is always read from a hidden prompt rather than a
@@ -133,26 +182,30 @@ accepted as a flag, so it can't leak into shell history.`,
 				}
 				apiKey := strings.TrimSpace(string(apiKeyBytes))
 
-				cfg.Profiles[name] = config.Profile{
+				p = config.Profile{
 					APIEndpoint: endpoint,
 					AuthMethod:  "api-key",
 					APIKey:      apiKey,
 				}
 			}
 
-			if cfg.DefaultProfile == "" {
-				cfg.DefaultProfile = name
+			cfg, err := config.Update(func(cfg *config.Config) error {
+				cfg.Profiles[name] = p
+				if cfg.DefaultProfile == "" {
+					cfg.DefaultProfile = name
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 
-			if err := config.Save(cfg); err != nil {
-				return fmt.Errorf("saving config: %w", err)
-			}
-
-			fmt.Printf("Profile %q saved to %s\n", name, config.ConfigPath())
+			fmt.Fprintf(successOutput(jsonOut), "Profile %q saved to %s\n", name, config.ConfigPath())
 			maybePrintBanner(cmd, name, cfg)
 			return nil
 		},
 	}
+	addBrowserFlag(cmd)
 
 	cmd.Flags().StringVar(&name, "name", "", "profile name (skips prompt)")
 	cmd.Flags().StringVar(&endpoint, "endpoint", "", "API endpoint, e.g. https://myorg.omniapp.co (skips prompt)")
@@ -428,11 +481,33 @@ func targetProfileName(cmd *cobra.Command, args []string, cfg *config.Config) (s
 	return "", fmt.Errorf("no profile specified and no default profile set")
 }
 
+// successOutput is where a login's closing message goes: stdout, or stderr
+// when JSON output keeps stdout to the device code's JSON line.
+func successOutput(jsonOut bool) *os.File {
+	if jsonOut {
+		return os.Stderr
+	}
+	return os.Stdout
+}
+
 func configLoginCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "login [profile]",
-		Short: "Log in via OAuth browser flow",
-		Args:  profileNameArgs(0, 1),
+		Short: "Log in with OAuth (device code, or --browser)",
+		Long: `Log in with OAuth and save the tokens to a profile.
+
+The CLI prints a URL and a code; approve the code in a browser on any device
+and the CLI picks up the tokens. At a terminal it also opens the URL for you.
+Pass --browser to log in through a browser on this machine instead (localhost
+callback); the CLI also falls back to it when the Omni instance doesn't offer
+device login.
+
+With --format json, the URL and code are printed to stdout as one JSON line
+before the CLI waits for approval, so a script or agent can read it and show
+it to the person signing in:
+
+  {"verification_uri":"…","verification_uri_complete":"…","user_code":"BDKF-QRTW","expires_in":600}`,
+		Args: profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Args are validated: failures below are runtime errors, not usage errors.
 			cmd.SilenceUsage = true
@@ -455,23 +530,37 @@ func configLoginCmd() *cobra.Command {
 			if err := config.ValidateEndpoint(p.APIEndpoint); err != nil {
 				return err
 			}
-			tok, err := oauth.Login(p.APIEndpoint)
+			jsonOut := jsonOutputChosen(cmd)
+			tok, err := oauthLogin(cmd, p.APIEndpoint, jsonOut)
 			if err != nil {
 				return fmt.Errorf("OAuth login failed: %w", err)
 			}
 
-			applyOAuthToken(&p, tok)
-			cfg.Profiles[name] = p
-
-			if err := config.Save(cfg); err != nil {
-				return fmt.Errorf("saving config: %w", err)
+			// Apply the tokens to the profile as it is on disk now, not as it
+			// was read before the (possibly minutes-long) login.
+			cfg, err = config.Update(func(cfg *config.Config) error {
+				latest, ok := cfg.Profiles[name]
+				if !ok {
+					return fmt.Errorf("profile %q was removed during login", name)
+				}
+				if latest.APIEndpoint != p.APIEndpoint {
+					return fmt.Errorf("profile %q changed endpoint during login; run login again", name)
+				}
+				applyOAuthToken(&latest, tok)
+				cfg.Profiles[name] = latest
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 
-			fmt.Printf("Login successful! Profile %q updated.\n", name)
+			fmt.Fprintf(successOutput(jsonOut), "Login successful! Profile %q updated.\n", name)
 			maybePrintBanner(cmd, name, cfg)
 			return nil
 		},
 	}
+	addBrowserFlag(cmd)
+	return cmd
 }
 
 func configLogoutCmd() *cobra.Command {
