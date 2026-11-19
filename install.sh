@@ -25,6 +25,7 @@ main() {
     archive="${BINARY}_${version_num}_${os}_${arch}.tar.gz"
     url="https://github.com/${REPO}/releases/download/${version}/${archive}"
     checksums_url="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+    bundle_url="https://github.com/${REPO}/releases/download/${version}/attestation.sigstore.json"
 
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
@@ -35,6 +36,7 @@ main() {
 
     echo "Verifying checksum..."
     verify_checksum "${tmpdir}" "${archive}"
+    verify_attestation "${tmpdir}" "${archive}" "${version}" "${bundle_url}"
 
     echo "Extracting..."
     tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
@@ -109,6 +111,59 @@ verify_checksum() {
         echo "  Actual:   ${actual}" >&2
         exit 1
     fi
+}
+
+# Verifies the archive's GitHub Artifact Attestation: proof it was built by
+# this repo's release workflow from the tag being installed. The checksum
+# alone can't show that, since checksums.txt ships in the same release.
+#
+# OMNI_VERIFY_ATTESTATION=auto (default) verifies when the GitHub CLI is
+#   available and skips with a note otherwise; =require fails instead of
+#   skipping; =skip turns it off. A failed verification always aborts.
+verify_attestation() {
+    dir="$1"
+    file="$2"
+    version="$3"
+    bundle_url="$4"
+    mode="${OMNI_VERIFY_ATTESTATION:-auto}"
+
+    case "$mode" in
+        skip) return 0 ;;
+        auto|require) ;;
+        *) echo "Error: OMNI_VERIFY_ATTESTATION must be auto, require or skip (got '${mode}')" >&2; exit 1 ;;
+    esac
+
+    # `gh attestation` needs gh 2.49+. With --bundle it verifies offline and
+    # works without `gh auth login`.
+    if ! command -v gh >/dev/null 2>&1 || ! gh attestation verify --help >/dev/null 2>&1; then
+        attestation_unavailable "$mode" "GitHub CLI (gh 2.49+) not found"
+        return 0
+    fi
+
+    if ! download "$bundle_url" "${dir}/attestation.sigstore.json" 2>/dev/null || [ ! -s "${dir}/attestation.sigstore.json" ]; then
+        attestation_unavailable "$mode" "release ${version} has no attestation bundle"
+        return 0
+    fi
+
+    echo "Verifying build provenance..."
+    if ! gh attestation verify "${dir}/${file}" \
+        --bundle "${dir}/attestation.sigstore.json" \
+        --repo "$REPO" \
+        --signer-workflow "${REPO}/.github/workflows/release.yml" \
+        --source-ref "refs/tags/${version}" \
+        --deny-self-hosted-runners >/dev/null 2>"${dir}/attestation.err"; then
+        echo "Error: Build provenance verification failed for ${file}" >&2
+        sed 's/^/  /' "${dir}/attestation.err" >&2
+        exit 1
+    fi
+}
+
+attestation_unavailable() {
+    if [ "$1" = "require" ]; then
+        echo "Error: Cannot verify build provenance: $2 (OMNI_VERIFY_ATTESTATION=require)" >&2
+        exit 1
+    fi
+    echo "Note: Skipping build provenance check: $2. The checksum was verified." >&2
 }
 
 select_install_dir() {

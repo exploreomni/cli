@@ -31,12 +31,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest release artifacts
+        id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             dist/omni_*.tar.gz
             dist/omni_*.zip
             dist/checksums.txt
+
+      # Ship the Sigstore bundle with the release so install.sh can verify
+      # provenance offline: no API call, no `gh auth login` needed.
+      - name: Upload attestation bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" dist/attestation.sigstore.json
+          gh release upload "$GITHUB_REF_NAME" dist/attestation.sigstore.json --clobber
 
       - name: Checkout Homebrew tap
         if: ${{ !contains(github.ref_name, '-') }}

@@ -18,6 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | s
 
 This downloads the latest release, verifies the SHA-256 checksum, and installs the `omni` binary to `/usr/local/bin` (or `~/.local/bin` if `/usr/local/bin` isn't writable).
 
+If the [GitHub CLI](https://cli.github.com) (2.49+) is installed, the script also verifies the archive's [build provenance](#verifying-release-artifacts): that it was built by this repo's release workflow from that release's tag. No `gh auth login` is needed. Without `gh` it skips this check with a note. Set `OMNI_VERIFY_ATTESTATION=require` to fail instead, or `=skip` to turn it off:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | OMNI_VERIFY_ATTESTATION=require sh
+```
+
 ### Download from GitHub Releases
 
 Pre-built binaries for macOS, Linux, and Windows are available on the [Releases page](https://github.com/exploreomni/cli/releases). Download the archive for your platform, extract it, and place the `omni` binary somewhere on your `PATH`.
