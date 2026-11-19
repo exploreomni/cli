@@ -1,6 +1,7 @@
-// Package oauth implements OAuth 2.1 browser-based login with PKCE for the Omni CLI.
-// It wraps golang.org/x/oauth2 with the local-server + browser-opener glue needed
-// for a CLI-initiated authorization code flow.
+// Package oauth implements OAuth login for the Omni CLI: the RFC 8628 device
+// authorization grant (device.go) and a browser-based authorization code flow
+// with PKCE. It wraps golang.org/x/oauth2 with the local-server + browser-opener
+// glue a CLI needs.
 package oauth
 
 import (
@@ -11,6 +12,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -113,8 +115,10 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 
 	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 
-	fmt.Printf("Opening browser to log in...\n")
-	fmt.Printf("If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
+	// Instructions go to stderr: stdout is for data, and `--format json`
+	// promises nothing but JSON there.
+	fmt.Fprintf(os.Stderr, "Opening browser to log in...\n")
+	fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
 	openBrowser(authURL)
 
 	var result authResult
