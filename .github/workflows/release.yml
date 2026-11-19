@@ -65,14 +65,12 @@ jobs:
 
       - name: Notify omni-agent-skills
         if: ${{ !contains(github.ref_name, '-') }}
-        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
-        with:
-          token: ${{ secrets.SKILLS_REPO_TOKEN }}
-          repository: exploreomni/omni-agent-skills
-          event-type: cli-update
-          client-payload: >-
-            {
-              "release_tag": "${{ github.ref_name }}",
-              "release_url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
-              "commit_sha": "${{ github.sha }}"
-            }
+        env:
+          GH_TOKEN: ${{ secrets.SKILLS_REPO_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          jq -n --arg tag "$RELEASE_TAG" --arg url "$RELEASE_URL" --arg sha "$COMMIT_SHA" \
+            '{event_type: "cli-update", client_payload: {release_tag: $tag, release_url: $url, commit_sha: $sha}}' \
+            | gh api --method POST repos/exploreomni/omni-agent-skills/dispatches --input -
