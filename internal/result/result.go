@@ -60,6 +60,9 @@ type Failure struct {
 }
 
 func (f Failure) Error() string {
+	if f.JobID == "" {
+		return "query failed: " + f.Message
+	}
 	if f.Status == "" {
 		return fmt.Sprintf("query job %s: %s", f.JobID, f.Message)
 	}
@@ -102,6 +105,10 @@ type line struct {
 	ErrorMessage    string          `json:"error_message"`
 	Error           json.RawMessage `json:"error"`
 	RemainingJobIDs []string        `json:"remaining_job_ids"`
+	// Message is set on a line that rejects the whole request rather than
+	// one job, e.g. a malformed filter: the API answers 200 with
+	// {"message":"Illegal json parameter found: ..."} and no job at all.
+	Message string `json:"message"`
 }
 
 type summary struct {
@@ -148,6 +155,8 @@ func Parse(data []byte) (*Stream, error) {
 				continue
 			}
 			st.Sets = append(st.Sets, set)
+		case l.Message != "":
+			st.Failures = append(st.Failures, Failure{Message: l.Message})
 		}
 	}
 	if err := sc.Err(); err != nil {

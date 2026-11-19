@@ -210,6 +210,20 @@ func TestRenderStream_OnlyFailuresWriteNothing(t *testing.T) {
 	}
 }
 
+// A request the API rejects outright (200, bare message, no job) is an
+// error, not "No results.".
+func TestRenderStream_RequestLevelMessage(t *testing.T) {
+	body := `{"message":"Illegal json parameter found: filters"}` + "\n"
+	var stdout bytes.Buffer
+	err := renderStream(&config.ResolvedConfig{}, streamResp(body, nil), "human", false, nil, &stdout, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "Illegal json parameter found: filters") {
+		t.Fatalf("expected the API's message, got %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("nothing should reach stdout, got %q", stdout.String())
+	}
+}
+
 func TestIsQueryStream(t *testing.T) {
 	if !isQueryStream(streamResp("", nil)) {
 		t.Error("text/ndjson 200 is a stream")

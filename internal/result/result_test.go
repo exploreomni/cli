@@ -156,6 +156,18 @@ func TestParse_FailedJobIsAFailure(t *testing.T) {
 	}
 }
 
+func TestParse_RequestLevelMessageIsAFailure(t *testing.T) {
+	// A malformed request comes back 200 with a bare message and no job.
+	body := `{"message":"Illegal json parameter found: filters"}` + "\n"
+	st, err := Parse([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Err(); err == nil || err.Error() != "query failed: Illegal json parameter found: filters" {
+		t.Errorf("expected the request's message, got %v", err)
+	}
+}
+
 func TestParse_OneFailedJobKeepsTheOthers(t *testing.T) {
 	body := jobLine(t, "j1", "COMPLETE", nil) + "\n" +
 		jobLine(t, "j2", "ERROR", map[string]any{"error_message": "boom"})
