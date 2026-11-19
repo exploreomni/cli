@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,9 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // clearEnv unsets all Omni env vars so tests start from a clean slate.
@@ -521,6 +525,153 @@ func TestResolve_OAuthFreshTokenSkipsRefresh(t *testing.T) {
 	}
 	if rc.Token != "fresh-access" {
 		t.Errorf("rc.Token = %q, want %q", rc.Token, "fresh-access")
+	}
+}
+
+// The server rotates refresh tokens and revokes the whole token family when a
+// refresh token is presented twice, so two commands started together with an
+// expired token must rotate it once and share the result.
+func TestResolve_ConcurrentRefreshRotatesOnce(t *testing.T) {
+	clearEnv(t)
+
+	var (
+		mu      sync.Mutex
+		seen    = map[string]bool{}
+		minted  int
+		hits    atomic.Int32
+		another = make(chan struct{})
+		once    sync.Once
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_ = r.ParseForm()
+		presented := r.PostForm.Get("refresh_token")
+
+		mu.Lock()
+		reused := seen[presented]
+		seen[presented] = true
+		if reused {
+			mu.Unlock()
+			once.Do(func() { close(another) })
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"concurrent_rotation"}`))
+			return
+		}
+		minted++
+		n := minted
+		mu.Unlock()
+
+		// Hold the first rotation open long enough for an unserialized second
+		// caller to arrive with the same refresh token.
+		select {
+		case <-another:
+		case <-time.After(300 * time.Millisecond):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"access_token":"access-%d","refresh_token":"refresh-%d","expires_in":3600,"token_type":"Bearer"}`, n, n)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	const callers = 2
+	var (
+		wg     sync.WaitGroup
+		start  = make(chan struct{})
+		tokens [callers]string
+		errs   [callers]error
+	)
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rc, err := Resolve("", "", "")
+			errs[i] = err
+			if rc != nil {
+				tokens[i] = rc.Token
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i := range callers {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: unexpected error: %v", i, errs[i])
+		}
+		if tokens[i] != "access-1" {
+			t.Errorf("caller %d: rc.Token = %q, want %q", i, tokens[i], "access-1")
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("token endpoint received %d request(s), want exactly 1 rotation", got)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after refresh: %v", err)
+	}
+	if got := loaded.Profiles["test"].RefreshToken; got != "refresh-1" {
+		t.Errorf("persisted RefreshToken = %q, want %q", got, "refresh-1")
+	}
+}
+
+// A refresh must never run without the lock: if another process holds it past
+// the wait, Resolve errors instead of presenting the refresh token.
+func TestResolve_RefreshLockTimeout(t *testing.T) {
+	clearEnv(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer srv.Close()
+
+	path := writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	held := flock.New(path + ".lock")
+	if ok, err := held.TryLock(); err != nil || !ok {
+		t.Fatalf("taking lock: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	orig := refreshLockTimeout
+	refreshLockTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { refreshLockTimeout = orig })
+
+	_, err := Resolve("", "", "")
+	if err == nil || !strings.Contains(err.Error(), "OAuth refresh lock") {
+		t.Fatalf("Resolve error = %v, want a refresh lock error", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("token endpoint received %d request(s) without the lock, want 0", hits.Load())
 	}
 }
 
