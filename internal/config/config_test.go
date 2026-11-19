@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,9 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // clearEnv unsets all Omni env vars so tests start from a clean slate.
@@ -521,6 +525,341 @@ func TestResolve_OAuthFreshTokenSkipsRefresh(t *testing.T) {
 	}
 	if rc.Token != "fresh-access" {
 		t.Errorf("rc.Token = %q, want %q", rc.Token, "fresh-access")
+	}
+}
+
+// The server rotates refresh tokens and revokes the whole token family when a
+// refresh token is presented twice, so two commands started together with an
+// expired token must rotate it once and share the result.
+func TestResolve_ConcurrentRefreshRotatesOnce(t *testing.T) {
+	clearEnv(t)
+
+	var (
+		mu      sync.Mutex
+		seen    = map[string]bool{}
+		minted  int
+		hits    atomic.Int32
+		another = make(chan struct{})
+		once    sync.Once
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_ = r.ParseForm()
+		presented := r.PostForm.Get("refresh_token")
+
+		mu.Lock()
+		reused := seen[presented]
+		seen[presented] = true
+		if reused {
+			mu.Unlock()
+			once.Do(func() { close(another) })
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"concurrent_rotation"}`))
+			return
+		}
+		minted++
+		n := minted
+		mu.Unlock()
+
+		// Hold the first rotation open long enough for an unserialized second
+		// caller to arrive with the same refresh token.
+		select {
+		case <-another:
+		case <-time.After(300 * time.Millisecond):
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"access_token":"access-%d","refresh_token":"refresh-%d","expires_in":3600,"token_type":"Bearer"}`, n, n)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	const callers = 2
+	var (
+		wg     sync.WaitGroup
+		start  = make(chan struct{})
+		tokens [callers]string
+		errs   [callers]error
+	)
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rc, err := Resolve("", "", "")
+			errs[i] = err
+			if rc != nil {
+				tokens[i] = rc.Token
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i := range callers {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: unexpected error: %v", i, errs[i])
+		}
+		if tokens[i] != "access-1" {
+			t.Errorf("caller %d: rc.Token = %q, want %q", i, tokens[i], "access-1")
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("token endpoint received %d request(s), want exactly 1 rotation", got)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after refresh: %v", err)
+	}
+	if got := loaded.Profiles["test"].RefreshToken; got != "refresh-1" {
+		t.Errorf("persisted RefreshToken = %q, want %q", got, "refresh-1")
+	}
+}
+
+// A refresh must never run without the lock, or when the rotated token can't be
+// saved. If the lock can't be taken (held by another process past the wait, or
+// not creatable in a read-only config directory), or the lock file already
+// exists but the config isn't writable, Resolve fails the command rather than
+// present the refresh token or fall through with the expired one, and the
+// config on disk is untouched.
+func TestResolve_RefreshLockFailureFailsCommand(t *testing.T) {
+	for _, blocker := range []string{"lock held", "dir unwritable", "lock file exists, config read-only"} {
+		t.Run(blocker, func(t *testing.T) {
+			clearEnv(t)
+			if blocker != "lock held" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("file permissions are not enforced here")
+			}
+
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+			}))
+			defer srv.Close()
+
+			path := writeConfig(t, &Config{
+				Version:        1,
+				DefaultProfile: "test",
+				Profiles: map[string]Profile{
+					"test": {
+						APIEndpoint:    srv.URL,
+						AuthMethod:     "oauth",
+						AccessToken:    "old-access",
+						RefreshToken:   "old-refresh",
+						TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+					},
+				},
+			})
+			t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+			orig := refreshLockTimeout
+			refreshLockTimeout = 100 * time.Millisecond
+			t.Cleanup(func() { refreshLockTimeout = orig })
+
+			lockPath := path + ".lock"
+			switch blocker {
+			case "lock held":
+				held := flock.New(lockPath)
+				if ok, err := held.TryLock(); err != nil || !ok {
+					t.Fatalf("taking lock: ok=%v err=%v", ok, err)
+				}
+				defer held.Unlock()
+			case "dir unwritable":
+				dir := filepath.Dir(path)
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			case "lock file exists, config read-only":
+				// An earlier refresh left the lock file, so the lock succeeds
+				// even though neither the directory nor the config is writable.
+				if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				dir := filepath.Dir(path)
+				if err := os.Chmod(path, 0o400); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dir, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+			}
+
+			rc, err := Resolve("", "", "")
+			if err == nil {
+				t.Fatalf("Resolve returned token %q, want an error", rc.Token)
+			}
+			switch blocker {
+			case "lock held":
+				want := "timed out after 100ms waiting for " + lockPath + " (held by another omni process)"
+				if err.Error() != want {
+					t.Errorf("Resolve error = %q, want %q", err, want)
+				}
+			case "dir unwritable":
+				want := "cannot create OAuth refresh lock " + lockPath + " (is the config directory writable?): "
+				if !strings.HasPrefix(err.Error(), want) {
+					t.Errorf("Resolve error = %q, want prefix %q", err, want)
+				}
+			case "lock file exists, config read-only":
+				want := "cannot save a refreshed OAuth token to " + path + " (is the config file writable?): "
+				if !strings.HasPrefix(err.Error(), want) {
+					t.Errorf("Resolve error = %q, want prefix %q", err, want)
+				}
+			}
+			if got := hits.Load(); got != 0 {
+				t.Errorf("token endpoint received %d request(s), want 0", got)
+			}
+			loaded, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := loaded.Profiles["test"].RefreshToken; got != "old-refresh" {
+				t.Errorf("persisted RefreshToken = %q, want %q", got, "old-refresh")
+			}
+		})
+	}
+}
+
+// A token passed by flag or env replaces the profile's, so the profile's OAuth
+// token is neither refreshed nor allowed to overwrite it — and a held lock or a
+// read-only config directory can't fail the command.
+func TestResolve_ExplicitTokenSkipsOAuthRefresh(t *testing.T) {
+	for _, source := range []string{"flag", "env"} {
+		for _, blocker := range []string{"none", "lock held", "dir unwritable"} {
+			t.Run(source+"/"+blocker, func(t *testing.T) {
+				clearEnv(t)
+				if blocker == "dir unwritable" && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+					t.Skip("directory permissions are not enforced here")
+				}
+
+				var hits atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					hits.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+				}))
+				defer srv.Close()
+
+				path := writeConfig(t, &Config{
+					Version:        1,
+					DefaultProfile: "test",
+					Profiles: map[string]Profile{
+						"test": {
+							APIEndpoint:    srv.URL,
+							AuthMethod:     "oauth",
+							AccessToken:    "old-access",
+							RefreshToken:   "old-refresh",
+							TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+						},
+					},
+				})
+				t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+				orig := refreshLockTimeout
+				refreshLockTimeout = 100 * time.Millisecond
+				t.Cleanup(func() { refreshLockTimeout = orig })
+
+				switch blocker {
+				case "lock held":
+					held := flock.New(path + ".lock")
+					if ok, err := held.TryLock(); err != nil || !ok {
+						t.Fatalf("taking lock: ok=%v err=%v", ok, err)
+					}
+					defer held.Unlock()
+				case "dir unwritable":
+					dir := filepath.Dir(path)
+					if err := os.Chmod(dir, 0o500); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+				}
+
+				tokenFlag := ""
+				if source == "flag" {
+					tokenFlag = "explicit-token"
+				} else {
+					t.Setenv("OMNI_API_TOKEN", "explicit-token")
+				}
+
+				rc, err := Resolve("", tokenFlag, "")
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if rc.Token != "explicit-token" {
+					t.Errorf("rc.Token = %q, want %q", rc.Token, "explicit-token")
+				}
+				if hits.Load() != 0 {
+					t.Errorf("token endpoint received %d request(s), want 0", hits.Load())
+				}
+			})
+		}
+	}
+}
+
+// If the refreshed token can't be saved (here the config turns read-only during
+// the request, after the writability check), the command still runs with it,
+// but the user is warned: the rotated-out refresh token left on disk is spent.
+func TestResolve_RefreshSaveFailureWarns(t *testing.T) {
+	clearEnv(t)
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("file permissions are not enforced here")
+	}
+
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := os.Chmod(path, 0o400); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer srv.Close()
+
+	path = writeConfig(t, &Config{
+		Version:        1,
+		DefaultProfile: "test",
+		Profiles: map[string]Profile{
+			"test": {
+				APIEndpoint:    srv.URL,
+				AuthMethod:     "oauth",
+				AccessToken:    "old-access",
+				RefreshToken:   "old-refresh",
+				TokenExpiresAt: time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
+
+	var warnings strings.Builder
+	origOut := warnOut
+	warnOut = &warnings
+	t.Cleanup(func() { warnOut = origOut })
+
+	rc, err := Resolve("", "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rc.Token != "new-access" {
+		t.Errorf("rc.Token = %q, want %q", rc.Token, "new-access")
+	}
+	if got := warnings.String(); !strings.Contains(got, "could not save the refreshed OAuth token to "+path) {
+		t.Errorf("warning = %q, want a save-failure warning naming %s", got, path)
 	}
 }
 

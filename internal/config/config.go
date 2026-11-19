@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/exploreomni/omni-cli/internal/oauth"
+	"github.com/gofrs/flock"
 	"golang.org/x/oauth2"
 )
 
@@ -154,33 +156,31 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 		rc.BaseURL = baseURLFlag
 	}
 
-	// Auto-refresh OAuth tokens via oauth2.TokenSource — it only calls the refresh
-	// endpoint when the token is near/past expiry. If refresh fails, fall through
-	// with the stale token and let the API return 401.
+	// Auto-refresh OAuth tokens when they are near/past expiry, unless the caller
+	// supplied its own token by flag or env: then the profile's token isn't used,
+	// so it isn't refreshed. If the refresh request fails, fall through with the
+	// stale token and let the API return 401. If the refresh lock can't be taken
+	// (held past refreshLockTimeout, or the config directory isn't writable),
+	// return that error rather than refresh unserialized; if the config file
+	// can't be written, return an error rather than spend a refresh token whose
+	// replacement can't be saved.
 	//
 	// Validate the profile's endpoint before hitting the network: if an attacker-
 	// supplied APIEndpoint ever made it into the config, we must not POST the
 	// refresh token there just because a flag/env has since redirected rc.BaseURL
 	// to a legitimate host.
-	if profile != nil && profile.AuthMethod == "oauth" && profile.RefreshToken != "" && ValidateEndpoint(profile.APIEndpoint) == nil {
-		expiry, _ := time.Parse(time.RFC3339, profile.TokenExpiresAt)
-		current := &oauth2.Token{
-			AccessToken:  profile.AccessToken,
-			RefreshToken: profile.RefreshToken,
-			Expiry:       expiry,
+	explicitToken := tokenFlag != "" || os.Getenv("OMNI_API_TOKEN") != ""
+	if !explicitToken && profile != nil && refreshable(profile) {
+		name := profileName
+		if name == "" {
+			name = cfg.DefaultProfile
 		}
-		src := oauth.Config(profile.APIEndpoint, "").TokenSource(oauth.Context(context.Background()), current)
-		if refreshed, err := src.Token(); err == nil && refreshed.AccessToken != current.AccessToken {
-			profile.AccessToken = refreshed.AccessToken
-			profile.RefreshToken = refreshed.RefreshToken
-			profile.TokenExpiresAt = refreshed.Expiry.Format(time.RFC3339)
-			name := profileName
-			if name == "" {
-				name = cfg.DefaultProfile
-			}
-			cfg.Profiles[name] = *profile
-			_ = Save(cfg)
-			rc.Token = refreshed.AccessToken
+		token, err := refreshOAuthToken(name, profile)
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			rc.Token = token
 		}
 	}
 
@@ -199,6 +199,117 @@ func Resolve(profileName, tokenFlag, baseURLFlag string) (*ResolvedConfig, error
 	}
 
 	return rc, nil
+}
+
+// Timeouts for the OAuth refresh. The lock wait outlasts the refresh request so
+// a process waiting on a slow but healthy refresh doesn't give up early.
+var (
+	refreshLockTimeout    = 30 * time.Second
+	refreshRequestTimeout = 20 * time.Second
+)
+
+// warnOut receives warnings that shouldn't fail the command.
+var warnOut io.Writer = os.Stderr
+
+// refreshOAuthToken returns the access token to use for the named profile,
+// refreshing it when it is near/past expiry. It returns "" when the stored
+// token should be used as-is (still valid, or the refresh failed).
+//
+// The server rotates refresh tokens and revokes the whole token family when
+// one refresh token is presented twice, so two commands refreshing at once
+// would log the user out. The refresh therefore runs under a file lock next to
+// the config file, and re-reads the profile once it holds the lock: if another
+// process already refreshed, its token is used and no request is sent. For the
+// same reason it sends no request unless the config file can be written, so
+// the rotated refresh token isn't lost.
+func refreshOAuthToken(name string, profile *Profile) (string, error) {
+	if profileToken(profile).Valid() {
+		return "", nil
+	}
+
+	unlock, err := lockConfigForRefresh()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
+	cfg, err := Load()
+	if err != nil {
+		return "", nil
+	}
+	latest, ok := cfg.Profiles[name]
+	if !ok || !refreshable(&latest) {
+		return "", nil
+	}
+	current := profileToken(&latest)
+	if current.Valid() {
+		return current.AccessToken, nil
+	}
+
+	// Holding the lock doesn't prove Save will succeed: once the lock file
+	// exists, it can be locked in a read-only directory. Save rewrites the
+	// existing config in place, so it needs only write permission on the file.
+	f, err := os.OpenFile(ConfigPath(), os.O_WRONLY, 0)
+	if err != nil {
+		return "", fmt.Errorf("cannot save a refreshed OAuth token to %s (is the config file writable?): %w", ConfigPath(), err)
+	}
+	_ = f.Close()
+
+	ctx, cancel := context.WithTimeout(oauth.Context(context.Background()), refreshRequestTimeout)
+	defer cancel()
+	refreshed, err := oauth.Config(latest.APIEndpoint, "").TokenSource(ctx, current).Token()
+	if err != nil || refreshed.AccessToken == current.AccessToken {
+		return "", nil
+	}
+	latest.AccessToken = refreshed.AccessToken
+	latest.RefreshToken = refreshed.RefreshToken
+	latest.TokenExpiresAt = refreshed.Expiry.Format(time.RFC3339)
+	cfg.Profiles[name] = latest
+	if err := Save(cfg); err != nil {
+		// The server has already rotated the refresh token, so the one still on
+		// disk is spent: the next command that presents it revokes the token
+		// family. This command's token is valid, so warn rather than fail it.
+		fmt.Fprintf(warnOut, "warning: could not save the refreshed OAuth token to %s (%v); the next command will need `omni config login`\n", ConfigPath(), err)
+	}
+	return refreshed.AccessToken, nil
+}
+
+// refreshable reports whether p's refresh token may be sent to its endpoint.
+func refreshable(p *Profile) bool {
+	return p.AuthMethod == "oauth" && p.RefreshToken != "" && ValidateEndpoint(p.APIEndpoint) == nil
+}
+
+func profileToken(p *Profile) *oauth2.Token {
+	expiry, _ := time.Parse(time.RFC3339, p.TokenExpiresAt)
+	return &oauth2.Token{
+		AccessToken:  p.AccessToken,
+		RefreshToken: p.RefreshToken,
+		Expiry:       expiry,
+	}
+}
+
+// lockConfigForRefresh takes the OAuth refresh lock, waiting up to
+// refreshLockTimeout. The lock is a stable file beside the config that is
+// never removed; the OS releases it if its process exits.
+func lockConfigForRefresh() (func(), error) {
+	path := ConfigPath() + ".lock"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("cannot create OAuth refresh lock %s (is the config directory writable?): %w", path, err)
+	}
+	lock := flock.New(path, flock.SetPermissions(0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), refreshLockTimeout)
+	defer cancel()
+	locked, err := lock.TryLockContext(ctx, 50*time.Millisecond)
+	if err == nil && !locked {
+		err = ctx.Err()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("timed out after %s waiting for %s (held by another omni process)", refreshLockTimeout, path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot create OAuth refresh lock %s (is the config directory writable?): %w", path, err)
+	}
+	return func() { _ = lock.Unlock() }, nil
 }
 
 // ValidateEndpoint reports whether url is safe to send API tokens or OAuth
