@@ -1115,11 +1115,27 @@ func TestUpdate_TakesRefreshLock(t *testing.T) {
 
 	ran := false
 	_, err := Update(func(*Config) error { ran = true; return nil })
-	if err == nil || !strings.Contains(err.Error(), "OAuth refresh lock") {
-		t.Fatalf("Update error = %v, want a refresh lock error", err)
+	want := "timed out after 100ms waiting for " + path + ".lock (held by another omni process)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Update error = %v, want %q", err, want)
 	}
 	if ran {
 		t.Error("Update ran fn without the lock")
+	}
+}
+
+// A lock Update can't create reports the same error a refresh does.
+func TestUpdate_UnwritableConfigDir(t *testing.T) {
+	clearEnv(t)
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(notDir, "config.json"))
+
+	_, err := Update(func(*Config) error { return nil })
+	if err == nil || !strings.HasPrefix(err.Error(), "cannot create OAuth refresh lock ") || !strings.Contains(err.Error(), "(is the config directory writable?)") {
+		t.Fatalf("Update error = %v, want the cannot-create lock error", err)
 	}
 }
 
