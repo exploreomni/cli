@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -34,6 +35,9 @@ const cliLoginDisabledDescription = "This organization does not allow CLI login"
 
 // defaultDeviceTimeout caps the whole device login, whatever expires_in says.
 const defaultDeviceTimeout = 10 * time.Minute
+
+// deviceAuthRequestTimeout bounds the device authorization request.
+const deviceAuthRequestTimeout = 30 * time.Second
 
 // Device login failures callers (and tests) can tell apart with errors.Is.
 var (
@@ -87,21 +91,24 @@ type deviceLine struct {
 // DeviceLogin runs the RFC 8628 device authorization grant against
 // apiEndpoint: it requests a device code, tells the person where to enter it,
 // and polls the token endpoint until they approve, deny, or the code expires.
-// Ctrl-C cancels the wait. It returns ErrDeviceUnsupported when the server
+// Ctrl-C while polling cancels the wait. It returns ErrDeviceUnsupported when the server
 // answers the device authorization request with 404.
 func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*oauth2.Token, error) {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
-	defer stop()
-
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = defaultDeviceTimeout
 	}
-	ctx, cancel := context.WithTimeout(Context(ctx), timeout)
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// x/oauth2 sends the device authorization request without ctx, so it
+	// gets a client timeout of its own; Ctrl-C during it still exits the
+	// process the default way.
+	client := useragent.Client()
+	client.Timeout = deviceAuthRequestTimeout
 	conf := DeviceConfig(apiEndpoint)
-	da, err := conf.DeviceAuth(ctx)
+	da, err := conf.DeviceAuth(context.WithValue(ctx, oauth2.HTTPClient, client))
 	if err != nil {
 		var re *oauth2.RetrieveError
 		if errors.As(err, &re) && re.Response != nil && re.Response.StatusCode == http.StatusNotFound {
@@ -114,11 +121,13 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 	}
 
 	// The code lives until the earlier of the server's expiry and our cap.
-	deadline := time.Now().Add(timeout)
+	// x/oauth2 dates expires_in from when the request was sent, so measuring
+	// from start gives back the server's own figure.
+	deadline := start.Add(timeout)
 	if da.Expiry.IsZero() || da.Expiry.After(deadline) {
 		da.Expiry = deadline
 	}
-	expiresIn := time.Until(da.Expiry).Round(time.Second)
+	expiresIn := da.Expiry.Sub(start).Round(time.Second)
 
 	stderr := opts.Stderr
 	if stderr == nil {
@@ -145,13 +154,19 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		if target == "" {
 			target = da.VerificationURI
 		}
-		opts.OpenBrowser(target)
+		// The URL comes from the server and goes to an OS command; open
+		// only a web URL.
+		if u, err := url.Parse(target); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
+			opts.OpenBrowser(target)
+		}
 	}
 
 	if opts.Interval > 0 {
 		da.Interval = int64(math.Ceil(opts.Interval.Seconds()))
 	}
 
+	ctx, stop := signal.NotifyContext(Context(ctx), os.Interrupt)
+	defer stop()
 	tok, err := conf.DeviceAccessToken(ctx, da)
 	if err != nil {
 		return nil, deviceError("waiting for approval", err)

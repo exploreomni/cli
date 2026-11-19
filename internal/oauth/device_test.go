@@ -44,6 +44,8 @@ type deviceServer struct {
 	discovery    string   // fixture for the discovery document; "" answers 404
 	deviceStatus int      // device authorization status; 0 answers 200 with the fixture
 	tokens       []string // fixtures for successive token polls; the last repeats; "403" answers 403
+	deviceBody   []byte   // replaces the device authorization fixture when set
+	deviceDelay  time.Duration
 	onPoll       func(n int)
 
 	mu          sync.Mutex
@@ -70,12 +72,17 @@ func (s *deviceServer) start(t *testing.T) *deviceServer {
 		case deviceAuthorizationPath:
 			s.deviceForms = append(s.deviceForms, r.PostForm)
 			s.mu.Unlock()
+			time.Sleep(s.deviceDelay)
 			if s.deviceStatus != 0 {
 				http.Error(w, http.StatusText(s.deviceStatus), s.deviceStatus)
 				return
 			}
+			body := s.deviceBody
+			if body == nil {
+				body = fixture(t, "device_authorization")
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(fixture(t, "device_authorization"))
+			_, _ = w.Write(body)
 		case "/oauth/token":
 			s.polls = append(s.polls, tokenPoll{at: time.Now(), form: r.PostForm, auth: r.Header.Get("Authorization")})
 			n := len(s.polls)
@@ -341,6 +348,42 @@ func TestDeviceLogin_JSONLineBeforePolling(t *testing.T) {
 	}
 	if len(opened) != 1 || opened[0] != "https://acme.omniapp.co/oauth/device?user_code=BDKF-QRTW" {
 		t.Errorf("opened = %v, want verification_uri_complete once", opened)
+	}
+}
+
+// A slow device authorization response doesn't eat into the expiry the
+// person is shown: it is the server's expires_in.
+func TestDeviceLogin_ExpiryIgnoresRequestLatency(t *testing.T) {
+	t.Parallel()
+	var jsonOut, stderr syncBuffer
+	srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceDelay: 700 * time.Millisecond}).start(t)
+	if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Stderr: &stderr, JSON: &jsonOut, Interval: time.Second}); err != nil {
+		t.Fatalf("DeviceLogin: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "(expires in 10m)") {
+		t.Errorf("stderr = %q, want expires in 10m", stderr.String())
+	}
+	if !strings.Contains(jsonOut.String(), `"expires_in":600`) {
+		t.Errorf("JSON = %q, want expires_in 600", jsonOut.String())
+	}
+}
+
+// Only a web URL from the server reaches the OS opener.
+func TestDeviceLogin_OpensOnlyWebURLs(t *testing.T) {
+	t.Parallel()
+	srv := (&deviceServer{
+		tokens:     []string{"device_token_success"},
+		deviceBody: []byte(`{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"file:///etc/passwd","verification_uri_complete":"calc.exe & whoami","expires_in":600,"interval":5}`),
+	}).start(t)
+	var opened []string
+	if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
+		OpenBrowser: func(u string) { opened = append(opened, u) },
+		Interval:    time.Second,
+	}); err != nil {
+		t.Fatalf("DeviceLogin: %v", err)
+	}
+	if len(opened) != 0 {
+		t.Errorf("opened %v, want nothing", opened)
 	}
 }
 
