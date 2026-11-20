@@ -1,6 +1,7 @@
-// Package oauth implements OAuth 2.1 browser-based login with PKCE for the Omni CLI.
-// It wraps golang.org/x/oauth2 with the local-server + browser-opener glue needed
-// for a CLI-initiated authorization code flow.
+// Package oauth implements OAuth login for the Omni CLI: the RFC 8628 device
+// authorization grant (device.go) and a browser-based authorization code flow
+// with PKCE. It wraps golang.org/x/oauth2 with the local-server + browser-opener
+// glue a CLI needs.
 package oauth
 
 import (
@@ -11,6 +12,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -46,9 +48,11 @@ func Context(ctx context.Context) context.Context {
 }
 
 // Login performs the full OAuth 2.1 authorization code flow with PKCE.
-// It starts a local HTTP server, opens the browser to the authorization endpoint,
-// waits for the callback, and exchanges the code for tokens.
-func Login(apiEndpoint string) (*oauth2.Token, error) {
+// It starts a local HTTP server, prints the authorization URL to stderr, opens
+// it with open when open is non-nil, waits for the callback, and exchanges the
+// code for tokens. With a nil open, the person opens the URL themselves in a
+// browser on this machine, which the localhost callback needs.
+func Login(apiEndpoint string, open func(url string)) (*oauth2.Token, error) {
 	listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return nil, fmt.Errorf("starting local server: %w", err)
@@ -113,9 +117,15 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 
 	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 
-	fmt.Printf("Opening browser to log in...\n")
-	fmt.Printf("If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
-	openBrowser(authURL)
+	// Instructions go to stderr: stdout is for data, and `--format json`
+	// promises nothing but JSON there.
+	if open != nil {
+		fmt.Fprintf(os.Stderr, "Opening browser to log in...\n")
+		fmt.Fprintf(os.Stderr, "If the browser doesn't open, visit this URL:\n%s\n\n", authURL)
+		open(authURL)
+	} else {
+		fmt.Fprintf(os.Stderr, "To log in, open this URL in a browser on this machine:\n%s\n\n", authURL)
+	}
 
 	var result authResult
 	select {
@@ -137,14 +147,20 @@ func Login(apiEndpoint string) (*oauth2.Token, error) {
 // Best-effort — if it fails, the URL is already printed to the terminal.
 // It's a var (not a func) so tests can replace it to drive the callback flow.
 var openBrowser = func(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	_ = browserCommand(runtime.GOOS, url).Start()
+}
+
+// browserCommand is the command that opens url on goos. On Windows it is
+// rundll32's URL handler, which takes url as a single argument; `cmd /c
+// start` would run it through cmd.exe, where an & in the query string ends
+// the URL and starts another command.
+func browserCommand(goos, url string) *exec.Cmd {
+	switch goos {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		return exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		return exec.Command("xdg-open", url)
 	}
-	_ = cmd.Start()
 }

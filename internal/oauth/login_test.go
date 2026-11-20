@@ -1,11 +1,13 @@
 package oauth
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +109,7 @@ func TestLogin_Success(t *testing.T) {
 		hitCallback(t, redirect, url.Values{"code": {"test-code"}, "state": {state}})
 	})
 
-	tok, err := Login(tokenSrv.URL)
+	tok, err := Login(tokenSrv.URL, openBrowser)
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
@@ -116,6 +118,58 @@ func TestLogin_Success(t *testing.T) {
 	}
 	if tok.RefreshToken != "good-refresh" {
 		t.Errorf("RefreshToken = %q, want %q", tok.RefreshToken, "good-refresh")
+	}
+}
+
+// With no opener, Login launches nothing: it prints the URL to stderr, and
+// the callback still completes when the person opens that URL themselves.
+func TestLogin_NoOpenerPrintsURLAndLaunchesNothing(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"good-access","refresh_token":"good-refresh","expires_in":3600,"token_type":"Bearer"}`))
+	}))
+	defer tokenSrv.Close()
+
+	prev := openBrowser
+	openBrowser = func(string) { t.Error("openBrowser ran with no opener") }
+	t.Cleanup(func() { openBrowser = prev })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	// Stand in for the person: read the URL off stderr and open it.
+	var printed strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			line := sc.Text()
+			printed.WriteString(line + "\n")
+			if strings.HasPrefix(line, tokenSrv.URL+"/oauth/authorize?") {
+				redirect, state := extractRedirect(t, line)
+				hitCallback(t, redirect, url.Values{"code": {"test-code"}, "state": {state}})
+			}
+		}
+	}()
+
+	tok, err := Login(tokenSrv.URL, nil)
+	os.Stderr = origStderr
+	_ = w.Close()
+	<-done
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if tok.AccessToken != "good-access" {
+		t.Errorf("AccessToken = %q, want good-access", tok.AccessToken)
+	}
+	if strings.Contains(printed.String(), "Opening browser") {
+		t.Errorf("stderr = %q, claims to open a browser with no opener", printed.String())
 	}
 }
 
@@ -134,7 +188,7 @@ func TestLogin_StateMismatch(t *testing.T) {
 		hitCallback(t, redirect, url.Values{"code": {"x"}, "state": {"wrong-state"}})
 	})
 
-	_, err := Login(tokenSrv.URL)
+	_, err := Login(tokenSrv.URL, openBrowser)
 	if err == nil {
 		t.Fatal("expected error from state mismatch, got nil")
 	}
@@ -163,7 +217,7 @@ func TestLogin_AuthorizationError(t *testing.T) {
 		})
 	})
 
-	_, err := Login(tokenSrv.URL)
+	_, err := Login(tokenSrv.URL, openBrowser)
 	if err == nil {
 		t.Fatal("expected error from authorize failure, got nil")
 	}
@@ -196,7 +250,7 @@ func TestLogin_HTMLEscapesErrorDescription(t *testing.T) {
 		bodyCh <- string(b)
 	})
 
-	_, _ = Login(tokenSrv.URL)
+	_, _ = Login(tokenSrv.URL, openBrowser)
 	pageBody := <-bodyCh
 
 	if strings.Contains(pageBody, "<script>alert(1)</script>") {
@@ -219,7 +273,7 @@ func TestLogin_MissingCode(t *testing.T) {
 		hitCallback(t, redirect, url.Values{"state": {state}})
 	})
 
-	_, err := Login(tokenSrv.URL)
+	_, err := Login(tokenSrv.URL, openBrowser)
 	if err == nil {
 		t.Fatal("expected error when callback omits code, got nil")
 	}
@@ -248,7 +302,7 @@ func TestLogin_SendsUserAgentToTokenEndpoint(t *testing.T) {
 		hitCallback(t, redirect, url.Values{"code": {"test-code"}, "state": {state}})
 	})
 
-	if _, err := Login(tokenSrv.URL); err != nil {
+	if _, err := Login(tokenSrv.URL, openBrowser); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	if gotUA != "omni-cli/9.9.9" {

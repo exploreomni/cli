@@ -76,6 +76,56 @@ This creates a profile with your organization, API endpoint, and API key. You ca
 
 In an interactive terminal, a successful `omni config init` or `omni config login` ends with a welcome banner showing the profile you just connected. It never appears when output is piped or JSON-formatted, in CI, or in a coding agent's shell. Set `OMNI_NO_BANNER=1` to disable it.
 
+### Log in with OAuth
+
+```bash
+omni config init --name prod --endpoint https://myorg.omniapp.co --auth oauth
+omni config login prod        # later, to sign in again
+```
+
+OAuth login uses the device authorization grant ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)). The CLI prints a URL and a code to stderr:
+
+```text
+To sign in, open https://myorg.omniapp.co/oauth/device?user_code=BDKF-QRTW
+and check the page shows code BDKF-QRTW
+Waiting for approval (expires in 10m)…
+```
+
+Open the URL in a browser on any device and sign in to Omni; the page shows the code and the device asking for access. Check the code matches the one the CLI printed, then approve it; the CLI picks up the tokens and saves them to the profile. When stdin and stdout are a terminal and a browser can be opened, the CLI also opens the URL for you. If the instance sends no usable URL with the code in it, the CLI prints the plain URL and asks you to enter the code (`and enter code BDKF-QRTW`). The code expires after 10 minutes, and Ctrl-C stops waiting.
+
+Pass `--browser` to `config login` or `config init` to sign in through a browser on this machine instead (a localhost callback with PKCE). The CLI also falls back to it on its own when the Omni instance doesn't offer device login.
+
+If login fails:
+
+- **CLI login turned off** — the organization doesn't allow CLI login. A personal access token still works: `omni config init --auth api-key`, or set `OMNI_API_TOKEN`.
+- **Login was denied** — the code was rejected in the browser. Run the login again.
+- **Code expired** — nobody approved the code within 10 minutes. Run the login again.
+- **HTTP 403** — the organization's IP allowlist most likely blocks this machine's IP address.
+
+#### Headless machines, containers and agents
+
+Device login needs no browser on the machine running the CLI, so it works over SSH, in a container, or on a CI runner: run the login there, open the URL it prints on your laptop or phone, and approve the code.
+
+With `--format json`, the CLI also writes the URL and code to stdout as a single JSON line before it starts waiting, then blocks until the login finishes (exit code 0) or fails (non-zero, with the reason on stderr):
+
+```json
+{"verification_uri":"https://myorg.omniapp.co/oauth/device","verification_uri_complete":"https://myorg.omniapp.co/oauth/device?user_code=BDKF-QRTW","user_code":"BDKF-QRTW","expires_in":600}
+```
+
+Nothing else goes to stdout in this mode; the success message goes to stderr. A script or coding agent can run the login in the background, read the first line, and show the person the URL and code:
+
+```bash
+omni config login prod --format json > login.json 2> login.err &
+login_pid=$!
+until [ -s login.json ] || ! kill -0 "$login_pid" 2>/dev/null; do sleep 0.2; done
+jq -r '"Open \(.verification_uri_complete) (code \(.user_code))"' login.json
+wait "$login_pid"   # returns once the code is approved, denied or expired
+```
+
+A server error (HTTP 5xx) while the CLI is waiting for approval ends the login; run it again.
+
+If the Omni instance doesn't offer device login, the CLI falls back to the browser login and no JSON line is written, so a script should also watch for the process exiting, as above.
+
 ### Set your API token
 
 Omni supports two types of API tokens:
@@ -192,7 +242,9 @@ Auth is resolved with this precedence (highest wins):
 
 1. `--token` flag
 2. `OMNI_API_TOKEN` env var
-3. Profile's `apiKey` from config file
+3. The profile's `apiKey`, or its OAuth access token for a profile set up with `--auth oauth` (see [Log in with OAuth](#log-in-with-oauth))
+
+OAuth access tokens are refreshed automatically when they expire.
 
 Config file lives at `~/.config/omni-cli/config.json`.
 
