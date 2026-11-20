@@ -86,12 +86,12 @@ omni config login prod        # later, to sign in again
 OAuth login uses the device authorization grant ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)). The CLI prints a URL and a code to stderr:
 
 ```text
-To sign in, open https://myorg.omniapp.co/oauth/device
-and enter code BDKF-QRTW
+To sign in, open https://myorg.omniapp.co/oauth/device?user_code=BDKF-QRTW
+and check the page shows code BDKF-QRTW
 Waiting for approval (expires in 10m)…
 ```
 
-Open the URL in a browser on any device, sign in to Omni, and approve the code; the CLI picks up the tokens and saves them to the profile. When stdin and stdout are a terminal and a browser can be opened, the CLI also opens the page for you with the code filled in. The code expires after 10 minutes, and Ctrl-C stops waiting.
+Open the URL in a browser on any device and sign in to Omni; the page has the code filled in. Check it matches the code the CLI printed, then approve it; the CLI picks up the tokens and saves them to the profile. When stdin and stdout are a terminal and a browser can be opened, the CLI also opens the URL for you. If the instance sends no usable URL with the code in it, the CLI prints the plain URL and asks you to enter the code (`and enter code BDKF-QRTW`). The code expires after 10 minutes, and Ctrl-C stops waiting.
 
 Pass `--browser` to `config login` or `config init` to sign in through a browser on this machine instead (a localhost callback with PKCE). The CLI also falls back to it on its own when the Omni instance doesn't offer device login.
 
@@ -104,7 +104,7 @@ If login fails:
 
 #### Headless machines, containers and agents
 
-Device login needs no browser on the machine running the CLI, so it works over SSH, in a container, or on a CI runner: run the login there and approve the code from your laptop or phone.
+Device login needs no browser on the machine running the CLI, so it works over SSH, in a container, or on a CI runner: run the login there, open the URL it prints on your laptop or phone, and approve the code.
 
 With `--format json`, the CLI also writes the URL and code to stdout as a single JSON line before it starts waiting, then blocks until the login finishes (exit code 0) or fails (non-zero, with the reason on stderr):
 

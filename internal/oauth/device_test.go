@@ -187,6 +187,8 @@ func TestDeviceLogin_PendingSlowDownSuccess(t *testing.T) {
 		t.Error("token expiry not set from expires_in")
 	}
 
+	// The fixture's URLs are on another host than the test server, so the
+	// prompt asks for the code to be entered.
 	wantPrompt := "To sign in, open https://acme.omniapp.co/oauth/device\nand enter code BDKF-QRTW\nWaiting for approval (expires in 10m)…\n"
 	if got := stderr.String(); got != wantPrompt {
 		t.Errorf("stderr = %q, want %q", got, wantPrompt)
@@ -375,9 +377,13 @@ func TestDeviceLogin_ExpiryIgnoresRequestLatency(t *testing.T) {
 	}
 }
 
-// The opener gets the server's URL unchanged, and only when it is on the
+// The prompt shows verification_uri_complete, so a copied URL opens with the
+// code filled in, and the opener gets it unchanged, only when it is on the
 // endpoint's own host and free of whitespace and control characters.
-func TestDeviceLogin_OpensOnlySameHostURLs(t *testing.T) {
+// Otherwise the prompt shows verification_uri and asks for the code to be
+// entered; the opener gets verification_uri only when there is no complete
+// URL at all.
+func TestDeviceLogin_ShowsAndOpensOnlySameHostURLs(t *testing.T) {
 	t.Parallel()
 	body := func(uri, complete string) string {
 		b, _ := json.Marshal(map[string]any{
@@ -386,15 +392,21 @@ func TestDeviceLogin_OpensOnlySameHostURLs(t *testing.T) {
 		})
 		return string(b)
 	}
+	const (
+		checkCode = "\nand check the page shows code BDKF-QRTW\nWaiting for approval (expires in 10m)…\n"
+		enterCode = "\nand enter code BDKF-QRTW\nWaiting for approval (expires in 10m)…\n"
+	)
 	cases := []struct {
-		name, uri, complete, want string
+		name, uri, complete, wantOpened, wantPrompt string
 	}{
-		{"same host, query with &", "BASE/oauth/device", `BASE/oauth/device?user_code=X&\\evil\share\p.exe`, `BASE/oauth/device?user_code=X&\\evil\share\p.exe`},
-		{"falls back to verification_uri", "BASE/oauth/device", "", "BASE/oauth/device"},
-		{"foreign host", "BASE/oauth/device", "https://evil.example/oauth/device?user_code=X", ""},
-		{"control character", "BASE/oauth/device", "BASE/oauth/device?user_code=X\u001b[2J", ""},
-		{"newline", "BASE/oauth/device", "BASE/oauth/device?user_code=X\nfoo", ""},
-		{"not a web URL", "BASE/oauth/device", "calc.exe & whoami", ""},
+		{"same host", "BASE/oauth/device", "BASE/oauth/device?user_code=BDKF-QRTW", "BASE/oauth/device?user_code=BDKF-QRTW", "To sign in, open BASE/oauth/device?user_code=BDKF-QRTW" + checkCode},
+		{"same host, query with &", "BASE/oauth/device", `BASE/oauth/device?user_code=X&\\evil\share\p.exe`, `BASE/oauth/device?user_code=X&\\evil\share\p.exe`, `To sign in, open BASE/oauth/device?user_code=X&\\evil\share\p.exe` + checkCode},
+		{"falls back to verification_uri", "BASE/oauth/device", "", "BASE/oauth/device", "To sign in, open BASE/oauth/device" + enterCode},
+		{"foreign host", "BASE/oauth/device", "https://evil.example/oauth/device?user_code=X", "", "To sign in, open BASE/oauth/device" + enterCode},
+		{"control character", "BASE/oauth/device", "BASE/oauth/device?user_code=X\u001b[2J", "", "To sign in, open BASE/oauth/device" + enterCode},
+		{"newline", "BASE/oauth/device", "BASE/oauth/device?user_code=X\nfoo", "", "To sign in, open BASE/oauth/device" + enterCode},
+		{"space", "BASE/oauth/device", "BASE/oauth/device?user_code=X Y", "", "To sign in, open BASE/oauth/device" + enterCode},
+		{"not a web URL", "BASE/oauth/device", "calc.exe & whoami", "", "To sign in, open BASE/oauth/device" + enterCode},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -402,15 +414,20 @@ func TestDeviceLogin_OpensOnlySameHostURLs(t *testing.T) {
 			srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceBody: body(tc.uri, tc.complete)}).start(t)
 			var mu sync.Mutex
 			var opened []string
+			var stderr syncBuffer
 			if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
+				Stderr:      &stderr,
 				OpenBrowser: func(u string) { mu.Lock(); opened = append(opened, u); mu.Unlock() },
 				Interval:    time.Second,
 			}); err != nil {
 				t.Fatalf("DeviceLogin: %v", err)
 			}
+			if got, want := stderr.String(), strings.ReplaceAll(tc.wantPrompt, "BASE", srv.URL); got != want {
+				t.Errorf("stderr = %q, want %q", got, want)
+			}
 			want := []string(nil)
-			if tc.want != "" {
-				want = []string{strings.ReplaceAll(tc.want, "BASE", srv.URL)}
+			if tc.wantOpened != "" {
+				want = []string{strings.ReplaceAll(tc.wantOpened, "BASE", srv.URL)}
 			}
 			if strings.Join(opened, "\n") != strings.Join(want, "\n") || len(opened) != len(want) {
 				t.Errorf("opened %q, want %q", opened, want)

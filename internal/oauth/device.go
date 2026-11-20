@@ -143,8 +143,17 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	fmt.Fprintf(stderr, "To sign in, open %s\nand enter code %s\nWaiting for approval (expires in %s)…\n",
-		verificationURI, da.UserCode, shortDuration(expiresIn))
+	// The complete URL carries the code, so a copied one (over SSH, where
+	// nothing is opened) lands with the code filled in; the person checks it
+	// against the one shown here. It is shown only on the terms it would be
+	// opened, checked before stripping: a URL that loses control characters,
+	// or breaks at whitespace when copied, carries a different code.
+	link, step := verificationURI, "enter code"
+	if openableVerificationURL(da.VerificationURIComplete, apiEndpoint) {
+		link, step = verificationURIComplete, "check the page shows code"
+	}
+	fmt.Fprintf(stderr, "To sign in, open %s\nand %s %s\nWaiting for approval (expires in %s)…\n",
+		link, step, da.UserCode, shortDuration(expiresIn))
 
 	if opts.JSON != nil {
 		enc := json.NewEncoder(opts.JSON)
