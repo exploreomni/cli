@@ -91,7 +91,7 @@ and check the page shows code BDKF-QRTW
 Waiting for approval (expires in 10m)…
 ```
 
-Open the URL in a browser on any device and sign in to Omni; the page has the code filled in. Check it matches the code the CLI printed, then approve it; the CLI picks up the tokens and saves them to the profile. When stdin and stdout are a terminal and a browser can be opened, the CLI also opens the URL for you. If the instance sends no usable URL with the code in it, the CLI prints the plain URL and asks you to enter the code (`and enter code BDKF-QRTW`). The code expires after 10 minutes, and Ctrl-C stops waiting.
+Open the URL in a browser on any device and sign in to Omni; the page shows the code and the device asking for access. Check the code matches the one the CLI printed, then approve it; the CLI picks up the tokens and saves them to the profile. When stdin and stdout are a terminal and a browser can be opened, the CLI also opens the URL for you. If the instance sends no usable URL with the code in it, the CLI prints the plain URL and asks you to enter the code (`and enter code BDKF-QRTW`). The code expires after 10 minutes, and Ctrl-C stops waiting.
 
 Pass `--browser` to `config login` or `config init` to sign in through a browser on this machine instead (a localhost callback with PKCE). The CLI also falls back to it on its own when the Omni instance doesn't offer device login.
 
