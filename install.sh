@@ -2,6 +2,10 @@
 set -e
 
 REPO="exploreomni/cli"
+# GitHub's numeric IDs for the repo and its owner, checked against the
+# attestation's signing certificate.
+REPO_ID="1176524410"
+REPO_OWNER_ID="100505341"
 BINARY="omni"
 
 main() {
@@ -25,6 +29,7 @@ main() {
     archive="${BINARY}_${version_num}_${os}_${arch}.tar.gz"
     url="https://github.com/${REPO}/releases/download/${version}/${archive}"
     checksums_url="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+    bundle_url="https://github.com/${REPO}/releases/download/${version}/attestation.sigstore.json"
 
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' EXIT
@@ -35,6 +40,7 @@ main() {
 
     echo "Verifying checksum..."
     verify_checksum "${tmpdir}" "${archive}"
+    verify_attestation "${tmpdir}" "${archive}" "${version}" "${bundle_url}"
 
     echo "Extracting..."
     tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
@@ -109,6 +115,77 @@ verify_checksum() {
         echo "  Actual:   ${actual}" >&2
         exit 1
     fi
+}
+
+# Verifies the archive's GitHub Artifact Attestation: proof it was built by
+# this repo's release workflow from the tag being installed. The checksum
+# alone can't show that, since checksums.txt ships in the same release.
+#
+# OMNI_VERIFY_ATTESTATION=auto (default) verifies when it can and skips with
+#   a note when it can't (no suitable gh, no bundle, Sigstore unreachable);
+#   =require fails instead of skipping; =skip turns it off. A verification
+#   that runs and fails always aborts.
+verify_attestation() {
+    dir="$1"
+    file="$2"
+    version="$3"
+    bundle_url="$4"
+    mode="${OMNI_VERIFY_ATTESTATION:-auto}"
+
+    case "$mode" in
+        skip) return 0 ;;
+        auto|require) ;;
+        *) echo "Error: OMNI_VERIFY_ATTESTATION must be auto, require or skip (got '${mode}')" >&2; exit 1 ;;
+    esac
+
+    # --source-ref arrived in gh 2.68, the newest flag used below. With
+    # --bundle, gh verifies without `gh auth login` or any GitHub API call.
+    if ! command -v gh >/dev/null 2>&1 || ! gh attestation verify --help 2>/dev/null | grep -q -- '--source-ref'; then
+        attestation_unavailable "$mode" "GitHub CLI 2.68+ not found"
+        return 0
+    fi
+
+    if ! download "$bundle_url" "${dir}/attestation.sigstore.json" 2>/dev/null || [ ! -s "${dir}/attestation.sigstore.json" ]; then
+        attestation_unavailable "$mode" "release ${version} has no attestation bundle"
+        return 0
+    fi
+
+    echo "Verifying build provenance..."
+    # Prints the signing repo's numeric IDs: names can be renamed or
+    # re-registered, IDs can't.
+    if ids=$(gh attestation verify "${dir}/${file}" \
+        --bundle "${dir}/attestation.sigstore.json" \
+        --repo "$REPO" \
+        --signer-workflow "${REPO}/.github/workflows/release.yml" \
+        --source-ref "refs/tags/${version}" \
+        --deny-self-hosted-runners \
+        --format json \
+        --jq '.[0].verificationResult.signature.certificate | "\(.sourceRepositoryIdentifier) \(.sourceRepositoryOwnerIdentifier)"' \
+        2>"${dir}/attestation.err"); then
+        if [ "$ids" = "${REPO_ID} ${REPO_OWNER_ID}" ]; then
+            return 0
+        fi
+        echo "Error: Build provenance for ${file} was signed by repository ID '${ids}', expected '${REPO_ID} ${REPO_OWNER_ID}'" >&2
+        exit 1
+    fi
+
+    # gh fetches Sigstore's trust root over the network; behind a proxy that
+    # blocks it, nothing was checked, so that's "unavailable", not a failure.
+    if grep -q 'error creating Sigstore verifier' "${dir}/attestation.err"; then
+        attestation_unavailable "$mode" "could not reach Sigstore to fetch its trust root"
+        return 0
+    fi
+    echo "Error: Build provenance verification failed for ${file}" >&2
+    sed 's/^/  /' "${dir}/attestation.err" >&2
+    exit 1
+}
+
+attestation_unavailable() {
+    if [ "$1" = "require" ]; then
+        echo "Error: Cannot verify build provenance: $2 (OMNI_VERIFY_ATTESTATION=require)" >&2
+        exit 1
+    fi
+    echo "Note: Skipping build provenance check: $2. The checksum was verified." >&2
 }
 
 select_install_dir() {
