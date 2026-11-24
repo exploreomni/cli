@@ -18,6 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | s
 
 This downloads the latest release, verifies the SHA-256 checksum, and installs the `omni` binary to `/usr/local/bin` (or `~/.local/bin` if `/usr/local/bin` isn't writable).
 
+If the [GitHub CLI](https://cli.github.com) (2.68+) is installed, the script also verifies the archive's [build provenance](#verifying-release-artifacts): that it was built by this repo's release workflow from that release's tag. No `gh auth login` is needed. Without `gh`, when the release has no attestation bundle, or when Sigstore can't be reached, it skips this check with a note; once the check runs, any failure stops the install. Set `OMNI_VERIFY_ATTESTATION=require` to fail instead, or `=skip` to turn it off:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/exploreomni/cli/main/install.sh | OMNI_VERIFY_ATTESTATION=require sh
+```
+
 ### Download from GitHub Releases
 
 Pre-built binaries for macOS, Linux, and Windows are available on the [Releases page](https://github.com/exploreomni/cli/releases). Download the archive for your platform, extract it, and place the `omni` binary somewhere on your `PATH`.
@@ -36,6 +42,14 @@ Verify a downloaded archive with the GitHub CLI:
 
 ```bash
 gh attestation verify omni_1.2.3_linux_amd64.tar.gz --repo exploreomni/cli
+```
+
+Homebrew checks the formula's SHA-256 but not attestations (it only verifies attestations for bottles, and the formula installs the release archive). To check a Homebrew install yourself:
+
+```bash
+brew fetch exploreomni/tap/omni
+gh attestation verify "$(brew --cache exploreomni/tap/omni)" --repo exploreomni/cli \
+  --signer-workflow exploreomni/cli/.github/workflows/release.yml
 ```
 
 ### Build from source
