@@ -43,7 +43,13 @@ func maybePrintBanner(cmd *cobra.Command, name string, cfg *config.Config) {
 // at a terminal: OMNI_NO_BANNER, CI, a dumb terminal, or a coding agent's
 // shell.
 func bannerOptedOut(getenv func(string) string) bool {
-	if getenv("OMNI_NO_BANNER") != "" || getenv("CI") != "" || getenv("TERM") == "dumb" {
+	return getenv("OMNI_NO_BANNER") != "" || getenv("TERM") == "dumb" || agentOrCIEnv(getenv)
+}
+
+// agentOrCIEnv reports a CI run or a coding agent's shell: places where a
+// TTY doesn't mean a person is at it.
+func agentOrCIEnv(getenv func(string) string) bool {
+	if getenv("CI") != "" {
 		return true
 	}
 	for _, name := range agentEnvVars {

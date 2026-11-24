@@ -88,8 +88,20 @@ func rootWithConfig(args ...string) *cobra.Command {
 	return root
 }
 
+// clearOpenerEnv blanks the variables that keep loginOpener shut (CI, a
+// coding agent's markers, SSH), so a test that expects a browser to open
+// passes under CI and in an agent's shell. A test that wants one sets it
+// after.
+func clearOpenerEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range append(append([]string{"CI"}, agentEnvVars...), sshEnvVars...) {
+		t.Setenv(name, "")
+	}
+}
+
 func loginTestEnv(t *testing.T) {
 	t.Helper()
+	clearOpenerEnv(t)
 	t.Setenv("OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS", "1")
 	t.Setenv("OMNI_OUTPUT_FORMAT", "")
 	t.Setenv("OMNI_NO_BANNER", "1")
@@ -361,7 +373,7 @@ func TestConfigInit_CorruptConfigFailsBeforeLogin(t *testing.T) {
 }
 
 // The device login opens a browser only when stdin and stdout are both
-// terminals.
+// terminals, and so does --browser (terminalOpener).
 func TestLoginOpener_RequiresBothTTYs(t *testing.T) {
 	prevTerm, prevOpener := isTerminal, browserOpener
 	t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
@@ -385,14 +397,51 @@ func TestLoginOpener_RequiresBothTTYs(t *testing.T) {
 			}
 			return fd == stdout && tc.stdoutTTY
 		}
-		if got := loginOpener() != nil; got != tc.want {
+		if got := loginOpener(false, getenv(nil)) != nil; got != tc.want {
 			t.Errorf("stdin TTY %v, stdout TTY %v: opener set = %v, want %v", tc.stdinTTY, tc.stdoutTTY, got, tc.want)
+		}
+		if got := terminalOpener() != nil; got != tc.want {
+			t.Errorf("stdin TTY %v, stdout TTY %v: --browser opener set = %v, want %v", tc.stdinTTY, tc.stdoutTTY, got, tc.want)
 		}
 	}
 	isTerminal = func(int) bool { return true }
 	browserOpener = func() func(string) { return nil }
-	if loginOpener() != nil {
+	if loginOpener(false, getenv(nil)) != nil || terminalOpener() != nil {
 		t.Error("opener set with no browser to open")
+	}
+}
+
+// Even at a terminal, the device login and the browser login it falls back
+// to don't open a browser with JSON output, in CI or a coding agent's shell,
+// or over SSH.
+func TestLoginOpener_SkipsForJSONAgentCIAndSSH(t *testing.T) {
+	prevTerm, prevOpener := isTerminal, browserOpener
+	t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
+	isTerminal = func(int) bool { return true }
+	browserOpener = func() func(string) { return func(string) {} }
+
+	type tc struct {
+		name    string
+		jsonOut bool
+		env     map[string]string
+		want    bool
+	}
+	cases := []tc{
+		{"a person at a terminal", false, nil, true},
+		{"an ordinary terminal", false, map[string]string{"TERM": "xterm-256color", "OMNI_NO_BANNER": "1"}, true},
+		{"--format json", true, nil, false},
+		{"ci", false, map[string]string{"CI": "true"}, false},
+		{"ssh connection", false, map[string]string{"SSH_CONNECTION": "203.0.113.5 52144 198.51.100.7 22"}, false},
+		{"ssh client", false, map[string]string{"SSH_CLIENT": "203.0.113.5 52144 22"}, false},
+		{"ssh tty", false, map[string]string{"SSH_TTY": "/dev/ttys004"}, false},
+	}
+	for _, name := range agentEnvVars {
+		cases = append(cases, tc{name, false, map[string]string{name: "1"}, false})
+	}
+	for _, c := range cases {
+		if got := loginOpener(c.jsonOut, getenv(c.env)) != nil; got != c.want {
+			t.Errorf("%s: opener set = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
@@ -463,6 +512,76 @@ func TestConfigLogin_BrowserLoginOpensOnlyOnATerminal(t *testing.T) {
 				}
 				if got := len(opened) == 1; got != tty.wantOpen {
 					t.Errorf("browser opened %v times, want opened = %v", len(opened), tty.wantOpen)
+				}
+			})
+		}
+	}
+}
+
+// At a terminal, --browser opens this machine's browser even in a coding
+// agent's shell, in CI, over SSH or with --format json, where the browser
+// login the CLI falls back to on its own leaves the URL for the person to
+// open.
+func TestConfigLogin_BrowserFlagOpensDespiteEnvGate(t *testing.T) {
+	// 404s discovery, so login without --browser falls back to the browser login.
+	noDeviceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/oauth-authorization-server" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(noDeviceSrv.Close)
+
+	for _, gate := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"CLAUDECODE=1", map[string]string{"CLAUDECODE": "1"}, nil},
+		{"SSH_TTY", map[string]string{"SSH_TTY": "/dev/ttys004"}, nil},
+		{"CI", map[string]string{"CI": "true"}, nil},
+		{"--format json", nil, []string{"--format", "json"}},
+	} {
+		for _, flow := range []struct {
+			name     string
+			args     []string
+			wantOpen bool
+		}{
+			{"fallback", nil, false},
+			{"--browser", []string{"--browser"}, true},
+		} {
+			t.Run(gate.name+"/"+flow.name, func(t *testing.T) {
+				loginTestEnv(t)
+				for k, v := range gate.env {
+					t.Setenv(k, v)
+				}
+				prevTerm, prevOpener := isTerminal, browserOpener
+				t.Cleanup(func() { isTerminal, browserOpener = prevTerm, prevOpener })
+				isTerminal = func(int) bool { return true }
+				var opened []string
+				browserOpener = func() func(string) {
+					return func(url string) { opened = append(opened, url) }
+				}
+				stubBrowserLoginWithOpener(t, func(_ string, open func(string)) (*oauth2.Token, error) {
+					if open != nil {
+						open("https://auth.example/authorize")
+					}
+					return &oauth2.Token{AccessToken: "browser-access", RefreshToken: "browser-refresh"}, nil
+				})
+				withConfig(t, &config.Config{
+					Version:        1,
+					DefaultProfile: "prod",
+					Profiles:       map[string]config.Profile{"prod": {APIEndpoint: noDeviceSrv.URL, AuthMethod: "oauth"}},
+				})
+
+				args := append(append([]string{"config", "login", "prod"}, gate.args...), flow.args...)
+				var err error
+				captureStdout(t, func() { err = rootWithConfig(args...).Execute() })
+				if err != nil {
+					t.Fatalf("login: %v", err)
+				}
+				if got := len(opened) == 1; got != flow.wantOpen {
+					t.Errorf("browser opened %v times, want opened = %v", len(opened), flow.wantOpen)
 				}
 			})
 		}

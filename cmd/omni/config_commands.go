@@ -29,7 +29,7 @@ func applyOAuthToken(p *config.Profile, tok *oauth2.Token) {
 
 // Test seams for the OAuth login: the browser flow, an override for the
 // device grant's polling interval (zero keeps the server's), and the TTY
-// check and browser opener behind loginOpener.
+// check and browser opener behind terminalOpener.
 var (
 	browserLogin       = oauth.Login
 	devicePollInterval time.Duration
@@ -37,24 +37,50 @@ var (
 	browserOpener      = oauth.BrowserOpener
 )
 
-// loginOpener is how the device and browser logins open their URL: only for a
-// person at a terminal (stdin and stdout both TTYs) with a browser to open,
-// else nil.
-func loginOpener() func(string) {
+// sshEnvVars are set by sshd in a remote session, where a browser opened on
+// the remote machine is one nobody is looking at.
+var sshEnvVars = []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"}
+
+// terminalOpener is the browser opener for a person at a terminal (stdin and
+// stdout both TTYs) with a browser to open, else nil. An explicit --browser
+// gets it as is.
+func terminalOpener() func(string) {
 	if isTerminal(int(os.Stdin.Fd())) && isTerminal(int(os.Stdout.Fd())) {
 		return browserOpener()
 	}
 	return nil
 }
 
+// loginOpener is how the device login, and the browser login it falls back
+// to, open their URL: terminalOpener, except with JSON output, in CI or a
+// coding agent's shell, or over SSH, where nil. The URL is printed either way.
+func loginOpener(jsonOut bool, getenv func(string) string) func(string) {
+	if jsonOut || agentOrCIEnv(getenv) {
+		return nil
+	}
+	for _, name := range sshEnvVars {
+		if getenv(name) != "" {
+			return nil
+		}
+	}
+	return terminalOpener()
+}
+
 // oauthLogin logs in to endpoint with the device grant, or with the browser
 // flow when --browser is set or the server doesn't offer the device grant.
-// Either flow's URL opens in a browser only for a person at a terminal with
-// a browser to open. With jsonOut, the device code is also written to
-// stdout as one JSON line before polling starts.
+// The URL opens in a browser on loginOpener's terms, or on terminalOpener's
+// with --browser, which asks for this machine's browser. With jsonOut, the
+// device code is also written to stdout as one JSON line before polling
+// starts.
 func oauthLogin(cmd *cobra.Command, endpoint string, jsonOut bool) (*oauth2.Token, error) {
 	forceBrowser, _ := cmd.Flags().GetBool("browser")
-	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval, OpenBrowser: loginOpener()}
+	var open func(string)
+	if forceBrowser {
+		open = terminalOpener()
+	} else {
+		open = loginOpener(jsonOut, os.Getenv)
+	}
+	device := oauth.DeviceOptions{Stderr: os.Stderr, Interval: devicePollInterval, OpenBrowser: open}
 	if jsonOut {
 		device.JSON = os.Stdout
 	}
@@ -507,10 +533,13 @@ func configLoginCmd() *cobra.Command {
 		Long: `Log in with OAuth and save the tokens to a profile.
 
 The CLI prints a URL and a code; approve the code in a browser on any device
-and the CLI picks up the tokens. At a terminal it also opens the URL for you.
+and the CLI picks up the tokens. At a terminal it also opens the URL for you,
+except with JSON output (--format json, OMNI_OUTPUT_FORMAT=json, or the
+profile's default format), in CI, in a coding agent's shell, or over SSH.
 Pass --browser to log in through a browser on this machine instead (localhost
-callback); the CLI also falls back to it when the Omni instance doesn't offer
-device login.
+callback), opened at a terminal in those cases too; the CLI also falls back to
+it, opening it on the device code's terms, when the Omni instance doesn't
+offer device login.
 
 With --format json, the URL and code are printed to stdout as one JSON line
 before the CLI waits for approval, so a script or agent can read it and show
