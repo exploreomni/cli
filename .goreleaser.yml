@@ -49,5 +49,7 @@ release:
   github:
     owner: exploreomni
     name: cli
-  draft: false
+  # release.yml publishes the draft once the attestation bundle is attached,
+  # so no published release is ever missing one.
+  draft: true
   prerelease: auto
