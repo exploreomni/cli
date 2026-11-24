@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	yaml "github.com/pb33f/go-yaml"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	"github.com/spf13/cobra"
-	"go.yaml.in/yaml/v4"
 )
 
 // maxSchemaDepth caps how deep we expand nested objects when describing a
