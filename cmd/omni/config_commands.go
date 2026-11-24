@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/exploreomni/omni-cli/internal/config"
 	"github.com/exploreomni/omni-cli/internal/oauth"
 	"github.com/exploreomni/omni-cli/internal/openapi"
+	"github.com/exploreomni/omni-cli/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	"golang.org/x/term"
@@ -99,6 +101,29 @@ func jsonOutputChosen(cmd *cobra.Command) bool {
 	return config.ChosenOutputFormat(format) == config.FormatJSON
 }
 
+// loginRunE adapts a login command's run function to RunE. It resolves
+// jsonOutputChosen once, before the run (which may rewrite the config), and
+// with JSON output reports a failure as one compact {"error","status"} line on
+// stderr instead of cobra's plain "Error:" line. Stderr may already carry the
+// device prompt or a fallback note, so the contract is that its last line is
+// the envelope; it is compact whatever --compact says. The error is still
+// returned, so the exit code stays non-zero.
+func loginRunE(run func(cmd *cobra.Command, args []string, jsonOut bool) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		jsonOut := jsonOutputChosen(cmd)
+		err := run(cmd, args, jsonOut)
+		if err != nil && jsonOut {
+			status := 0
+			if errors.Is(err, oauth.ErrForbidden) {
+				status = http.StatusForbidden
+			}
+			output.APIErrorTo(os.Stderr, status, err.Error(), nil, true)
+			cmd.SilenceErrors = true
+		}
+		return err
+	}
+}
+
 // addBrowserFlag registers --browser on a command that runs the OAuth login.
 func addBrowserFlag(cmd *cobra.Command) {
 	cmd.Flags().Bool("browser", false, "log in through a browser on this machine (localhost callback) instead of with a device code")
@@ -152,7 +177,7 @@ line before the CLI waits for approval.`,
 
   # API key (prompts securely for the key)
   omni config init --name prod --endpoint https://myorg.omniapp.co --auth api-key`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: loginRunE(func(cmd *cobra.Command, args []string, jsonOut bool) error {
 			// Args are validated: failures below are runtime errors, not usage errors.
 			cmd.SilenceUsage = true
 
@@ -192,7 +217,6 @@ line before the CLI waits for approval.`,
 				return fmt.Errorf("loading config %s: %w (fix or delete %s, then run init again)", config.ConfigPath(), err, config.ConfigPath())
 			}
 
-			jsonOut := jsonOutputChosen(cmd)
 			var p config.Profile
 			switch choice {
 			case "2", "o", "oauth":
@@ -239,7 +263,7 @@ line before the CLI waits for approval.`,
 			fmt.Fprintf(successOutput(jsonOut), "Profile %q saved to %s\n", name, config.ConfigPath())
 			maybePrintBanner(cmd, name, cfg)
 			return nil
-		},
+		}),
 	}
 	addBrowserFlag(cmd)
 
@@ -550,7 +574,7 @@ it to the person signing in:
 verification_uri_complete is always set: when the instance sends no usable URL
 with the code in it, it equals verification_uri and the person enters the code.`,
 		Args: profileNameArgs(0, 1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: loginRunE(func(cmd *cobra.Command, args []string, jsonOut bool) error {
 			// Args are validated: failures below are runtime errors, not usage errors.
 			cmd.SilenceUsage = true
 
@@ -572,7 +596,6 @@ with the code in it, it equals verification_uri and the person enters the code.`
 			if err := config.ValidateEndpoint(p.APIEndpoint); err != nil {
 				return err
 			}
-			jsonOut := jsonOutputChosen(cmd)
 			tok, err := oauthLogin(cmd, p.APIEndpoint, jsonOut)
 			if err != nil {
 				return fmt.Errorf("OAuth login failed: %w", err)
@@ -599,7 +622,7 @@ with the code in it, it equals verification_uri and the person enters the code.`
 			fmt.Fprintf(successOutput(jsonOut), "Login successful! Profile %q updated.\n", name)
 			maybePrintBanner(cmd, name, cfg)
 			return nil
-		},
+		}),
 	}
 	addBrowserFlag(cmd)
 	return cmd

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,11 +31,18 @@ func oauthFixture(t *testing.T, name string) []byte {
 // approves on the first poll.
 func deviceOrgServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return deviceServerAnswering(t, http.StatusOK, "device_token_success")
+}
+
+// deviceServerAnswering is a fake org host that offers the device grant and
+// answers the first poll with the token fixture and status given.
+func deviceServerAnswering(t *testing.T, tokenStatus int, tokenFixture string) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := map[string]string{
 			"/.well-known/oauth-authorization-server": "discovery_with_device",
 			"/oauth/device_authorization":             "device_authorization",
-			"/oauth/token":                            "device_token_success",
+			"/oauth/token":                            tokenFixture,
 		}[r.URL.Path]
 		if name == "" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -42,10 +50,70 @@ func deviceOrgServer(t *testing.T) *httptest.Server {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/oauth/token" {
+			w.WriteHeader(tokenStatus)
+		}
 		_, _ = w.Write(oauthFixture(t, name))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// captureStderr is captureStdout for os.Stderr, where cobra's own "Error:"
+// line goes too when the root doesn't silence errors.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+
+	fn()
+	_ = w.Close()
+	return <-done
+}
+
+// runCapturingBoth runs args on a config root that, like the real one, lets
+// cobra print a returned error, and returns stdout, stderr, the command that
+// ran and its error.
+func runCapturingBoth(t *testing.T, args ...string) (stdout, stderr string, ran *cobra.Command, err error) {
+	t.Helper()
+	root := rootWithConfig(args...)
+	root.SilenceErrors = false
+	stdout = captureStdout(t, func() {
+		stderr = captureStderr(t, func() { ran, err = root.ExecuteC() })
+	})
+	return stdout, stderr, ran, err
+}
+
+// lastErrorEnvelope parses stderr's last non-empty line as the
+// {"error","status"} envelope, failing the test if it isn't one.
+func lastErrorEnvelope(t *testing.T, stderr string) map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	last := lines[len(lines)-1]
+	var env map[string]any
+	if err := json.Unmarshal([]byte(last), &env); err != nil {
+		t.Fatalf("last stderr line %q is not JSON: %v (stderr %q)", last, err, stderr)
+	}
+	if _, ok := env["error"].(string); !ok {
+		t.Fatalf("envelope %v lacks a string \"error\"", env)
+	}
+	for k := range env {
+		if k != "error" && k != "status" {
+			t.Errorf("envelope %v has unexpected field %q", env, k)
+		}
+	}
+	return env
 }
 
 // refusingServer fails the test on any request: --browser must not touch
@@ -161,6 +229,133 @@ func TestConfigLogin_FormatJSONWritesOneDeviceLine(t *testing.T) {
 	p := cfg.Profiles["prod"]
 	if p.AuthMethod != "oauth" || p.AccessToken != "device-access-token" || p.RefreshToken != "device-refresh-token" {
 		t.Errorf("saved profile = %+v, want the device grant's OAuth tokens", p)
+	}
+}
+
+// A denied login with --format json leaves the device line on stdout (it was
+// written before the outcome was known) and ends stderr with one compact
+// envelope line, with no "Error:" line from cobra. The exit code is the
+// verdict.
+func TestConfigLogin_FormatJSONDeniedEndsStderrWithEnvelope(t *testing.T) {
+	loginTestEnv(t)
+	srv := deviceServerAnswering(t, http.StatusBadRequest, "device_token_access_denied")
+	stubBrowserLogin(t, func(string) (*oauth2.Token, error) {
+		t.Error("browser login ran; the server offers the device grant")
+		return nil, nil
+	})
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {APIEndpoint: srv.URL, AuthMethod: "api-key", APIKey: "old-key"}},
+	})
+
+	stdout, stderr, _, err := runCapturingBoth(t, "config", "login", "prod", "--format", "json")
+	if err == nil {
+		t.Fatal("login succeeded, want the denial returned")
+	}
+	if strings.Count(stdout, "\n") != 1 {
+		t.Fatalf("stdout = %q, want exactly the device line", stdout)
+	}
+	var line map[string]any
+	if err := json.Unmarshal([]byte(stdout), &line); err != nil || line["user_code"] != "BDKF-QRTW" {
+		t.Errorf("stdout %q is not the device line (%v)", stdout, err)
+	}
+	if strings.Contains(stderr, "Error:") {
+		t.Errorf("stderr = %q, want no cobra \"Error:\" line", stderr)
+	}
+	env := lastErrorEnvelope(t, stderr)
+	if msg := env["error"].(string); !strings.Contains(msg, "denied") {
+		t.Errorf("envelope error = %q, want it to say the login was denied", msg)
+	}
+	if _, ok := env["status"]; ok {
+		t.Errorf("envelope %v has a status, want none for a denial", env)
+	}
+	cfg, _ := config.Load()
+	if p := cfg.Profiles["prod"]; p.AccessToken != "" || p.APIKey != "old-key" {
+		t.Errorf("prod profile = %+v, want it untouched", p)
+	}
+}
+
+// A 403 (the org's IP allowlist) with --format json comes before any device
+// line, so stdout stays empty, and the envelope carries "status": 403.
+func TestConfigLogin_FormatJSONForbiddenEnvelopeHas403(t *testing.T) {
+	loginTestEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/oauth-authorization-server" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	stubBrowserLogin(t, func(string) (*oauth2.Token, error) {
+		t.Error("browser login ran after a 403")
+		return nil, nil
+	})
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {APIEndpoint: srv.URL, AuthMethod: "oauth"}},
+	})
+
+	stdout, stderr, _, err := runCapturingBoth(t, "config", "login", "prod", "--format", "json")
+	if err == nil {
+		t.Fatal("login succeeded, want the 403 returned")
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want it empty", stdout)
+	}
+	if strings.Contains(stderr, "Error:") {
+		t.Errorf("stderr = %q, want no cobra \"Error:\" line", stderr)
+	}
+	if env := lastErrorEnvelope(t, stderr); env["status"] != float64(http.StatusForbidden) {
+		t.Errorf("envelope %v, want \"status\": 403", env)
+	}
+}
+
+// init reports a failure before any login (here a bad --auth) in the same
+// envelope when JSON output is chosen.
+func TestConfigInit_FormatJSONInvalidAuthWritesEnvelope(t *testing.T) {
+	loginTestEnv(t)
+	withConfig(t, nil)
+
+	stdout, stderr, _, err := runCapturingBoth(t, "config", "init", "--name", "prod", "--endpoint", "https://myorg.omniapp.co", "--auth", "magic", "--format", "json")
+	if err == nil {
+		t.Fatal("init succeeded, want the invalid --auth returned")
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want it empty", stdout)
+	}
+	if strings.Contains(stderr, "Error:") {
+		t.Errorf("stderr = %q, want no cobra \"Error:\" line", stderr)
+	}
+	if msg := lastErrorEnvelope(t, stderr)["error"].(string); !strings.Contains(msg, `invalid --auth "magic"`) {
+		t.Errorf("envelope error = %q, want it to name the invalid --auth", msg)
+	}
+}
+
+// Without JSON output a failed login is left to cobra: the error is returned
+// unsilenced and printed as its plain "Error:" line.
+func TestConfigLogin_HumanDeniedLeftToCobra(t *testing.T) {
+	loginTestEnv(t)
+	srv := deviceServerAnswering(t, http.StatusBadRequest, "device_token_access_denied")
+	withConfig(t, &config.Config{
+		Version:        1,
+		DefaultProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {APIEndpoint: srv.URL, AuthMethod: "oauth"}},
+	})
+
+	_, stderr, ran, err := runCapturingBoth(t, "config", "login", "prod")
+	if err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("login error = %v, want the denial", err)
+	}
+	if ran.SilenceErrors {
+		t.Error("SilenceErrors set on a human-mode login")
+	}
+	if !strings.Contains(stderr, "Error: OAuth login failed: login was denied") {
+		t.Errorf("stderr = %q, want cobra's \"Error:\" line", stderr)
+	}
+	if strings.Contains(stderr, `{"error"`) {
+		t.Errorf("stderr = %q, want no JSON envelope in human mode", stderr)
 	}
 }
 

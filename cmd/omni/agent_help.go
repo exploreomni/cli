@@ -20,7 +20,9 @@ Automatic update notices are disabled for non-interactive runs. Check explicitly
 ## Streams and exit codes
 On failure nothing is written to stdout — the API's error body, the error
 message, and any suggestions all go to stderr, and the exit code is non-zero.
-So an empty stdout always means "no data", never "parse this".
+So an empty stdout means "no data", never "parse this". The exit code is the
+verdict, though: a failed "config login --format json" still leaves its
+device-code line on stdout, written before the outcome was known.
 
 A failed API call leaves exactly one JSON document on stderr:
   {"error": "<message>", "status": 400, "body": {<the API's payload>}}
@@ -41,12 +43,13 @@ background with JSON output:
 Once login.json is non-empty it holds one JSON line:
   {"verification_uri":"…","verification_uri_complete":"…","user_code":"…","expires_in":600}
 Show the person verification_uri_complete and user_code, then wait for the
-process: exit 0 = tokens saved to the profile, non-zero = the reason is on
-stderr (denied, code expired, CLI login off for the org, HTTP 403 from the
-org's IP allowlist). verification_uri_complete is always set; when it equals
-verification_uri the person types the code. With JSON output (--format json,
-OMNI_OUTPUT_FORMAT=json, or the profile's default) the CLI doesn't open a
-browser itself (unless --browser is passed).
+process: exit 0 = tokens saved to the profile, non-zero = the last line of
+login.err is {"error": "<reason>"} (denied, code expired, CLI login off for
+the org), with "status": 403 when the org's IP allowlist blocks this machine.
+login.json may still hold the device line then. verification_uri_complete is
+always set; when it equals verification_uri the person types the code. With
+JSON output (--format json, OMNI_OUTPUT_FORMAT=json, or the profile's
+default) the CLI doesn't open a browser itself (unless --browser is passed).
 
 Wait for login.json to be non-empty OR for a line in login.err ending in
 "browser login." — the second means the instance doesn't offer device login

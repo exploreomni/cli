@@ -122,6 +122,8 @@ jq -r '"Open \(.verification_uri_complete) (code \(.user_code))"' login.json
 wait "$login_pid"   # returns once the code is approved, denied or expired
 ```
 
+When the login fails, the exit code is non-zero and the last line on stderr is a JSON error, `{"error":"OAuth login failed: login was denied"}`, with `"status":403` when the organization's IP allowlist blocks the request. Stdout still holds the device-code line if one was written, so check the exit code, not stdout. `config init --format json` reports its errors the same way.
+
 A server error (HTTP 5xx) while the CLI is waiting for approval ends the login; run it again.
 
 If the Omni instance doesn't offer device login, the CLI falls back to the browser login and no JSON line is written, so a script should also watch for the process exiting, as above.
@@ -252,7 +254,7 @@ Config file lives at `~/.config/omni-cli/config.json`.
 
 All output is JSON to stdout. Errors go to stderr as JSON. Use `--compact` for non-indented output (good for piping to `jq`).
 
-Failures write nothing to stdout — the API's error body, the error message, and any subcommand suggestions go to stderr, and the exit code is non-zero. An empty stdout therefore always means "no data", which keeps `omni ... | jq` from choking on error JSON.
+Failures write nothing to stdout — the API's error body, the error message, and any subcommand suggestions go to stderr, and the exit code is non-zero. An empty stdout therefore means "no data", which keeps `omni ... | jq` from choking on error JSON. The exit code is the verdict, though: a failed `config login --format json` still leaves its device-code line on stdout, since that's written before the outcome is known (see [Headless machines, containers and agents](#headless-machines-containers-and-agents)).
 
 A failed API call leaves exactly one JSON document on stderr, so `omni ... 2>err.json` stays parseable:
 
