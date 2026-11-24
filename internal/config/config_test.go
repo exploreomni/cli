@@ -1096,3 +1096,82 @@ func TestResolve_MalformedConfigIsReported(t *testing.T) {
 		t.Errorf("flags should bypass the broken config, got %v", err)
 	}
 }
+
+// Update waits for the refresh lock: a login's save can't interleave with a
+// refresh.
+func TestUpdate_TakesRefreshLock(t *testing.T) {
+	clearEnv(t)
+	path := writeConfig(t, &Config{Version: 1, Profiles: map[string]Profile{}})
+
+	held := flock.New(path + ".lock")
+	if ok, err := held.TryLock(); err != nil || !ok {
+		t.Fatalf("taking lock: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	orig := refreshLockTimeout
+	refreshLockTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { refreshLockTimeout = orig })
+
+	ran := false
+	_, err := Update(func(*Config) error { ran = true; return nil })
+	want := "timed out after 100ms waiting for " + path + ".lock (held by another omni process)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Update error = %v, want %q", err, want)
+	}
+	if ran {
+		t.Error("Update ran fn without the lock")
+	}
+}
+
+// A lock Update can't create reports the same error a refresh does.
+func TestUpdate_UnwritableConfigDir(t *testing.T) {
+	clearEnv(t)
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(notDir, "config.json"))
+
+	_, err := Update(func(*Config) error { return nil })
+	if err == nil || !strings.HasPrefix(err.Error(), "cannot create OAuth refresh lock ") || !strings.Contains(err.Error(), "(is the config directory writable?)") {
+		t.Fatalf("Update error = %v, want the cannot-create lock error", err)
+	}
+}
+
+func TestUpdate_MissingFileStartsEmpty(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("OMNI_CONFIG_PATH", filepath.Join(t.TempDir(), "nested", "config.json"))
+
+	saved, err := Update(func(cfg *Config) error {
+		cfg.Profiles["prod"] = Profile{APIEndpoint: "https://prod.omniapp.co", AuthMethod: "oauth"}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Version != 1 || loaded.Profiles["prod"].AuthMethod != "oauth" || saved.Profiles["prod"].AuthMethod != "oauth" {
+		t.Errorf("saved %+v, loaded %+v; want version 1 with the prod profile", saved, loaded)
+	}
+}
+
+// A config file that exists but doesn't parse is reported, not replaced.
+func TestUpdate_CorruptFileIsNotOverwritten(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("OMNI_CONFIG_PATH", path)
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Update(func(*Config) error { return nil }); err == nil {
+		t.Fatal("Update succeeded on a corrupt config")
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{not json" {
+		t.Errorf("config file = %q, want it untouched", b)
+	}
+}

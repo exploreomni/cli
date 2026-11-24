@@ -312,6 +312,38 @@ func lockConfigForRefresh() (func(), error) {
 	return func() { _ = lock.Unlock() }, nil
 }
 
+// Update re-reads the config file, applies fn to it and saves the result,
+// all under the lock token refreshes take, so a login can't interleave with
+// a concurrent refresh and write back a refresh token the server has
+// rotated out. A missing file starts from an empty config; a file that can't
+// be read or parsed is an error rather than something to overwrite. fn's
+// error aborts the save. Update returns the config it saved.
+func Update(fn func(cfg *Config) error) (*Config, error) {
+	unlock, err := lockConfigForRefresh()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	cfg, err := Load()
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		cfg = &Config{Version: 1}
+	case err != nil:
+		return nil, fmt.Errorf("loading config %s: %w", ConfigPath(), err)
+	}
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]Profile)
+	}
+	if err := fn(cfg); err != nil {
+		return nil, err
+	}
+	if err := Save(cfg); err != nil {
+		return nil, fmt.Errorf("saving config: %w", err)
+	}
+	return cfg, nil
+}
+
 // ValidateEndpoint reports whether url is safe to send API tokens or OAuth
 // credentials to: it must be HTTPS and on an allowlisted Omni domain. Setting
 // OMNI_CLI_DANGEROUSLY_ALLOW_INSECURE_REQUESTS=1 bypasses both checks.
