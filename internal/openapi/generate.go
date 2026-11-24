@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -894,13 +895,16 @@ func pickMediaType(content *orderedmap.Map[string, *v3.MediaType]) (string, *bas
 }
 
 // commandName derives a CLI subcommand name from the operationId or method+path.
+// The tag is already the parent command, so its slug is dropped from the
+// kebab-cased operationId: as a prefix ("ModelsList" under Models → "list") or,
+// failing that, at its first whole-word occurrence elsewhere
+// ("userCustomOrganizationRolesSet" under Custom Organization Roles →
+// "user-set"). Matching is on whole dash-separated words, so "ai" never
+// matches inside "conversation-detail", and a name that is only the tag
+// ("whoami" under Whoami) is kept rather than emptied.
 func commandName(op *operationInfo) string {
 	if op.OperationID != "" {
-		// Strip the tag prefix if present (e.g., "models-list" from "ModelsList")
-		name := canonicalName(op.OperationID)
-		tagPrefix := slugify(op.Tag) + "-"
-		name = strings.TrimPrefix(name, tagPrefix)
-		return name
+		return stripTagWords(canonicalName(op.OperationID), slugify(op.Tag))
 	}
 	// Fallback: method + last path segment
 	parts := strings.Split(strings.Trim(op.Path, "/"), "/")
@@ -911,6 +915,22 @@ func commandName(op *operationInfo) string {
 		}
 	}
 	return strings.ToLower(op.Method) + "-" + slugify(last)
+}
+
+// stripTagWords removes the first run of words in name (both kebab-case) that
+// equals tag, unless that would leave nothing.
+func stripTagWords(name, tag string) string {
+	words := strings.Split(name, "-")
+	tagWords := strings.Split(tag, "-")
+	if tag == "" || len(tagWords) >= len(words) {
+		return name
+	}
+	for i := 0; i+len(tagWords) <= len(words); i++ {
+		if slices.Equal(words[i:i+len(tagWords)], tagWords) {
+			return strings.Join(slices.Concat(words[:i], words[i+len(tagWords):]), "-")
+		}
+	}
+	return name
 }
 
 // Helper functions
