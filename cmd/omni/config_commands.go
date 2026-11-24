@@ -545,7 +545,10 @@ With --format json, the URL and code are printed to stdout as one JSON line
 before the CLI waits for approval, so a script or agent can read it and show
 it to the person signing in:
 
-  {"verification_uri":"…","verification_uri_complete":"…","user_code":"BDKF-QRTW","expires_in":600}`,
+  {"verification_uri":"…","verification_uri_complete":"…","user_code":"BDKF-QRTW","expires_in":600}
+
+verification_uri_complete is always set: when the instance sends no usable URL
+with the code in it, it equals verification_uri and the person enters the code.`,
 		Args: profileNameArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Args are validated: failures below are runtime errors, not usage errors.

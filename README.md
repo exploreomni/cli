@@ -112,7 +112,7 @@ With `--format json`, the CLI also writes the URL and code to stdout as a single
 {"verification_uri":"https://myorg.omniapp.co/oauth/device","verification_uri_complete":"https://myorg.omniapp.co/oauth/device?user_code=BDKF-QRTW","user_code":"BDKF-QRTW","expires_in":600}
 ```
 
-Nothing else goes to stdout in this mode; the success message goes to stderr. A script or coding agent can run the login in the background, read the first line, and show the person the URL and code:
+`verification_uri_complete` is always set; when the instance sends no usable URL with the code in it, it equals `verification_uri` and the person enters the code. Nothing else goes to stdout in this mode; the success message goes to stderr. A script or coding agent can run the login in the background, read the first line, and show the person the URL and code:
 
 ```bash
 omni config login prod --format json > login.json 2> login.err &

@@ -95,6 +95,9 @@ type DeviceOptions struct {
 }
 
 // deviceLine is the JSON line written to DeviceOptions.JSON.
+// VerificationURIComplete is the link the prompt shows, so it is never empty:
+// the server's complete URL on the terms it would be opened, else
+// VerificationURI, and the person enters the code.
 type deviceLine struct {
 	VerificationURI         string `json:"verification_uri"`
 	VerificationURIComplete string `json:"verification_uri_complete"`
@@ -176,7 +179,7 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		enc.SetEscapeHTML(false)
 		if err := enc.Encode(deviceLine{
 			VerificationURI:         verificationURI,
-			VerificationURIComplete: verificationURIComplete,
+			VerificationURIComplete: link,
 			UserCode:                da.UserCode,
 			ExpiresIn:               int64(expiresIn / time.Second),
 		}); err != nil {

@@ -308,7 +308,9 @@ func TestDeviceLogin_CancelStopsPolling(t *testing.T) {
 }
 
 // The JSON line is written, whole and alone, before the first poll, and the
-// fixture's URL, on another host than the test server, is not opened.
+// fixture's URL, on another host than the test server, is not opened. Its
+// verification_uri_complete is the link the prompt shows: the plain URL,
+// since the complete one is not on the endpoint's host.
 func TestDeviceLogin_JSONLineBeforePolling(t *testing.T) {
 	t.Parallel()
 	var jsonOut syncBuffer
@@ -345,7 +347,7 @@ func TestDeviceLogin_JSONLineBeforePolling(t *testing.T) {
 	}
 	want := map[string]any{
 		"verification_uri":          "https://acme.omniapp.co/oauth/device",
-		"verification_uri_complete": "https://acme.omniapp.co/oauth/device?user_code=BDKF-QRTW",
+		"verification_uri_complete": "https://acme.omniapp.co/oauth/device",
 		"user_code":                 "BDKF-QRTW",
 		"expires_in":                float64(600),
 	}
@@ -384,7 +386,8 @@ func TestDeviceLogin_ExpiryIgnoresRequestLatency(t *testing.T) {
 // endpoint's own host and free of whitespace and control characters.
 // Otherwise the prompt shows verification_uri and asks for the code to be
 // entered; the opener gets verification_uri only when there is no complete
-// URL at all.
+// URL at all. The JSON line's verification_uri_complete is always the link
+// the prompt shows, never empty.
 func TestDeviceLogin_ShowsAndOpensOnlySameHostURLs(t *testing.T) {
 	t.Parallel()
 	body := func(uri, complete string) string {
@@ -416,16 +419,29 @@ func TestDeviceLogin_ShowsAndOpensOnlySameHostURLs(t *testing.T) {
 			srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceBody: body(tc.uri, tc.complete)}).start(t)
 			var mu sync.Mutex
 			var opened []string
-			var stderr syncBuffer
+			var stderr, jsonOut syncBuffer
 			if _, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
 				Stderr:      &stderr,
+				JSON:        &jsonOut,
 				OpenBrowser: func(u string) { mu.Lock(); opened = append(opened, u); mu.Unlock() },
 				Interval:    time.Second,
 			}); err != nil {
 				t.Fatalf("DeviceLogin: %v", err)
 			}
-			if got, want := stderr.String(), strings.ReplaceAll(tc.wantPrompt, "BASE", srv.URL); got != want {
-				t.Errorf("stderr = %q, want %q", got, want)
+			wantPrompt := strings.ReplaceAll(tc.wantPrompt, "BASE", srv.URL)
+			if got := stderr.String(); got != wantPrompt {
+				t.Errorf("stderr = %q, want %q", got, wantPrompt)
+			}
+			var line map[string]any
+			if err := json.Unmarshal([]byte(jsonOut.String()), &line); err != nil {
+				t.Fatalf("JSON line %q: %v", jsonOut.String(), err)
+			}
+			shown, _, _ := strings.Cut(strings.TrimPrefix(wantPrompt, "To sign in, open "), "\n")
+			if got := line["verification_uri_complete"]; got != shown || shown == "" {
+				t.Errorf("JSON verification_uri_complete = %q, want the link the prompt shows, %q", got, shown)
+			}
+			if got, want := line["verification_uri"], strings.ReplaceAll(tc.uri, "BASE", srv.URL); got != want {
+				t.Errorf("JSON verification_uri = %q, want %q", got, want)
 			}
 			want := []string(nil)
 			if tc.wantOpened != "" {
