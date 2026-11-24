@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -497,6 +499,103 @@ func TestDeviceLogin_ExpiryCappedAtTenMinutes(t *testing.T) {
 	}
 	if !strings.Contains(jsonOut.String(), `"expires_in":600`) {
 		t.Errorf("JSON = %q, want expires_in 600", jsonOut.String())
+	}
+}
+
+// The server's interval is clamped in seconds, before x/oauth2 turns it into
+// a time.Duration: not positive is the RFC's 5, and anything over a minute is
+// a minute, so no value can wrap or panic the ticker.
+func TestDeviceInterval(t *testing.T) {
+	for in, want := range map[int64]int64{
+		math.MinInt64: 5,
+		-5:            5,
+		0:             5,
+		1:             1,
+		5:             5,
+		60:            60,
+		61:            60,
+		3600:          60,
+		1e10:          60,
+		math.MaxInt64: 60,
+	} {
+		if got := deviceInterval(in); got != want {
+			t.Errorf("deviceInterval(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// A negative or overflowing interval from the server doesn't panic the
+// poller. Neither case sets DeviceOptions.Interval, which would replace the
+// server's value before x/oauth2 saw it. -5 polls after the RFC's 5 seconds;
+// 1e10 is clamped to a minute, so the test stops it at its timeout instead
+// of waiting for the first poll.
+func TestDeviceLogin_ClampsServerInterval(t *testing.T) {
+	t.Parallel()
+	body := func(interval int64) string {
+		return fmt.Sprintf(`{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"BASE/oauth/device","expires_in":600,"interval":%d}`, interval)
+	}
+	t.Run("negative", func(t *testing.T) {
+		t.Parallel()
+		srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceBody: body(-5)}).start(t)
+		tok, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Timeout: 20 * time.Second})
+		if err != nil {
+			t.Fatalf("DeviceLogin: %v", err)
+		}
+		if tok.AccessToken != "device-access-token" {
+			t.Errorf("access token = %q, want the fixture's", tok.AccessToken)
+		}
+		if _, _, polls := srv.snapshot(); len(polls) != 1 {
+			t.Errorf("token polls = %d, want 1", len(polls))
+		}
+	})
+	t.Run("overflowing", func(t *testing.T) {
+		t.Parallel()
+		srv := (&deviceServer{tokens: []string{"device_token_success"}, deviceBody: body(1e10)}).start(t)
+		_, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{Timeout: 1500 * time.Millisecond})
+		if !errors.Is(err, ErrCodeExpired) {
+			t.Fatalf("err = %v, want ErrCodeExpired at the timeout", err)
+		}
+		if _, _, polls := srv.snapshot(); len(polls) != 0 {
+			t.Errorf("token polls = %d, want 0 before a minute has passed", len(polls))
+		}
+	})
+}
+
+// A code that has already expired (a negative expires_in) is refused before
+// anything is shown: no prompt, no JSON line, no browser, no polling.
+func TestDeviceLogin_RejectsNonPositiveExpiresIn(t *testing.T) {
+	t.Parallel()
+	for _, expiresIn := range []int{-30, -1} {
+		t.Run(fmt.Sprint(expiresIn), func(t *testing.T) {
+			t.Parallel()
+			srv := (&deviceServer{
+				tokens:     []string{"device_token_success"},
+				deviceBody: fmt.Sprintf(`{"device_code":"d","user_code":"BDKF-QRTW","verification_uri":"BASE/oauth/device","expires_in":%d,"interval":1}`, expiresIn),
+			}).start(t)
+			var stderr, jsonOut syncBuffer
+			var opened []string
+			_, err := DeviceLogin(context.Background(), srv.URL, DeviceOptions{
+				Stderr:      &stderr,
+				JSON:        &jsonOut,
+				OpenBrowser: func(u string) { opened = append(opened, u) },
+				Interval:    time.Second,
+			})
+			if err == nil || !strings.Contains(err.Error(), "already expired") {
+				t.Fatalf("err = %v, want the expired code refused", err)
+			}
+			if got := stderr.String(); got != "" {
+				t.Errorf("stderr = %q, want nothing printed", got)
+			}
+			if got := jsonOut.String(); got != "" {
+				t.Errorf("JSON = %q, want nothing written", got)
+			}
+			if len(opened) != 0 {
+				t.Errorf("opened %v, want nothing", opened)
+			}
+			if _, _, polls := srv.snapshot(); len(polls) != 0 {
+				t.Errorf("token polls = %d, want 0", len(polls))
+			}
+		})
 	}
 }
 

@@ -40,6 +40,15 @@ const defaultDeviceTimeout = 10 * time.Minute
 // defaultDeviceAuthRequestTimeout bounds the device authorization request.
 const defaultDeviceAuthRequestTimeout = 30 * time.Second
 
+// defaultDeviceInterval is the polling interval, in seconds, when the server
+// sends none (RFC 8628 §3.2), and maxDeviceInterval the most the CLI waits
+// between polls whatever the server asks: anything longer can't be meant
+// under the ten-minute cap.
+const (
+	defaultDeviceInterval = 5
+	maxDeviceInterval     = 60
+)
+
 // Device login failures callers (and tests) can tell apart with errors.Is.
 var (
 	// ErrDeviceUnsupported means the server has no device authorization
@@ -126,6 +135,13 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 	if !printableASCII(da.UserCode) {
 		return nil, fmt.Errorf("requesting a device code: the server sent a user code that isn't printable ASCII")
 	}
+	// x/oauth2 turns a negative expires_in into an expiry in the past; such a
+	// code can never be approved, so it isn't shown. A missing one (zero
+	// Expiry) gets the cap below.
+	if !da.Expiry.IsZero() && !da.Expiry.After(start) {
+		return nil, fmt.Errorf("requesting a device code: the server sent a code that has already expired (expires_in must be a positive number of seconds)")
+	}
+	da.Interval = deviceInterval(da.Interval)
 	// Server text bound for the terminal can't carry escape sequences.
 	verificationURI := stripControl(da.VerificationURI)
 	verificationURIComplete := stripControl(da.VerificationURIComplete)
@@ -190,6 +206,21 @@ func DeviceLogin(ctx context.Context, apiEndpoint string, opts DeviceOptions) (*
 		return nil, deviceError("waiting for approval", err)
 	}
 	return tok, nil
+}
+
+// deviceInterval is the polling interval, in seconds, for the server's
+// interval: the RFC's default when it is missing or not positive, and at most
+// maxDeviceInterval. It works on the seconds, before x/oauth2 multiplies them
+// into a time.Duration: a huge value wraps there, and a non-positive one
+// panics the ticker.
+func deviceInterval(seconds int64) int64 {
+	switch {
+	case seconds <= 0:
+		return defaultDeviceInterval
+	case seconds > maxDeviceInterval:
+		return maxDeviceInterval
+	}
+	return seconds
 }
 
 // openableVerificationURL reports whether target, a URL the server sent, may
