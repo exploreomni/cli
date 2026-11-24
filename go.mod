@@ -2,6 +2,8 @@ module github.com/exploreomni/omni-cli
 
 go 1.25.6
 
+toolchain go1.27.4
+
 require (
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/briandowns/spinner v1.23.2
@@ -29,7 +31,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.19.2 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect
