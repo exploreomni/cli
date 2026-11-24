@@ -35,6 +35,26 @@ subcommand names.
 ## Auth
 Set OMNI_API_TOKEN env var, or run: omni config init
 
+OAuth login needs a person to approve it. From an agent, run it in the
+background with JSON output:
+  omni config login <profile> --format json > login.json 2> login.err &
+Once login.json is non-empty it holds one JSON line:
+  {"verification_uri":"…","verification_uri_complete":"…","user_code":"…","expires_in":600}
+Show the person verification_uri_complete and user_code, then wait for the
+process: exit 0 = tokens saved to the profile, non-zero = the reason is on
+stderr (denied, code expired, CLI login off for the org, HTTP 403 from the
+org's IP allowlist). verification_uri_complete is always set; when it equals
+verification_uri the person types the code. With JSON output (--format json,
+OMNI_OUTPUT_FORMAT=json, or the profile's default) the CLI doesn't open a
+browser itself (unless --browser is passed).
+
+Wait for login.json to be non-empty OR for a line in login.err ending in
+"browser login." — the second means the instance doesn't offer device login
+(or its login settings couldn't be read), so no JSON line will come. The CLI
+has fallen back to a browser login on this machine and printed its URL to
+login.err. The person must open it in a browser on the machine the CLI runs
+on within 2 minutes; otherwise use OMNI_API_TOKEN instead.
+
 ## Common Workflows
 
 ### Answer a question about your data (recommended first approach)

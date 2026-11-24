@@ -722,6 +722,11 @@ func TestLoginDefault_ChoosesFlow(t *testing.T) {
 			if tc.wantNote != "" && !strings.Contains(stderr.String(), tc.wantNote+"\n") {
 				t.Errorf("stderr = %q, want the note %q", stderr.String(), tc.wantNote)
 			}
+			// agent-help tells agents a stderr line ending in "browser login."
+			// means no device code is coming.
+			if tc.wantNote != "" && !strings.HasSuffix(tc.wantNote, "browser login.") {
+				t.Errorf("fallback note %q doesn't end in \"browser login.\", which agent-help tells agents to watch for", tc.wantNote)
+			}
 			if tc.wantNote != notOffered && strings.Contains(stderr.String(), notOffered) {
 				t.Errorf("stderr = %q, says the instance doesn't offer device login", stderr.String())
 			}

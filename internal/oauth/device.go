@@ -346,6 +346,8 @@ func shortDuration(d time.Duration) string {
 }
 
 // notOffered is the fallback note when the org doesn't offer the device grant.
+// Every fallback note ends in "browser login.": agent-help tells agents that
+// such a stderr line means no device code is coming.
 const notOffered = "This Omni instance doesn't offer device login; using browser login."
 
 // discoverDeviceLogin reports whether apiEndpoint's RFC 8414 discovery
