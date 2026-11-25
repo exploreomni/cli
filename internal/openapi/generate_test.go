@@ -115,13 +115,10 @@ func TestCommandName(t *testing.T) {
 // TestCommandNameSpecRenames checks every command in the real spec that
 // stripping the tag mid-name renames, compared with stripping it only as a
 // prefix, against an allowlist, so a rule change or a spec sync can't silently
-// rename a command users already script against. An entry may stop applying
-// once upstream renames the operationId to start with its tag.
+// rename a command users already script against. No operationId in the spec
+// carries its tag mid-name, so the list is empty; add old → new pairs here.
 func TestCommandNameSpecRenames(t *testing.T) {
-	allowed := map[string]string{
-		"custom-organization-roles/user-custom-organization-roles-set":       "custom-organization-roles/user-set",
-		"custom-organization-roles/user-group-custom-organization-roles-set": "custom-organization-roles/user-group-set",
-	}
+	allowed := map[string]string{}
 
 	seen := map[string]string{}
 	for _, sop := range parseSpecOperations(t, loadSpec(t)) {

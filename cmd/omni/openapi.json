@@ -7818,13 +7818,22 @@
           "id": {
             "type": "string",
             "format": "uuid",
-            "description": "The ID of the run (scheduled job) that was started.",
+            "description": "The ID of the run (scheduled job) that was started. Omitted when `personalized` is true, because a personalized run has one job per recipient.",
             "example": "990e8400-e29b-41d4-a716-446655440004"
+          },
+          "personalized": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Present and true when the routine is personalized and was started once per recipient, each with their own answer."
+          },
+          "recipients": {
+            "type": "integer",
+            "description": "The number of recipients the personalized run was started for. Present only when `personalized` is true.",
+            "example": 3
           }
-        },
-        "required": [
-          "id"
-        ]
+        }
       },
       "ApiKeyListResponse": {
         "type": "object",
@@ -9923,6 +9932,15 @@
             "description": "File name, ending in `.md`",
             "example": "AGENTS.md"
           },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "personal"
+            ],
+            "description": "Whose context the file is: `organization` for a file at the root of the Hub, read by the AI of each member who can view it; `personal` for one of the caller's own files, read only by the caller's AI. Names are unique only within a scope.",
+            "example": "organization"
+          },
           "type": {
             "type": "string",
             "enum": [
@@ -9943,6 +9961,7 @@
           "characters",
           "id",
           "name",
+          "scope",
           "type",
           "updatedAt"
         ]
@@ -10044,6 +10063,24 @@
           "content"
         ],
         "additionalProperties": false
+      },
+      "ContextFileDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContextFileSummary"
+              },
+              {
+                "description": "The file as it was when it was deleted, without its body"
+              }
+            ]
+          }
+        },
+        "required": [
+          "file"
+        ]
       },
       "DashboardsDownloadResponse": {
         "type": "object",
@@ -41397,11 +41434,100 @@
         "type": "object",
         "properties": {
           "run": {
-            "$ref": "#/components/schemas/EvalRunDetail"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvalRunDetail"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "results": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/EvalRunResultWithJudgements"
+                    }
+                  }
+                }
+              }
+            ]
           }
         },
         "required": [
           "run"
+        ]
+      },
+      "EvalRunResultWithJudgements": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/EvalRunResult"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "judgements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/EvalRunJudgement"
+                },
+                "description": "Per-judge scores for this result. Empty when no judgement was recorded, the result has no conversation, or the caller can't access its conversation."
+              }
+            },
+            "required": [
+              "judgements"
+            ]
+          }
+        ]
+      },
+      "EvalRunJudgement": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the judgement was recorded.",
+            "example": "2026-10-01T00:00:00.000Z"
+          },
+          "judge_name": {
+            "type": "string",
+            "description": "Name of the judge that graded the answer.",
+            "example": "analysis_judge"
+          },
+          "max_score": {
+            "type": "number",
+            "description": "Highest score this judge can give.",
+            "example": 1
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "answered",
+              "asked_clarification",
+              "acknowledgment_only",
+              "insufficient_evidence"
+            ],
+            "description": "The judge's verdict on the answer. Omitted when the judge gave none.",
+            "example": "answered"
+          },
+          "rationale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The judge's explanation of its score. Kept for 30 days after the judgement; null once it has expired or when it is unavailable.",
+            "example": "The answer reports the requested total for each region."
+          },
+          "score": {
+            "type": "number",
+            "description": "The judge's score, from 0 to `max_score`.",
+            "example": 1
+          }
+        },
+        "required": [
+          "created_at",
+          "judge_name",
+          "max_score",
+          "rationale",
+          "score"
         ]
       },
       "EvalRunsDeleteResponse": {
@@ -52999,7 +53125,7 @@
             }
           },
           "400": {
-            "description": "Invalid request body. Common causes: missing, empty or over-long prompt, invalid UUID for modelId/branchId/conversationId, invalid webhook URL format.",
+            "description": "Invalid request body. Common causes: missing, empty or over-long prompt, invalid UUID for modelId/branchId/conversationId, invalid webhook URL format. Also returned when conversationId names a conversation that runs through an agent, such as a run of a routine that has an agent: it can only be continued in Omni.",
             "content": {
               "application/json": {
                 "schema": {
@@ -55411,7 +55537,7 @@
     },
     "/api/v1/ai/routines/{id}/trigger": {
       "post": {
-        "description": "Run a routine immediately, in addition to its schedule. The run executes once using the routine owner's permissions and delivers the AI response to every configured recipient — it is not a private preview. A conditional routine evaluates its delivery condition first, so the run may complete without delivering. Because runs execute as the owner, the owner's per-connector AI toggles (set in the chat + menu) govern which integration tools the agent may use. Returns once the run has started; the result is delivered asynchronously. Organization API keys can pass `?userId=<userId>` to act on behalf of a specific organization member.",
+        "description": "Run a routine immediately, in addition to its schedule. A personalized routine runs once per recipient, each with their own answer. Any other routine runs once using the routine owner's permissions and delivers the AI response to every configured recipient — it is not a private preview. A conditional routine evaluates its delivery condition first, so the run may complete without delivering. Because runs execute as the owner, the owner's per-connector AI toggles (set in the chat + menu) govern which integration tools the agent may use. Returns once the run has started; the result is delivered asynchronously. Organization API keys can pass `?userId=<userId>` to act on behalf of a specific organization member.",
         "operationId": "routineTrigger",
         "summary": "Run a routine now",
         "tags": [
@@ -55422,7 +55548,7 @@
           "grants": [
             "useRoutines"
           ],
-          "hint": "Starts one run of the routine now, in addition to its schedule. The agent runs the routine prompt as the routine owner and sends the answer to every recipient on the routine, so it is not a preview; a routine with a condition sends only if the condition holds. A personalized routine does not run per recipient here: every recipient gets the answer from the run as the owner. The response is the id of the run that started, not its result: call getRoutine later, whose lastRun is the latest finished run. Takes an id from listRoutines. A paused or disabled routine comes back as not found, and one with a run already in progress is refused.",
+          "hint": "Starts the routine now, in addition to its schedule. A personalized routine runs once per recipient, each with their own answer, and the response gives the recipient count. Any other routine runs once as the routine owner and sends the answer to every recipient, so it is not a preview. A routine with a condition sends only if the condition holds. For a routine that is not personalized the response is the id of the run that started, not its result: call getRoutine later, whose lastRun is the latest finished run. Takes an id from listRoutines. A paused or disabled routine comes back as not found, and one with a run already in progress is refused.",
           "omitParameters": [
             "userId"
           ],
@@ -55454,7 +55580,7 @@
         ],
         "responses": {
           "202": {
-            "description": "The run has started. For a conditional routine this is the condition evaluation, which delivers only if the condition holds.",
+            "description": "The run has started. For a conditional routine this is the condition evaluation, which delivers only if the condition holds. A personalized routine returns `personalized` and `recipients` instead of an `id`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -55504,7 +55630,7 @@
             }
           },
           "409": {
-            "description": "A run is already in progress for this routine, or the routine delivers to a destination type the organization has disabled.",
+            "description": "A run is already in progress for this routine, the routine delivers to a destination type the organization has disabled, or a personalized run cannot start (no recipients, more recipients than a personalized run allows, or a model on an OAuth connection). Over the recipient cap the routine is paused and its owner emailed, so remove recipients and resume it before running it again. An OAuth refusal records a failed run in the run history of the routine. No refusal sends anything to recipients or otherwise changes its schedule.",
             "content": {
               "application/json": {
                 "schema": {
@@ -60772,7 +60898,7 @@
             }
           },
           "400": {
-            "description": "Invalid body, blank `content`, an invalid `name`, a body over the length limit, or a scope that already holds 20 `always_context` files or 500 files of any type. A new file is `always_context`; room is freed in the app, by changing a file's type or deleting one"
+            "description": "Invalid body, blank `content`, an invalid `name`, a body over the length limit, or a scope that already holds 20 `always_context` files or 500 files of any type. A new file is `always_context`; room is freed by deleting a file with `DELETE /api/v1/context-files/{id}`, or in the app by changing a file's type"
           },
           "403": {
             "description": "Invalid bearer token, the caller is an embed user, or a user-scoped key named another member; or the caller is not an organization admin and the file is an organization file, or may not create personal files"
@@ -60856,7 +60982,7 @@
         }
       },
       "patch": {
-        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReplaces the whole body of one context file with `content`, so read the file first and send it back with your change. It is authorized as the read is, with edit access in place of view access: a caller below editor on the file is a 403, and otherwise anything the read answers with a 404 is a 404 here too. Returns the file's metadata, not its body.",
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nReplaces the whole body of one context file with `content`, so read the file first and send it back with your change. It is authorized as the read is, with edit access in place of view access: a caller below editor on the file is a 403, and so is anyone but an organization admin on an organization file. Otherwise anything the read answers with a 404 is a 404 here too. Returns the file's metadata, not its body.",
         "operationId": "contextFilesUpdate",
         "summary": "Update a context file",
         "tags": [
@@ -60912,7 +61038,64 @@
             "description": "A malformed `id` or `userId`, an invalid body, or a resulting body over the length limit"
           },
           "403": {
-            "description": "Invalid bearer token, the caller is an embed user, or a user-scoped key named another member; or the caller has no edit access to the file"
+            "description": "Invalid bearer token, the caller is an embed user, or a user-scoped key named another member; or the caller has no edit access to the file, or is not an organization admin and the file is an organization file"
+          },
+          "404": {
+            "description": "No organization file or personal file of the caller's has this `id`, or `userId` names no member of the organization"
+          },
+          "405": {
+            "description": "Method not allowed"
+          }
+        }
+      },
+      "delete": {
+        "description": "**Experimental.** This resource is still gaining fields and may change without a version bump.\n\nDeletes one context file, so the AI stops reading it and it leaves the list. It is authorized as the read is, with manager access in place of view access, as deleting the file in Omni needs: the creator of a personal file can delete it, and only an organization admin deletes an organization file. A caller below manager on the file is a 403, and so is anyone but an organization admin on an organization file. Otherwise anything the read answers with a 404 is a 404 here too, a file already deleted included. Returns the deleted file's metadata, not its body.",
+        "operationId": "contextFilesDelete",
+        "summary": "Delete a context file",
+        "tags": [
+          "Context Files"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The file's `id`, as the list returns it",
+              "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            },
+            "required": true,
+            "description": "The file's `id`, as the list returns it",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Target user ID (for org-scoped API keys)"
+            },
+            "required": false,
+            "description": "Target user ID (for org-scoped API keys)",
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The deleted file, without its body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextFileDeleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed `id` or `userId`"
+          },
+          "403": {
+            "description": "Invalid bearer token, the caller is an embed user, or a user-scoped key named another member; or the caller has no manager access to the file, or is not an organization admin and the file is an organization file"
           },
           "404": {
             "description": "No organization file or personal file of the caller's has this `id`, or `userId` names no member of the organization"
@@ -65653,6 +65836,15 @@
         "tags": [
           "Folders"
         ],
+        "x-omni-mcp": {
+          "action": "delete",
+          "gate": "content",
+          "hint": "Removes one folder for good, with its sharing settings, the labels on it and everyone's favorites of it; no tool restores it. Only an empty folder goes: one that still holds a document or a sub-folder is refused with an error, sometimes worded as a missing permission, and nothing is deleted. Documents of it in the trash don't count, and they lose the folder: restoring one later puts it outside any folder. This tool can't remove a folder's contents with it, so don't retry a refusal. A user's own key needs the Manager role on the folder, or to own it with at least Editor, and an embed entity folder is always refused. Takes a folder's ID, from listFolders or getFolder.",
+          "object": "folder",
+          "omitParameters": [
+            "force"
+          ]
+        },
         "parameters": [
           {
             "schema": {
@@ -67387,7 +67579,7 @@
     },
     "/api/v1/users/{id}/custom-organization-roles": {
       "put": {
-        "operationId": "userCustomOrganizationRolesSet",
+        "operationId": "customOrganizationRolesUserSet",
         "summary": "Set a user's custom organization roles",
         "tags": [
           "Custom Organization Roles"
@@ -67446,7 +67638,7 @@
     },
     "/api/v1/user-groups/{id}/custom-organization-roles": {
       "put": {
-        "operationId": "userGroupCustomOrganizationRolesSet",
+        "operationId": "customOrganizationRolesUserGroupSet",
         "summary": "Set a user group's custom organization roles",
         "tags": [
           "Custom Organization Roles"
