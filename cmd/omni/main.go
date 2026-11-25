@@ -45,6 +45,9 @@ func main() {
 		Short:   "Omni CLI — programmatic access to the Omni API",
 		Version: version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkOutputFormat(cmd); err != nil {
+				return err
+			}
 			// This hook runs immediately before RunE, so the check overlaps
 			// with the work the user asked for.
 			updater = startAutomaticUpdate(checker, version, cmd, os.Stdout, os.Stderr)
@@ -125,6 +128,28 @@ func addGlobalFlags(root *cobra.Command) {
 	root.PersistentFlags().String("base-url", "", "API base URL (overrides profile)")
 	root.PersistentFlags().Bool("compact", false, "compact JSON output (no indentation)")
 	root.PersistentFlags().StringP("format", "o", "", "output format: json, human, auto (default auto: human on TTY, json when piped)")
+}
+
+// checkOutputFormat refuses an unknown --format or OMNI_OUTPUT_FORMAT before
+// the command runs, rather than letting it fall through to JSON. A command
+// whose spec has its own "format" query param registers it as --param-format,
+// so `--format html` there is a misdirected param and the error says so.
+func checkOutputFormat(cmd *cobra.Command) error {
+	// Tab completion prints no output format, and an error there would only
+	// surface as broken completion in the shell.
+	if cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd {
+		return nil
+	}
+	formatFlag, _ := cmd.Flags().GetString("format")
+	err := config.CheckOutputFormat(formatFlag)
+	if err == nil {
+		return nil
+	}
+	cmd.SilenceUsage = true
+	if formatFlag != "" && cmd.LocalNonPersistentFlags().Lookup("param-format") != nil {
+		return fmt.Errorf("%w; this command's \"format\" query parameter is --param-format", err)
+	}
+	return err
 }
 
 // addResultFlags registers the presentation flags on an API command group

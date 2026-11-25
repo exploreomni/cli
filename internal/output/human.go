@@ -281,15 +281,22 @@ func styleFor(columns []string) func(row, col int) lipgloss.Style {
 }
 
 // renderKeyValue prints a single object as aligned key: value lines.
-// Nulls are skipped — same rationale as renderSections.
+// Nulls are skipped — same rationale as renderSections. An array holding
+// objects renders as a table under its own heading after those lines, so the
+// ids inside it stay visible.
 func renderKeyValue(w io.Writer, obj map[string]any) {
 	keys := sortedKeys(obj)
 	// Promote common identity fields to the top.
 	keys = promote(keys, []string{"id", "name", "modelKind", "dialect", "type", "kind"})
 
 	visible := make([]string, 0, len(keys))
+	var tableKeys []string
 	for _, k := range keys {
 		if obj[k] == nil {
+			continue
+		}
+		if holdsObjects(obj[k]) {
+			tableKeys = append(tableKeys, k)
 			continue
 		}
 		visible = append(visible, k)
@@ -312,6 +319,26 @@ func renderKeyValue(w io.Writer, obj map[string]any) {
 		}
 		fmt.Fprintf(w, "%-*s  %s\n", maxKey+1, labels[k]+":", formatField(k, v))
 	}
+	for _, k := range tableKeys {
+		fmt.Fprintf(w, "\n%s\n", humanizeKey(k))
+		renderTable(w, obj[k].([]any))
+	}
+}
+
+// holdsObjects reports whether v is an array of objects with at least one
+// scalar field between them, so renderTable has a column to draw.
+func holdsObjects(v any) bool {
+	arr, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	var records []map[string]any
+	for _, e := range arr {
+		if m, ok := e.(map[string]any); ok {
+			records = append(records, m)
+		}
+	}
+	return len(pickColumns(records)) > 0
 }
 
 // pickColumns selects up to 6 scalar columns across the given records.
@@ -399,9 +426,9 @@ func isComplex(v any) bool {
 func summarizeComplex(v any) string {
 	switch x := v.(type) {
 	case []any:
-		return fmt.Sprintf("[%d items]", len(x))
+		return fmt.Sprintf("[%d item%s]", len(x), plural(len(x)))
 	case map[string]any:
-		return fmt.Sprintf("{%d fields}", len(x))
+		return fmt.Sprintf("{%d field%s}", len(x), plural(len(x)))
 	}
 	return ""
 }

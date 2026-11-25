@@ -79,17 +79,39 @@ func FormatFromChoice(chosen string, isTTY bool) string {
 // env, or config file, before the TTY fallback. It returns "" when nobody
 // chose and the format is therefore down to auto-detection — the difference
 // between "this output must be JSON" and "this happens to be a pipe".
+// The value is trimmed and lowercased, so -o JSON reads as json.
 func ChosenOutputFormat(flagValue string) string {
 	if flagValue != "" {
-		return flagValue
+		return normalizeFormat(flagValue)
 	}
 	if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" {
-		return v
+		return normalizeFormat(v)
 	}
 	if cfg, _ := Load(); cfg != nil && cfg.DefaultOutputFormat != "" {
-		return cfg.DefaultOutputFormat
+		return normalizeFormat(cfg.DefaultOutputFormat)
 	}
 	return ""
+}
+
+// CheckOutputFormat rejects an unrecognized format from whichever of the flag
+// or OMNI_OUTPUT_FORMAT wins, by ChosenOutputFormat's precedence. The config
+// file's defaultOutputFormat is left alone: rejecting it here would also block
+// `config set-format`, the command that fixes it.
+func CheckOutputFormat(flagValue string) error {
+	if flagValue != "" {
+		if !ValidOutputFormat(normalizeFormat(flagValue)) {
+			return fmt.Errorf("invalid output format %q (json, human, auto)", flagValue)
+		}
+		return nil
+	}
+	if v := os.Getenv("OMNI_OUTPUT_FORMAT"); v != "" && !ValidOutputFormat(normalizeFormat(v)) {
+		return fmt.Errorf("invalid OMNI_OUTPUT_FORMAT %q (json, human, auto)", v)
+	}
+	return nil
+}
+
+func normalizeFormat(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // ResolvedConfig is the final runtime config after merging flags, env, and file.

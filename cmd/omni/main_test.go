@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/exploreomni/omni-cli/internal/openapi"
@@ -37,5 +39,57 @@ func TestGlobalFlagsAreReserved(t *testing.T) {
 func TestHelpFlagIsReserved(t *testing.T) {
 	if !openapi.IsReservedFlagName("help") {
 		t.Error("--help must be reserved")
+	}
+}
+
+// An operation whose spec has a "format" query param gets it as
+// --param-format, so --format there is the global output format and must not
+// pass silently as JSON.
+func TestRootPreRunRejectsUnknownOutputFormat(t *testing.T) {
+	tests := []struct {
+		args    []string
+		env     string
+		wantErr string
+	}{
+		{args: []string{"viz", "--format", "html"}, wantErr: `invalid output format "html" (json, human, auto); this command's "format" query parameter is --param-format`},
+		{args: []string{"plain", "-o", "html"}, wantErr: `invalid output format "html" (json, human, auto)`},
+		{args: []string{"viz"}, env: "html", wantErr: `invalid OMNI_OUTPUT_FORMAT "html" (json, human, auto)`},
+		{args: []string{"viz", "--param-format", "html"}},
+		{args: []string{"viz", "-o", "JSON"}},
+		{args: []string{"plain"}, env: "Human"},
+	}
+	for _, tt := range tests {
+		t.Setenv("OMNI_OUTPUT_FORMAT", tt.env)
+		ran := false
+		run := func(*cobra.Command, []string) error { ran = true; return nil }
+		root := &cobra.Command{Use: "omni", SilenceErrors: true, PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return checkOutputFormat(cmd)
+		}}
+		addGlobalFlags(root)
+		root.SetGlobalNormalizationFunc(openapi.NormalizeFlagName)
+		viz := &cobra.Command{Use: "viz", RunE: run}
+		viz.Flags().String("param-format", "", "")
+		root.AddCommand(viz, &cobra.Command{Use: "plain", RunE: run})
+		var printed bytes.Buffer
+		root.SetOut(&printed)
+		root.SetErr(&printed)
+		root.SetArgs(tt.args)
+
+		err := root.Execute()
+		if tt.wantErr == "" {
+			if err != nil || !ran {
+				t.Errorf("%v (env %q): err %v, ran %v", tt.args, tt.env, err, ran)
+			}
+			continue
+		}
+		if err == nil || err.Error() != tt.wantErr {
+			t.Errorf("%v (env %q): got error %v, want %q", tt.args, tt.env, err, tt.wantErr)
+		}
+		if ran {
+			t.Errorf("%v: command ran despite an invalid format", tt.args)
+		}
+		if strings.Contains(printed.String(), "Usage:") {
+			t.Errorf("%v: printed usage:\n%s", tt.args, printed.String())
+		}
 	}
 }

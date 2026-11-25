@@ -97,6 +97,36 @@ func TestHumanTo_SuccessEnvelope(t *testing.T) {
 	}
 }
 
+// An array of objects inside a success envelope (a branch's parts) renders as
+// a table, so the ids a follow-up command needs are on screen.
+func TestHumanTo_SuccessEnvelopeNestedObjectArray(t *testing.T) {
+	body := strings.NewReader(`{
+		"success": true,
+		"branch": {
+			"id": "b1",
+			"name": "my branch",
+			"parts": [{"id": "6f1c2a9e-part", "kind": "model", "allowed": true, "move": {"to": "x"}, "drafts": []}],
+			"tags": ["one"],
+			"owner": {"id": "u1"},
+			"labels": [],
+			"moves": [{"to": {"type": "branch"}}]
+		}
+	}`)
+	var buf bytes.Buffer
+	if err := HumanTo(&buf, body); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"\nParts\n", "6f1c2a9e-part", "model", " [1 item]\n", " {1 field}\n", " [0 items]\n", "Moves:   [1 item]\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Parts:") {
+		t.Errorf("parts should render as a table, not a summary line:\n%s", out)
+	}
+}
+
 // Empty body → "✓ ok".
 func TestHumanTo_EmptyBody(t *testing.T) {
 	body := strings.NewReader(``)

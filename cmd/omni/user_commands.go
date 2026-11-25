@@ -246,7 +246,7 @@ func setAttributesSchemaDoc() openapi.SchemaDoc {
 						"required": []string{"emailLinkSignIn", "lastLogin", "userType"},
 					},
 				},
-				"required": []string{"active", "displayName", "emails", "groups", "id", "meta", "schemas", "userName", userAttributePrefix, "urn:omni:params:scim:schemas:extension:user:2.0"},
+				"required": []string{userAttributePrefix, "urn:omni:params:scim:schemas:extension:user:2.0", "active", "displayName", "emails", "groups", "id", "meta", "schemas", "userName"},
 			},
 		},
 	}
